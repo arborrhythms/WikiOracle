@@ -7,12 +7,12 @@ The project is motivated by a simple question:
 > Can we design an LLM whose outputs are explicitly grounded in trusted sources, such that its conclusions are explainable and consistent, and whose conversations can serve as training data?
 
 ## Motivation
-Right now LLMs are using our data (sourced from a billion people) to train its LLMs. The world is using LLMs to train its children. This raises privacy concerns (how do we prevent malicious commercial use?), concerns about the psychological health of our children (do we want them imprinting on a prediction-engine based on arbitrary internet content?), and good opportunities (can we create a public good similar to Wikipedia?).
+Right now for-profit corporations are using our data (sourced from a billion people) to train their LLMs. The world is using LLMs to train its children. This raises privacy concerns (how do we prevent malicious commercial use?), concerns about the psychological health of our children (do we want them imprinting on a prediction-engine based on arbitrary internet content?), and good opportunities (can we create a public good similar to Wikipedia?).
 
 So to enumerate several problems with existing LLMs:
 - they frequently produce ungrounded or fabricated claims,
 - they are difficult to explain or audit,
-- they and are vulnerable to ideological or data-driven capture, especially under online learning.
+- they are vulnerable to ideological or data-driven capture, especially under online learning.
 
 ## Core Idea
 
@@ -52,5 +52,4 @@ Contributions of many kinds are welcome:
 - xAI, interpretability, and safety analysis
 - Epistemology, philosophy of science, and governance critique
 - Documentation, evaluation, and testing
-- Monetary contributions are discouraged; better to fund organizations that are figting for truthfulness and privacy (Internet Archive, EFF, Wikipedia, ...).
 

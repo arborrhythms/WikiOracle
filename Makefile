@@ -102,19 +102,24 @@ some:
 metalBaby: setup-gpu data tokenizer metalBaby-pretrain $(IDENTITY_DATA) metalBaby-sft metalBaby-eval report
 	@echo "metalBaby training pipeline complete."
 
+# T4 (Turing) does not support TF32; disable to avoid torch.compile conflict
+METALBABY_ENV = export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+	export TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=0
+
 metalBaby-pretrain: tokenizer
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		$(METALBABY_ENV) && \
 		python -m nanochat.dataset -n $(DATA_SHARDS_FULL) && \
 		torchrun --standalone --nproc_per_node=1 \
 			-m scripts.base_train -- \
 			--depth=14 \
+			--window-pattern=L \
 			--device-batch-size=8 \
 			--run=$(WANDB_RUN)
 
 metalBaby-sft: $(IDENTITY_DATA)
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		$(METALBABY_ENV) && \
 		torchrun --standalone --nproc_per_node=1 \
 			-m scripts.chat_sft -- \
 			--device-batch-size=8 \
@@ -122,7 +127,7 @@ metalBaby-sft: $(IDENTITY_DATA)
 
 metalBaby-eval:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		$(METALBABY_ENV) && \
 		torchrun --standalone --nproc_per_node=1 \
 			-m scripts.base_eval -- \
 			--device-batch-size=8 && \

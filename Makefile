@@ -33,8 +33,7 @@ DATA_SHARDS_FULL ?= 100
 
 # --- Phony targets ------------------------------------------------------------
 
-.PHONY: all some metalBaby help \
-        metalBaby-pretrain metalBaby-sft metalBaby-eval \
+.PHONY: all some help \
         setup-cpu setup-gpu \
         data tokenizer \
         pretrain-cpu pretrain-gpu \
@@ -51,7 +50,6 @@ help:
 	@echo ""
 	@echo "  make all                Full local run: setup + train + eval + report (CPU)"
 	@echo "  make some               Lightweight smoke test (d4, 10 iters, small batch)"
-	@echo "  make metalBaby          Full run on Lightsail GPU 4XL (1x T4, d14)"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make setup-cpu          Install dependencies (CPU/MPS)"
@@ -96,38 +94,8 @@ help:
 all: setup-cpu train-cpu eval-cpu report
 
 some:
-	$(MAKE) all CPU_ITERS=10 CPU_DEPTH=4 CPU_BATCH=8 CPU_SEQ_LEN=256
+	$(MAKE) all CPU_ITERS=10 #TORCH_COMPILE_DISABLE=1 CPU_DEPTH=4 #CPU_BATCH=8 CPU_SEQ_LEN=256
 
-# Lightsail for Research GPU 4XL: 1x NVIDIA T4 (16GB), 16 vCPUs, 64GB RAM
-metalBaby: setup-gpu data tokenizer metalBaby-pretrain $(IDENTITY_DATA) metalBaby-sft metalBaby-eval report
-	@echo "metalBaby training pipeline complete."
-
-metalBaby-pretrain: tokenizer
-	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-		python -m nanochat.dataset -n $(DATA_SHARDS_FULL) && \
-		torchrun --standalone --nproc_per_node=1 \
-			-m scripts.base_train -- \
-			--depth=14 \
-			--device-batch-size=8 \
-			--run=$(WANDB_RUN)
-
-metalBaby-sft: $(IDENTITY_DATA)
-	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-		torchrun --standalone --nproc_per_node=1 \
-			-m scripts.chat_sft -- \
-			--device-batch-size=8 \
-			--run=$(WANDB_RUN)
-
-metalBaby-eval:
-	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-		torchrun --standalone --nproc_per_node=1 \
-			-m scripts.base_eval -- \
-			--device-batch-size=8 && \
-		torchrun --standalone --nproc_per_node=1 \
-			-m scripts.chat_eval -- -i sft
 
 # --- Setup --------------------------------------------------------------------
 
@@ -172,11 +140,6 @@ pretrain-cpu: tokenizer
 			--window-pattern=L \
 			--max-seq-len=$(CPU_SEQ_LEN) \
 			--device-batch-size=$(CPU_BATCH) \
-			--total-batch-size=16384 \
-			--eval-every=100 \
-			--eval-tokens=524288 \
-			--core-metric-every=-1 \
-			--sample-every=100 \
 			--num-iterations=$(CPU_ITERS) \
 			--run=$(WANDB_RUN)
 
@@ -201,9 +164,6 @@ sft-cpu: $(IDENTITY_DATA)
 		python -m scripts.chat_sft \
 			--max-seq-len=$(CPU_SEQ_LEN) \
 			--device-batch-size=$(CPU_BATCH) \
-			--total-batch-size=16384 \
-			--eval-every=200 \
-			--eval-tokens=524288 \
 			--num-iterations=1500 \
 			--run=$(WANDB_RUN)
 

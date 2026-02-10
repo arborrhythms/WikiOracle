@@ -33,7 +33,8 @@ DATA_SHARDS_FULL ?= 370
 
 # --- Phony targets ------------------------------------------------------------
 
-.PHONY: all some help \
+.PHONY: all some metalBaby help \
+        metalBaby-pretrain metalBaby-sft metalBaby-eval \
         setup-cpu setup-gpu \
         data tokenizer \
         pretrain-cpu pretrain-gpu \
@@ -50,6 +51,7 @@ help:
 	@echo ""
 	@echo "  make all                Full local run: setup + train + eval + report (CPU)"
 	@echo "  make some               Lightweight smoke test (d4, 10 iters, small batch)"
+	@echo "  make metalBaby          Full run on Lightsail GPU 4XL (1x T4, d14)"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make setup-cpu          Install dependencies (CPU/MPS)"
@@ -96,17 +98,48 @@ all: setup-cpu train-cpu eval-cpu report
 some:
 	$(MAKE) all CPU_ITERS=10 CPU_DEPTH=4 CPU_BATCH=8 CPU_SEQ_LEN=256
 
+# Lightsail for Research GPU 4XL: 1x NVIDIA T4 (16GB), 16 vCPUs, 64GB RAM
+metalBaby: setup-gpu data tokenizer metalBaby-pretrain $(IDENTITY_DATA) metalBaby-sft metalBaby-eval report
+	@echo "metalBaby training pipeline complete."
+
+metalBaby-pretrain: tokenizer
+	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
+		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		python -m nanochat.dataset -n $(DATA_SHARDS_FULL) && \
+		torchrun --standalone --nproc_per_node=1 \
+			-m scripts.base_train -- \
+			--depth=14 \
+			--device-batch-size=8 \
+			--run=$(WANDB_RUN)
+
+metalBaby-sft: $(IDENTITY_DATA)
+	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
+		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		torchrun --standalone --nproc_per_node=1 \
+			-m scripts.chat_sft -- \
+			--device-batch-size=8 \
+			--run=$(WANDB_RUN)
+
+metalBaby-eval:
+	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
+		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		torchrun --standalone --nproc_per_node=1 \
+			-m scripts.base_eval -- \
+			--device-batch-size=8 && \
+		torchrun --standalone --nproc_per_node=1 \
+			-m scripts.chat_eval -- -i sft
+
 # --- Setup --------------------------------------------------------------------
 
 $(VENV_DIR):
-	command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
-	cd $(NANOCHAT_DIR) && uv venv
+	command -v uv &> /dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$$HOME/.local/bin:$$PATH"; }
+	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv venv
 
 setup-cpu: $(VENV_DIR)
-	cd $(NANOCHAT_DIR) && uv sync --extra cpu
+	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra cpu
 
 setup-gpu: $(VENV_DIR)
-	cd $(NANOCHAT_DIR) && uv sync --extra gpu
+	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra gpu
 
 # --- Data ---------------------------------------------------------------------
 

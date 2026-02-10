@@ -102,12 +102,10 @@ some:
 metalBaby: setup-gpu data tokenizer metalBaby-pretrain $(IDENTITY_DATA) metalBaby-sft metalBaby-eval report
 	@echo "metalBaby training pipeline complete."
 
-# T4 (Turing) does not support TF32; NanoChat sets the new fp32_precision API
-# which conflicts with the legacy allow_tf32 getter in torch.compile's inductor.
-# Patch the legacy getter to handle the mixed state gracefully.
-TF32_PATCH_DIR   := $(CURDIR)/patches
+# T4 (Turing) does not support TF32; torch.compile crashes due to legacy/new API
+# conflict in PyTorch inductor. Disable torch.compile entirely on T4.
 METALBABY_ENV = export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-	export PYTHONPATH="$(TF32_PATCH_DIR):$$PYTHONPATH"
+	export TORCHDYNAMO_DISABLE=1
 
 metalBaby-pretrain: tokenizer
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \

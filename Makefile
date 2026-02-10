@@ -29,7 +29,7 @@ GPU_BATCH        ?= 16
 
 # Data download shard counts
 DATA_SHARDS_INIT ?= 8
-DATA_SHARDS_FULL ?= 370
+DATA_SHARDS_FULL ?= 100
 
 # --- Phony targets ------------------------------------------------------------
 

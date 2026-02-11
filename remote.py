@@ -547,26 +547,31 @@ def cmd_logs(args):
 def cmd_status(args):
     instance_id = read_state("instance-id")
     ip = read_state("instance-ip")
+    key_file = os.path.expanduser(args.key_file)
 
-    # Instance state
-    state = aws(
-        "ec2", "describe-instances",
-        "--region", args.region,
-        "--instance-ids", instance_id,
-        "--query", "Reservations[0].Instances[0].State.Name",
-        "--output", "text",
+    # Instance state (quiet — no command echo)
+    r = subprocess.run(
+        ["aws", "ec2", "describe-instances",
+         "--region", args.region,
+         "--instance-ids", instance_id,
+         "--query", "Reservations[0].Instances[0].State.Name",
+         "--output", "text"],
+        capture_output=True, text=True,
     )
+    state = r.stdout.strip()
     print(f"Instance {instance_id}: {state}")
 
     if state != "running":
         return
 
-    # Check if training is done
-    done_json = run(
-        ssh_cmd(os.path.expanduser(args.key_file), args.user, ip) +
+    # Check if training is done (quiet)
+    r = subprocess.run(
+        ssh_cmd(key_file, args.user, ip) +
         ["cat ~/done.json 2>/dev/null || echo ''"],
-        capture=True, check=False,
+        capture_output=True, text=True,
     )
+    done_json = r.stdout.strip()
+
     if done_json:
         done_data = json.loads(done_json)
         code = done_data.get("exit_code", "?")
@@ -575,13 +580,12 @@ def cmd_status(args):
         print(f"Training: {status} at {end}")
         print("Run 'make remote-retrieve' to pull artifacts and terminate.")
     else:
-        # Check screen
-        screen_check = run(
-            ssh_cmd(os.path.expanduser(args.key_file), args.user, ip) +
+        r = subprocess.run(
+            ssh_cmd(key_file, args.user, ip) +
             ["screen -ls train 2>/dev/null || true"],
-            capture=True, check=False,
+            capture_output=True, text=True,
         )
-        if "train" in screen_check:
+        if "train" in r.stdout:
             print("Training: IN PROGRESS")
         else:
             print("Training: UNKNOWN (no screen session, no done.json)")

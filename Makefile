@@ -29,11 +29,20 @@ GPU_BATCH        ?= 16
 
 # Data download shard counts
 DATA_SHARDS_INIT ?= 8
-DATA_SHARDS_FULL ?= 100
+DATA_SHARDS_FULL ?= 370
+
+# Remote EC2 configuration
+EC2_INSTANCE_TYPE ?= p4d.24xlarge
+EC2_REGION        ?= us-west-2
+EC2_KEY_NAME      ?= nanochat-key
+EC2_KEY_FILE      ?= ~/.ssh/$(EC2_KEY_NAME).pem
+EC2_DISK_SIZE     ?= 200
+EC2_USER          ?= ubuntu
+EC2_TARGET        ?= all-gpu
 
 # --- Phony targets ------------------------------------------------------------
 
-.PHONY: all some help \
+.PHONY: all all-gpu some help \
         setup-cpu setup-gpu \
         data tokenizer \
         pretrain-cpu pretrain-gpu \
@@ -41,7 +50,8 @@ DATA_SHARDS_FULL ?= 100
         train-cpu train-gpu \
         eval-cpu eval-gpu \
         run-cli run-web \
-        report clean clean-all
+        report clean clean-all \
+        remote remote-ssh remote-status remote-logs
 
 # --- Help ---------------------------------------------------------------------
 
@@ -49,7 +59,9 @@ help:
 	@echo "WikiOracle / NanoChat Makefile"
 	@echo ""
 	@echo "  make all                Full local run: setup + train + eval + report (CPU)"
+	@echo "  make all-gpu            Full local run (GPU)"
 	@echo "  make some               Lightweight smoke test (d4, 10 iters, small batch)"
+	@echo "  make remote             Launch EC2 p4d.24xlarge, copy code, train, auto-terminate"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make setup-cpu          Install dependencies (CPU/MPS)"
@@ -76,6 +88,12 @@ help:
 	@echo "  make run-web            Chat with the model (Web UI)"
 	@echo "  make report             Generate training report"
 	@echo ""
+	@echo "Remote (EC2):"
+	@echo "  make remote             Launch EC2 instance, copy repo, start training"
+	@echo "  make remote-ssh         SSH into running EC2 instance"
+	@echo "  make remote-status      Check EC2 instance state"
+	@echo "  make remote-logs        Tail training log on remote instance"
+	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              Remove Python caches"
 	@echo "  make clean-all          Remove caches and venv"
@@ -88,14 +106,40 @@ help:
 	@echo "  GPU_DEPTH=26            Model depth for GPU training"
 	@echo "  DATA_SHARDS_INIT=8      Initial data shards to download"
 	@echo "  DATA_SHARDS_FULL=370    Full data shards for GPU training"
+	@echo "  EC2_INSTANCE_TYPE       EC2 instance type (default: p4d.24xlarge)"
+	@echo "  EC2_DISK_SIZE           Root EBS volume in GB (default: 200)"
 
 # ---- All ----------------------------------------------------------------------
 
 all: setup-cpu train-cpu eval-cpu report
 
-some:
-	$(MAKE) all CPU_ITERS=10 #TORCH_COMPILE_DISABLE=1 CPU_DEPTH=4 #CPU_BATCH=8 CPU_SEQ_LEN=256
+all-gpu: setup-gpu train-gpu eval-gpu report
 
+some:
+	$(MAKE) all CPU_ITERS=10
+
+# --- Remote (EC2) -------------------------------------------------------------
+
+REMOTE_ARGS := --region=$(EC2_REGION) --key-name=$(EC2_KEY_NAME) \
+               --key-file=$(EC2_KEY_FILE) --user=$(EC2_USER)
+
+remote:
+	python3 remote.py $(REMOTE_ARGS) launch \
+		--instance-type=$(EC2_INSTANCE_TYPE) \
+		--disk-size=$(EC2_DISK_SIZE) \
+		--nproc=$(NPROC) \
+		--wandb-run=$(WANDB_RUN) \
+		--data-shards=$(DATA_SHARDS_FULL) \
+		--target="$(EC2_TARGET)"
+
+remote-ssh:
+	python3 remote.py $(REMOTE_ARGS) ssh
+
+remote-logs:
+	python3 remote.py $(REMOTE_ARGS) logs
+
+remote-status:
+	python3 remote.py $(REMOTE_ARGS) status
 
 # --- Setup --------------------------------------------------------------------
 

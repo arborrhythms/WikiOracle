@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Launch an EC2 instance, copy the local repo, and run NanoChat GPU training.
+"""Launch an EC2 instance, clone the repo, and run NanoChat GPU training.
+
+The remote instance clones from GitHub, so commit and push before launching.
 
 Usage:
     python remote.py launch [--instance-type=p4d.24xlarge] [--region=us-west-2] ...
@@ -28,7 +30,9 @@ def run(cmd, check=True, capture=False):
     """Run a shell command, printing it first."""
     print(f"  $ {' '.join(cmd)}")
     if capture:
-        r = subprocess.run(cmd, check=check, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0 and check:
+            sys.exit(f"Error (exit {r.returncode}): {r.stderr.strip()}")
         return r.stdout.strip()
     subprocess.run(cmd, check=check)
 
@@ -79,7 +83,19 @@ def cmd_launch(args):
     key_file = os.path.expanduser(args.key_file)
     region = args.region
 
-    print(f"=== Launching EC2 {args.instance_type} in {region} ===\n")
+    # --- Check for uncommitted changes ---
+    r = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True,
+        cwd=Path(__file__).parent,
+    )
+    dirty = [l for l in r.stdout.strip().splitlines() if not l.startswith("??")]
+    if dirty:
+        print("Warning: uncommitted changes won't be on the remote instance.")
+        print("  (Remote clones from GitHub — commit and push first.)")
+        print()
+
+    print(f"=== Launching EC2 {args.instance_type} in {region} ===")
 
     # --- Key pair ---
     if not os.path.exists(key_file):
@@ -122,13 +138,13 @@ def cmd_launch(args):
         )
     print(f"Security group: {sg_id}")
 
-    # --- AMI ---
+    # --- AMI (AWS Deep Learning AMI with NVIDIA drivers + CUDA + PyTorch) ---
     ami_id = aws(
         "ec2", "describe-images",
         "--region", region,
-        "--owners", "099720109477",
+        "--owners", "amazon",
         "--filters",
-        "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*",
+        "Name=name,Values=Deep Learning OSS Nvidia Driver AMI GPU PyTorch * (Ubuntu 22.04)*",
         "Name=state,Values=available",
         "--query", "sort_by(Images,&CreationDate)[-1].ImageId",
         "--output", "text",
@@ -174,39 +190,14 @@ def cmd_launch(args):
     # --- Wait for SSH ---
     wait_for_ssh(key_file, args.user, ip)
 
-    # --- Bootstrap ---
-    print("\nInstalling NVIDIA drivers and CUDA...")
-    bootstrap = "\n".join([
-        "set -ex",
-        "sudo apt-get update",
-        "sudo apt-get install -y build-essential curl make",
-        "curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb -o /tmp/cuda-keyring.deb",
-        "sudo dpkg -i /tmp/cuda-keyring.deb",
-        "sudo apt-get update",
-        "sudo apt-get install -y cuda-drivers cuda-toolkit-12-4",
-    ])
+    # --- Clone repo ---
+    print("\nCloning repository on remote...")
     subprocess.run(
-        ssh_cmd(key_file, args.user, ip) + ["bash", "-s"],
-        input=bootstrap, text=True, check=True,
+        ssh_cmd(key_file, args.user, ip) + [
+            f"git clone --recursive {args.repo} ~/WikiOracle"
+        ],
+        check=True,
     )
-
-    print("\nRebooting to load NVIDIA driver...")
-    subprocess.run(
-        ssh_cmd(key_file, args.user, ip) + ["sudo", "reboot"],
-        capture_output=True,
-    )
-    time.sleep(30)
-    wait_for_ssh(key_file, args.user, ip)
-
-    # --- Copy repo ---
-    print("\nCopying repository to remote...")
-    repo_dir = str(Path(__file__).parent) + "/"
-    run([
-        "rsync", "-avz",
-        "--exclude=.venv", "--exclude=__pycache__", "--exclude=.ec2",
-        "-e", " ".join(["ssh", "-i", key_file] + SSH_OPTS),
-        repo_dir, f"{args.user}@{ip}:~/WikiOracle/",
-    ])
 
     # --- Start training ---
     print("\nStarting training in screen session...")
@@ -282,6 +273,9 @@ def main():
     p_launch.add_argument("--data-shards", type=int, default=370)
     p_launch.add_argument("--target", default="all-gpu",
                           help="Makefile target to run on remote (default: all-gpu)")
+    p_launch.add_argument("--repo",
+                          default="https://github.com/arborrhythms/WikiOracle.git",
+                          help="Git repo URL to clone on remote")
 
     sub.add_parser("ssh", help="SSH into running instance")
     sub.add_parser("logs", help="Tail training log")

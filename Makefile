@@ -25,7 +25,7 @@ CPU_SEQ_LEN      ?= 512
 
 # GPU training defaults
 GPU_DEPTH        ?= 26
-GPU_BATCH        ?= 8              # 8 for A100-40GB, 16 for H100-80GB
+GPU_BATCH        ?= 4              # 4 for A100-40GB, 16 for H100-80GB
 
 # Data download shard counts
 DATA_SHARDS_INIT ?= 8

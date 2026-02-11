@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Launch an EC2 instance, clone the repo, and run NanoChat GPU training.
 
-The remote instance clones from GitHub, so commit and push before launching.
+Clones from GitHub, then rsyncs any local modifications on top.
 
 Usage:
     python remote.py launch [--instance-type=p4d.24xlarge] [--region=us-west-2] ...
@@ -11,10 +11,10 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -83,17 +83,7 @@ def cmd_launch(args):
     key_file = os.path.expanduser(args.key_file)
     region = args.region
 
-    # --- Check for uncommitted changes ---
-    r = subprocess.run(
-        ["git", "status", "--porcelain"],
-        capture_output=True, text=True,
-        cwd=Path(__file__).parent,
-    )
-    dirty = [l for l in r.stdout.strip().splitlines() if not l.startswith("??")]
-    if dirty:
-        print("Warning: uncommitted changes won't be on the remote instance.")
-        print("  (Remote clones from GitHub — commit and push first.)")
-        print()
+    repo_dir = Path(__file__).parent
 
     print(f"=== Launching EC2 {args.instance_type} in {region} ===")
 
@@ -198,6 +188,46 @@ def cmd_launch(args):
         ],
         check=True,
     )
+
+    # --- Overlay local modifications ---
+    # Find files that differ from HEAD (staged + unstaged + untracked)
+    dirty_files = []
+    # Modified/staged files
+    r = subprocess.run(
+        ["git", "diff", "--name-only", "HEAD"],
+        capture_output=True, text=True, cwd=repo_dir,
+    )
+    dirty_files.extend(r.stdout.strip().splitlines())
+    # Staged but not yet in HEAD
+    r = subprocess.run(
+        ["git", "diff", "--name-only", "--cached"],
+        capture_output=True, text=True, cwd=repo_dir,
+    )
+    dirty_files.extend(r.stdout.strip().splitlines())
+    # Untracked files (excluding .venv, __pycache__, .ec2)
+    r = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        capture_output=True, text=True, cwd=repo_dir,
+    )
+    dirty_files.extend(r.stdout.strip().splitlines())
+    # Deduplicate
+    dirty_files = sorted(set(f for f in dirty_files if f))
+
+    if dirty_files:
+        print(f"\nOverlaying {len(dirty_files)} local modification(s)...")
+        for f in dirty_files:
+            print(f"  {f}")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
+            tmp.write("\n".join(dirty_files) + "\n")
+            filelist = tmp.name
+        try:
+            run([
+                "rsync", "-avz", "--files-from", filelist,
+                "-e", " ".join(["ssh", "-i", key_file] + SSH_OPTS),
+                str(repo_dir) + "/", f"{args.user}@{ip}:~/WikiOracle/",
+            ])
+        finally:
+            os.unlink(filelist)
 
     # --- Start training ---
     print("\nStarting training in screen session...")

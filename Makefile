@@ -42,7 +42,7 @@ EC2_TARGET        ?= all-gpu
 
 # --- Phony targets ------------------------------------------------------------
 
-.PHONY: all all-gpu some help \
+.PHONY: all all-gpu some some-gpu help \
         setup-cpu setup-gpu \
         data tokenizer \
         pretrain-cpu pretrain-gpu \
@@ -51,7 +51,7 @@ EC2_TARGET        ?= all-gpu
         eval-cpu eval-gpu \
         run-cli run-web \
         report clean clean-all \
-        remote remote-ssh remote-status remote-logs
+        remote remote-retrieve remote-ssh remote-status remote-logs
 
 # --- Help ---------------------------------------------------------------------
 
@@ -60,7 +60,8 @@ help:
 	@echo ""
 	@echo "  make all                Full local run: setup + train + eval + report (CPU)"
 	@echo "  make all-gpu            Full local run (GPU)"
-	@echo "  make some               Lightweight smoke test (d4, 10 iters, small batch)"
+	@echo "  make some               Lightweight CPU smoke test (10 iters)"
+	@echo "  make some-gpu           Lightweight GPU smoke test (10 iters)"
 	@echo "  make remote             Launch EC2 p4d.24xlarge, copy code, train, auto-terminate"
 	@echo ""
 	@echo "Setup:"
@@ -90,6 +91,7 @@ help:
 	@echo ""
 	@echo "Remote (EC2):"
 	@echo "  make remote             Launch EC2 instance, copy repo, start training"
+	@echo "  make remote-retrieve    Pull artifacts, generate summary, terminate instance"
 	@echo "  make remote-ssh         SSH into running EC2 instance"
 	@echo "  make remote-status      Check EC2 instance state"
 	@echo "  make remote-logs        Tail training log on remote instance"
@@ -118,6 +120,9 @@ all-gpu: setup-gpu train-gpu eval-gpu report
 some:
 	$(MAKE) all CPU_ITERS=10
 
+some-gpu:
+	$(MAKE) all-gpu GPU_ITERS=10 DATA_SHARDS_FULL=8
+
 # --- Remote (EC2) -------------------------------------------------------------
 
 REMOTE_ARGS := --region=$(EC2_REGION) --key-name=$(EC2_KEY_NAME) \
@@ -131,6 +136,9 @@ remote:
 		--wandb-run=$(WANDB_RUN) \
 		--data-shards=$(DATA_SHARDS_FULL) \
 		--target="$(EC2_TARGET)"
+
+remote-retrieve:
+	python3 remote.py $(REMOTE_ARGS) retrieve
 
 remote-ssh:
 	python3 remote.py $(REMOTE_ARGS) ssh
@@ -197,7 +205,9 @@ pretrain-gpu: tokenizer
 			--depth=$(GPU_DEPTH) \
 			--target-param-data-ratio=8.25 \
 			--device-batch-size=$(GPU_BATCH) \
+			--window-pattern=L \
 			--fp8 \
+			$(if $(GPU_ITERS),--num-iterations=$(GPU_ITERS)) \
 			--run=$(WANDB_RUN)
 
 # --- SFT (Supervised Fine-Tuning) --------------------------------------------
@@ -218,6 +228,7 @@ sft-gpu: $(IDENTITY_DATA)
 		torchrun --standalone --nproc_per_node=$(NPROC) \
 			-m scripts.chat_sft -- \
 			--device-batch-size=$(GPU_BATCH) \
+			$(if $(GPU_ITERS),--num-iterations=$(GPU_ITERS)) \
 			--run=$(WANDB_RUN)
 
 # --- Full training pipelines --------------------------------------------------

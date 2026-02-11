@@ -2,28 +2,42 @@
 """Launch an EC2 instance, clone the repo, and run NanoChat GPU training.
 
 Clones from GitHub, then rsyncs any local modifications on top.
+After training completes, retrieve artifacts with the 'retrieve' subcommand.
 
 Usage:
     python remote.py launch [--instance-type=p4d.24xlarge] [--region=us-west-2] ...
+    python remote.py retrieve   # Pull artifacts, generate summary, terminate
     python remote.py ssh
     python remote.py logs
     python remote.py status
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 STATE_DIR = Path(__file__).parent / ".ec2"
+OUTPUT_DIR = Path(__file__).parent / "output"
 SSH_OPTS = [
     "-o", "StrictHostKeyChecking=no",
     "-o", "UserKnownHostsFile=/dev/null",
     "-o", "LogLevel=ERROR",
 ]
+
+# Hourly on-demand pricing (USD) for common GPU instance types
+INSTANCE_PRICING = {
+    "p4d.24xlarge": 32.77,
+    "p4de.24xlarge": 40.97,
+    "p5.48xlarge": 98.32,
+    "g5.xlarge": 1.006,
+    "g5.48xlarge": 16.288,
+}
 
 
 def run(cmd, check=True, capture=False):
@@ -48,6 +62,11 @@ def ssh_cmd(key_file, user, ip):
     return ["ssh", "-i", key_file] + SSH_OPTS + [f"{user}@{ip}"]
 
 
+def scp_cmd(key_file):
+    """Build base SCP command prefix."""
+    return ["scp", "-i", key_file] + SSH_OPTS
+
+
 def read_state(name):
     """Read a value from the state directory."""
     path = STATE_DIR / name
@@ -57,10 +76,25 @@ def read_state(name):
     return path.read_text().strip()
 
 
+def read_run_meta():
+    """Read run metadata from state directory."""
+    path = STATE_DIR / "run-meta.json"
+    if not path.exists():
+        print(f"Error: {path} not found. Run 'python remote.py launch' first.")
+        sys.exit(1)
+    return json.loads(path.read_text())
+
+
 def write_state(name, value):
     """Write a value to the state directory."""
     STATE_DIR.mkdir(exist_ok=True)
     (STATE_DIR / name).write_text(value + "\n")
+
+
+def write_run_meta(meta):
+    """Write run metadata to state directory."""
+    STATE_DIR.mkdir(exist_ok=True)
+    (STATE_DIR / "run-meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
 
 def wait_for_ssh(key_file, user, ip, attempts=30, delay=10):
@@ -84,6 +118,7 @@ def cmd_launch(args):
     region = args.region
 
     repo_dir = Path(__file__).parent
+    launch_time = datetime.now(timezone.utc)
 
     print(f"=== Launching EC2 {args.instance_type} in {region} ===")
 
@@ -151,7 +186,6 @@ def cmd_launch(args):
         "--security-group-ids", sg_id,
         "--block-device-mappings",
         f"DeviceName=/dev/sda1,Ebs={{VolumeSize={args.disk_size},VolumeType=gp3}}",
-        "--instance-initiated-shutdown-behavior", "terminate",
         "--tag-specifications",
         "ResourceType=instance,Tags=[{Key=Name,Value=nanochat-training}]",
         "--query", "Instances[0].InstanceId", "--output", "text",
@@ -176,6 +210,21 @@ def cmd_launch(args):
     )
     write_state("instance-ip", ip)
     print(f"Public IP: {ip}")
+
+    # --- Save run metadata ---
+    meta = {
+        "instance_id": instance_id,
+        "instance_type": args.instance_type,
+        "region": region,
+        "ip": ip,
+        "ami_id": ami_id,
+        "launch_time": launch_time.isoformat(),
+        "target": args.target,
+        "nproc": args.nproc,
+        "data_shards": args.data_shards,
+        "disk_size_gb": args.disk_size,
+    }
+    write_run_meta(meta)
 
     # --- Wait for SSH ---
     wait_for_ssh(key_file, args.user, ip)
@@ -229,7 +278,24 @@ def cmd_launch(args):
         finally:
             os.unlink(filelist)
 
+    # --- Capture system info ---
+    print("\nCapturing system info...")
+    subprocess.run(
+        ssh_cmd(key_file, args.user, ip) + [
+            "{"
+            " echo '=== uname ===' && uname -a;"
+            " echo '=== nvidia-smi ===' && nvidia-smi;"
+            " echo '=== GPU topology ===' && nvidia-smi topo -m;"
+            " echo '=== CPU ===' && lscpu | head -20;"
+            " echo '=== Memory ===' && free -h;"
+            "} > ~/sysinfo.txt 2>&1"
+        ],
+        check=False,
+    )
+
     # --- Start training ---
+    # Records training start/end times and exit code into done.json.
+    # The instance stays running so artifacts can be retrieved.
     print("\nStarting training in screen session...")
     make_cmd = (
         f"make {args.target}"
@@ -238,8 +304,14 @@ def cmd_launch(args):
         f" DATA_SHARDS_FULL={args.data_shards}"
     )
     screen_cmd = (
-        f"screen -dmS train bash -c "
-        f"'cd ~/WikiOracle && {make_cmd} 2>&1 | tee ~/train.log; sudo shutdown -h now'"
+        f"screen -dmS train bash -c '"
+        f"TRAIN_START=$(date -u +%Y-%m-%dT%H:%M:%SZ); "
+        f"cd ~/WikiOracle && {make_cmd} 2>&1 | tee ~/train.log; "
+        f"EXIT=$?; "
+        f"echo \"{{\\\"exit_code\\\": $EXIT, "
+        f"\\\"train_start\\\": \\\"$TRAIN_START\\\", "
+        f"\\\"end_time\\\": \\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\"}}\" > ~/done.json"
+        f"'"
     )
     subprocess.run(
         ssh_cmd(key_file, args.user, ip) + [screen_cmd],
@@ -248,18 +320,181 @@ def cmd_launch(args):
 
     print(f"""
 === Training launched on {instance_id} ({ip}) ===
-Instance will auto-terminate when training completes.
+Instance will stay running after training completes so artifacts can be retrieved.
 
 Monitor:
-  python remote.py ssh          # SSH into instance
-  python remote.py logs         # Tail training log
-  python remote.py status       # Check instance state
+  make remote-logs            # Tail training log
+  make remote-status          # Check instance state
 
-  -- or via make --
-  make remote-ssh
-  make remote-logs
-  make remote-status
+Retrieve artifacts when done:
+  make remote-retrieve        # Pull output, generate summary, terminate instance
+
+  -- or via python --
+  python remote.py retrieve   # Same as above
 """)
+
+
+def cmd_retrieve(args):
+    """Pull artifacts from remote, generate summary, terminate instance."""
+    key_file = os.path.expanduser(args.key_file)
+    ip = read_state("instance-ip")
+    instance_id = read_state("instance-id")
+    meta = read_run_meta()
+
+    print(f"=== Retrieving artifacts from {instance_id} ({ip}) ===")
+
+    # --- Check if training is done ---
+    done_json = run(
+        ssh_cmd(key_file, args.user, ip) + ["cat ~/done.json 2>/dev/null || echo ''"],
+        capture=True, check=False,
+    )
+
+    if not done_json:
+        # Check if screen session is still running
+        screen_check = run(
+            ssh_cmd(key_file, args.user, ip) + ["screen -ls train 2>/dev/null || true"],
+            capture=True, check=False,
+        )
+        if "train" in screen_check:
+            print("Training is still running. Use 'make remote-logs' to monitor.")
+            print("Run 'make remote-retrieve' again after training completes.")
+            sys.exit(1)
+        else:
+            print("Warning: No done.json found and no screen session running.")
+            print("Training may have crashed. Retrieving what's available...")
+            done_data = {"exit_code": -1, "end_time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    else:
+        done_data = json.loads(done_json)
+
+    exit_code = done_data.get("exit_code", -1)
+    end_time_str = done_data.get("end_time", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    # --- Create output directory ---
+    launch_time = datetime.fromisoformat(meta["launch_time"])
+    run_dir_name = launch_time.strftime("%Y-%m-%d-%H%M")
+    run_dir = OUTPUT_DIR / run_dir_name
+
+    run_dir.mkdir(parents=True)
+    print(f"Output directory: {run_dir}")
+
+    # --- SCP artifacts ---
+    scp_base = scp_cmd(key_file)
+    remote = f"{args.user}@{ip}"
+    nanochat_base = "~/WikiOracle/nanochat"
+
+    artifacts = [
+        ("train.log",           f"{remote}:~/train.log",                          False),
+        ("sysinfo.txt",         f"{remote}:~/sysinfo.txt",                        False),
+        ("report.md",           f"{remote}:{nanochat_base}/report/report.md",     False),
+        ("report/",             f"{remote}:{nanochat_base}/report/",              True),
+        ("base_checkpoints/",   f"{remote}:{nanochat_base}/base_checkpoints/",    True),
+        ("chatsft_checkpoints/",f"{remote}:{nanochat_base}/chatsft_checkpoints/", True),
+        ("base_eval/",          f"{remote}:{nanochat_base}/base_eval/",           True),
+        ("tokenizer/",          f"{remote}:{nanochat_base}/tokenizer/",           True),
+    ]
+    for name, src, is_dir in artifacts:
+        print(f"Retrieving {name}...")
+        flags = ["-r"] if is_dir else []
+        run(scp_base + flags + [src, str(run_dir / name)], check=False)
+
+    # --- Compute timing and cost ---
+    end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
+
+    # Total duration: launch to end (includes setup, data download, training)
+    total_duration = end_time - launch_time
+    total_min = total_duration.total_seconds() / 60
+    total_hr = total_duration.total_seconds() / 3600
+
+    # Training wall clock: from when make started to when it finished
+    train_start_str = done_data.get("train_start")
+    if train_start_str:
+        train_start = datetime.fromisoformat(train_start_str.replace("Z", "+00:00"))
+        train_duration = end_time - train_start
+        train_min = train_duration.total_seconds() / 60
+        train_hr = train_duration.total_seconds() / 3600
+        train_time_str = f"{int(train_min)} min ({train_hr:.2f} hr)"
+    else:
+        train_time_str = "unknown"
+
+    instance_type = meta.get("instance_type", "unknown")
+    hourly_rate = INSTANCE_PRICING.get(instance_type, 0)
+    # EC2 bills per-second, minimum 60s
+    cost = max(total_duration.total_seconds(), 60) / 3600 * hourly_rate
+
+    status = "SUCCESS" if exit_code == 0 else "FAILED"
+
+    # --- Read system info ---
+    sysinfo_path = run_dir / "sysinfo.txt"
+    sysinfo = sysinfo_path.read_text() if sysinfo_path.exists() else "not captured"
+
+    # --- Generate summary.md ---
+    summary = f"""# Run Summary
+
+## Status: {status}
+
+## Instance
+| Field | Value |
+|-------|-------|
+| Instance ID | `{meta.get('instance_id', 'unknown')}` |
+| Instance Type | `{instance_type}` |
+| Region | `{meta.get('region', 'unknown')}` |
+| AMI | `{meta.get('ami_id', 'unknown')}` |
+| Disk | {meta.get('disk_size_gb', '?')} GB |
+
+## Run
+| Field | Value |
+|-------|-------|
+| Target | `{meta.get('target', 'unknown')}` |
+| GPUs (nproc) | {meta.get('nproc', '?')} |
+| Data shards | {meta.get('data_shards', '?')} |
+| Exit code | {exit_code} |
+
+## Timing
+| Field | Value |
+|-------|-------|
+| Instance launch | {launch_time.strftime('%Y-%m-%d %H:%M:%S UTC')} |
+| Training start | {train_start_str or 'unknown'} |
+| Training end | {end_time.strftime('%Y-%m-%d %H:%M:%S UTC')} |
+| Training wall clock | {train_time_str} |
+| Total duration (incl. setup) | {int(total_min)} min ({total_hr:.2f} hr) |
+
+## Cost
+| Field | Value |
+|-------|-------|
+| Hourly rate | ${hourly_rate:.2f}/hr |
+| Estimated cost | ${cost:.2f} |
+
+## System Info
+```
+{sysinfo}
+```
+
+## Artifacts
+"""
+    # List what we actually retrieved
+    for item in sorted(run_dir.iterdir()):
+        if item.name == "summary.md":
+            continue
+        if item.is_dir():
+            file_count = sum(1 for _ in item.rglob("*") if _.is_file())
+            dir_size = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
+            summary += f"- `{item.name}/` — {file_count} files, {dir_size / 1024 / 1024:.1f} MB\n"
+        else:
+            size = item.stat().st_size
+            summary += f"- `{item.name}` — {size / 1024:.1f} KB\n"
+
+    (run_dir / "summary.md").write_text(summary)
+    print(f"\nSummary written to {run_dir / 'summary.md'}")
+
+    # --- Terminate instance ---
+    print(f"\nTerminating instance {instance_id}...")
+    aws(
+        "ec2", "terminate-instances",
+        "--region", meta.get("region", args.region),
+        "--instance-ids", instance_id,
+        capture=False,
+    )
+    print(f"\n=== Done. Artifacts saved to {run_dir} ===")
 
 
 def cmd_ssh(args):
@@ -276,14 +511,45 @@ def cmd_logs(args):
 
 def cmd_status(args):
     instance_id = read_state("instance-id")
-    aws(
+    ip = read_state("instance-ip")
+
+    # Instance state
+    state = aws(
         "ec2", "describe-instances",
         "--region", args.region,
         "--instance-ids", instance_id,
-        "--query", "Reservations[0].Instances[0].[InstanceId,State.Name,PublicIpAddress]",
-        "--output", "table",
-        capture=False,
+        "--query", "Reservations[0].Instances[0].State.Name",
+        "--output", "text",
     )
+    print(f"Instance {instance_id}: {state}")
+
+    if state != "running":
+        return
+
+    # Check if training is done
+    done_json = run(
+        ssh_cmd(os.path.expanduser(args.key_file), args.user, ip) +
+        ["cat ~/done.json 2>/dev/null || echo ''"],
+        capture=True, check=False,
+    )
+    if done_json:
+        done_data = json.loads(done_json)
+        code = done_data.get("exit_code", "?")
+        end = done_data.get("end_time", "?")
+        status = "SUCCESS" if code == 0 else f"FAILED (exit {code})"
+        print(f"Training: {status} at {end}")
+        print("Run 'make remote-retrieve' to pull artifacts and terminate.")
+    else:
+        # Check screen
+        screen_check = run(
+            ssh_cmd(os.path.expanduser(args.key_file), args.user, ip) +
+            ["screen -ls train 2>/dev/null || true"],
+            capture=True, check=False,
+        )
+        if "train" in screen_check:
+            print("Training: IN PROGRESS")
+        else:
+            print("Training: UNKNOWN (no screen session, no done.json)")
 
 
 def main():
@@ -307,6 +573,7 @@ def main():
                           default="https://github.com/arborrhythms/WikiOracle.git",
                           help="Git repo URL to clone on remote")
 
+    sub.add_parser("retrieve", help="Pull artifacts, generate summary, terminate instance")
     sub.add_parser("ssh", help="SSH into running instance")
     sub.add_parser("logs", help="Tail training log")
     sub.add_parser("status", help="Check instance state")
@@ -315,6 +582,7 @@ def main():
 
     commands = {
         "launch": cmd_launch,
+        "retrieve": cmd_retrieve,
         "ssh": cmd_ssh,
         "logs": cmd_logs,
         "status": cmd_status,

@@ -136,7 +136,7 @@ def cmd_launch(args):
         os.chmod(key_file, 0o600)
     print(f"Key: {key_file}")
 
-    # --- Security group ---
+    # --- Security group (ensure current IP is allowed) ---
     sg_id = aws(
         "ec2", "describe-security-groups",
         "--region", region,
@@ -152,16 +152,27 @@ def cmd_launch(args):
             "--description", "NanoChat training SSH access",
             "--query", "GroupId", "--output", "text",
         )
-        my_ip = run(["curl", "-s", "https://checkip.amazonaws.com"], capture=True)
+    my_ip = run(["curl", "-s", "https://checkip.amazonaws.com"], capture=True)
+    my_cidr = f"{my_ip}/32"
+    # Check if current IP is already in the security group
+    existing = aws(
+        "ec2", "describe-security-groups",
+        "--region", region,
+        "--group-ids", sg_id,
+        "--query", "SecurityGroups[0].IpPermissions[?FromPort==`22`].IpRanges[].CidrIp",
+        "--output", "text",
+    )
+    if my_cidr not in existing.split():
+        print(f"Adding current IP {my_ip} to security group...")
         aws(
             "ec2", "authorize-security-group-ingress",
             "--region", region,
             "--group-id", sg_id,
             "--protocol", "tcp", "--port", "22",
-            "--cidr", f"{my_ip}/32",
+            "--cidr", my_cidr,
             capture=False,
         )
-    print(f"Security group: {sg_id}")
+    print(f"Security group: {sg_id} (SSH from {my_ip})")
 
     # --- AMI (AWS Deep Learning AMI with NVIDIA drivers + CUDA + PyTorch) ---
     ami_id = aws(
@@ -305,6 +316,7 @@ def cmd_launch(args):
     )
     screen_cmd = (
         f"screen -dmS train bash -c '"
+        f"set -o pipefail; "
         f"TRAIN_START=$(date -u +%Y-%m-%dT%H:%M:%SZ); "
         f"cd ~/WikiOracle && {make_cmd} 2>&1 | tee ~/train.log; "
         f"EXIT=$?; "
@@ -320,18 +332,41 @@ def cmd_launch(args):
 
     print(f"""
 === Training launched on {instance_id} ({ip}) ===
-Instance will stay running after training completes so artifacts can be retrieved.
-
-Monitor:
-  make remote-logs            # Tail training log
-  make remote-status          # Check instance state
-
-Retrieve artifacts when done:
-  make remote-retrieve        # Pull output, generate summary, terminate instance
-
-  -- or via python --
-  python remote.py retrieve   # Same as above
+Polling every 30s. Ctrl-C to detach (instance stays running).
+If detached, use 'make remote-retrieve' to pull artifacts and terminate.
 """)
+
+    # --- Poll for completion, then auto-retrieve ---
+    poll_interval = 30  # seconds — Nyquist on per-second billing
+    try:
+        while True:
+            time.sleep(poll_interval)
+            elapsed = datetime.now(timezone.utc) - launch_time
+            elapsed_min = int(elapsed.total_seconds() / 60)
+            cost_so_far = elapsed.total_seconds() / 3600 * INSTANCE_PRICING.get(args.instance_type, 0)
+
+            # Quiet SSH check — no command echo
+            r = subprocess.run(
+                ssh_cmd(key_file, args.user, ip) + ["cat ~/done.json 2>/dev/null || echo ''"],
+                capture_output=True, text=True,
+            )
+            done_json = r.stdout.strip()
+
+            if done_json:
+                done_data = json.loads(done_json)
+                code = done_data.get("exit_code", "?")
+                status = "SUCCESS" if code == 0 else f"FAILED (exit {code})"
+                print(f"\n=== Training finished: {status} ({elapsed_min} min, ~${cost_so_far:.2f}) ===")
+                print("Retrieving artifacts...")
+                cmd_retrieve(args)
+                return
+            else:
+                print(f"  [{elapsed_min} min, ~${cost_so_far:.2f}] still running...")
+    except KeyboardInterrupt:
+        print(f"\n\nDetached. Instance {instance_id} ({ip}) still running.")
+        print("  make remote-status        # Check if done")
+        print("  make remote-retrieve      # Pull artifacts and terminate")
+        print("  make remote-logs          # Tail training log")
 
 
 def cmd_retrieve(args):

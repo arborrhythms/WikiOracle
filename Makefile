@@ -206,7 +206,6 @@ pretrain-gpu: tokenizer
 			--target-param-data-ratio=8.25 \
 			--device-batch-size=$(GPU_BATCH) \
 			--window-pattern=L \
-			--fp8 \
 			$(if $(GPU_ITERS),--num-iterations=$(GPU_ITERS)) \
 			--run=$(WANDB_RUN)
 

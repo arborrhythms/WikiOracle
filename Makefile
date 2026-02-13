@@ -26,6 +26,7 @@ CPU_SEQ_LEN      ?= 512
 # GPU training defaults
 GPU_DEPTH        ?= 26
 GPU_BATCH        ?= 4              # 4 for A100-40GB, 16 for H100-80GB
+GPU_WINDOW       ?= L              # L for A100 (no FA3), SSSL for H100+
 
 # Data download shard counts
 DATA_SHARDS_INIT ?= 8
@@ -189,7 +190,7 @@ pretrain-cpu: tokenizer
 		python -m scripts.base_train \
 			--depth=$(CPU_DEPTH) \
 			--head-dim=64 \
-			--window-pattern=L \
+			--window-pattern=$(GPU_WINDOW) \
 			--max-seq-len=$(CPU_SEQ_LEN) \
 			--device-batch-size=$(CPU_BATCH) \
 			--num-iterations=$(CPU_ITERS) \
@@ -205,7 +206,7 @@ pretrain-gpu: tokenizer
 			--depth=$(GPU_DEPTH) \
 			--target-param-data-ratio=8.25 \
 			--device-batch-size=$(GPU_BATCH) \
-			--window-pattern=L \
+			--window-pattern=$(GPU_WINDOW) \
 			$(if $(GPU_ITERS),--num-iterations=$(GPU_ITERS)) \
 			--run=$(WANDB_RUN)
 

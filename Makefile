@@ -259,7 +259,7 @@ eval-gpu:
 			$(if $(EVAL_MAX_PER_TASK),--max-per-task=$(EVAL_MAX_PER_TASK)) && \
 		torchrun --standalone --nproc_per_node=$(NPROC) \
 			-m scripts.chat_eval -- -i sft \
-			$(if $(EVAL_MAX_PER_TASK),--max-per-task=$(EVAL_MAX_PER_TASK))
+			$(if $(EVAL_MAX_PER_TASK),-x $(EVAL_MAX_PER_TASK))
 
 # --- Inference ----------------------------------------------------------------
 

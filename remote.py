@@ -29,6 +29,7 @@ SSH_OPTS = [
     "-o", "StrictHostKeyChecking=no",
     "-o", "UserKnownHostsFile=/dev/null",
     "-o", "LogLevel=ERROR",
+    "-o", "ConnectTimeout=10",
 ]
 
 # Hourly on-demand pricing (USD) for common GPU instance types
@@ -413,25 +414,48 @@ def cmd_retrieve(args):
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {run_dir}")
 
-    # --- SCP artifacts ---
+    # --- Check remote artifact sizes ---
     scp_base = scp_cmd(key_file)
     remote = f"{args.user}@{ip}"
     nanochat_base = "~/WikiOracle/nanochat"
 
     artifacts = [
-        ("train.log",           f"{remote}:~/train.log",                          False),
-        ("sysinfo.txt",         f"{remote}:~/sysinfo.txt",                        False),
-        ("report.md",           f"{remote}:{nanochat_base}/report/report.md",     False),
-        ("report/",             f"{remote}:{nanochat_base}/report/",              True),
-        ("base_checkpoints/",   f"{remote}:{nanochat_base}/base_checkpoints/",    True),
-        ("chatsft_checkpoints/",f"{remote}:{nanochat_base}/chatsft_checkpoints/", True),
-        ("base_eval/",          f"{remote}:{nanochat_base}/base_eval/",           True),
-        ("tokenizer/",          f"{remote}:{nanochat_base}/tokenizer/",           True),
+        ("train.log",           "~/train.log",                          False),
+        ("sysinfo.txt",         "~/sysinfo.txt",                        False),
+        ("report.md",           f"{nanochat_base}/report/report.md",    False),
+        ("report/",             f"{nanochat_base}/report/",             True),
+        ("base_checkpoints/",   f"{nanochat_base}/base_checkpoints/",   True),
+        ("chatsft_checkpoints/",f"{nanochat_base}/chatsft_checkpoints/",True),
+        ("base_eval/",          f"{nanochat_base}/base_eval/",          True),
+        ("tokenizer/",          f"{nanochat_base}/tokenizer/",          True),
     ]
-    for name, src, is_dir in artifacts:
-        print(f"Retrieving {name}...")
+
+    # Get sizes so we can warn about large transfers
+    size_cmd = " ; ".join(
+        f"du -sb {path.rstrip('/')} 2>/dev/null || echo '0 {path}'"
+        for _, path, _ in artifacts
+    )
+    r = subprocess.run(
+        ssh_cmd(key_file, args.user, ip) + [size_cmd],
+        capture_output=True, text=True,
+    )
+    remote_sizes = {}
+    for line in r.stdout.strip().splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            remote_sizes[parts[1]] = int(parts[0])
+
+    # --- SCP artifacts (skip >1GB with notice) ---
+    skip_threshold = 1_000_000_000  # 1 GB
+    for name, path, is_dir in artifacts:
+        size = remote_sizes.get(path.rstrip("/"), 0)
+        size_mb = size / 1024 / 1024
+        if size > skip_threshold:
+            print(f"Skipping {name} ({size_mb:.0f} MB) — use 'make remote-ssh' to retrieve manually")
+            continue
+        print(f"Retrieving {name} ({size_mb:.1f} MB)...")
         flags = ["-r"] if is_dir else []
-        run(scp_base + flags + [src, str(run_dir / name)], check=False)
+        run(scp_base + flags + [f"{remote}:{path}", str(run_dir / name)], check=False)
 
     # --- Compute timing and cost ---
     end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))

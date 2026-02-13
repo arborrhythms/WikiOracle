@@ -15,6 +15,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -409,7 +410,7 @@ def cmd_retrieve(args):
     run_dir_name = launch_time.strftime("%Y-%m-%d-%H%M")
     run_dir = OUTPUT_DIR / run_dir_name
 
-    run_dir.mkdir(parents=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {run_dir}")
 
     # --- SCP artifacts ---
@@ -544,10 +545,50 @@ def cmd_logs(args):
     os.execvp("ssh", ssh_cmd(key_file, args.user, ip) + ["tail", "-f", "~/train.log"])
 
 
+STAGE_MARKERS = [
+    ("scripts.base_eval",      "eval-base",  6),
+    ("scripts.chat_eval",      "eval-chat",  7),
+    ("scripts.chat_sft",       "sft",        5),
+    ("scripts.base_train",     "pretrain",   4),
+    ("tok_train",              "tokenizer",  3),
+    ("nanochat.dataset",       "data",       2),
+    ("nanochat.report",        "report",     8),
+    ("uv sync",               "setup",      1),
+]
+TOTAL_STAGES = 8
+
+
+def detect_stage(key_file, user, ip):
+    """Detect the current training stage from the log file.
+
+    Finds the last stage marker in the log (highest line number) to determine
+    which stage is currently executing.
+    """
+    r = subprocess.run(
+        ssh_cmd(key_file, user, ip) + [
+            "grep -n 'scripts\\.base_eval\\|scripts\\.chat_eval\\|scripts\\.chat_sft\\|"
+            "scripts\\.base_train\\|tok_train\\|nanochat\\.dataset\\|nanochat\\.report\\|"
+            "uv sync' ~/train.log 2>/dev/null | tail -1"
+        ],
+        capture_output=True, text=True,
+    )
+    last_match = r.stdout.strip()
+    if not last_match:
+        return None, None
+
+    # Match against known stage markers
+    for marker_text, stage_name, stage_num in STAGE_MARKERS:
+        if marker_text in last_match:
+            return stage_name, stage_num
+
+    return None, None
+
+
 def cmd_status(args):
     instance_id = read_state("instance-id")
     ip = read_state("instance-ip")
     key_file = os.path.expanduser(args.key_file)
+    meta = read_run_meta()
 
     # Instance state (quiet — no command echo)
     r = subprocess.run(
@@ -559,7 +600,15 @@ def cmd_status(args):
         capture_output=True, text=True,
     )
     state = r.stdout.strip()
-    print(f"Instance {instance_id}: {state}")
+
+    # Compute elapsed time and cost
+    launch_time = datetime.fromisoformat(meta["launch_time"])
+    elapsed = datetime.now(timezone.utc) - launch_time
+    elapsed_min = int(elapsed.total_seconds() / 60)
+    hourly_rate = INSTANCE_PRICING.get(meta.get("instance_type", ""), 0)
+    cost = elapsed.total_seconds() / 3600 * hourly_rate
+
+    print(f"Instance {instance_id}: {state}  [{elapsed_min} min, ~${cost:.2f}]")
 
     if state != "running":
         return
@@ -586,7 +635,39 @@ def cmd_status(args):
             capture_output=True, text=True,
         )
         if "train" in r.stdout:
-            print("Training: IN PROGRESS")
+            stage_name, stage_num = detect_stage(key_file, args.user, ip)
+            if stage_name:
+                print(f"Training: IN PROGRESS — stage {stage_num}/{TOTAL_STAGES} ({stage_name})")
+            else:
+                print("Training: IN PROGRESS")
+
+            # Show last meaningful line (handle \r-overwritten lines)
+            r = subprocess.run(
+                ssh_cmd(key_file, args.user, ip) + [
+                    "tail -3 ~/train.log 2>/dev/null | tr '\\r' '\\n' | grep -v '^$' | tail -10"
+                ],
+                capture_output=True, text=True,
+            )
+            tail_lines = r.stdout.strip().splitlines()
+            if tail_lines:
+                # Check if output is rank progress lines (e.g. "[KRank 2 | 0/76 (0.00%)")
+                rank_pattern = re.compile(r'\[?K?Rank\s+\d+\s*\|\s*(\d+)/(\d+)')
+                rank_matches = []
+                for line in tail_lines:
+                    m = rank_pattern.search(line)
+                    if m:
+                        rank_matches.append((int(m.group(1)), int(m.group(2))))
+
+                if rank_matches:
+                    # Summarize rank progress: show max progress across GPUs
+                    max_total = max(t for _, t in rank_matches)
+                    max_correct = max(c for c, _ in rank_matches)
+                    print(f"  eval progress: ~{max_total} questions scored ({max_correct} correct)")
+                else:
+                    last_line = tail_lines[-1]
+                    if len(last_line) > 120:
+                        last_line = last_line[:117] + "..."
+                    print(f"  {last_line}")
         else:
             print("Training: UNKNOWN (no screen session, no done.json)")
 

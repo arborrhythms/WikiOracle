@@ -121,7 +121,7 @@ some:
 	$(MAKE) all CPU_ITERS=10
 
 some-gpu:
-	$(MAKE) all-gpu GPU_ITERS=10 DATA_SHARDS_FULL=8
+	$(MAKE) all-gpu GPU_ITERS=10 DATA_SHARDS_FULL=8 EVAL_MAX_PER_TASK=16
 
 # --- Remote (EC2) -------------------------------------------------------------
 
@@ -255,9 +255,11 @@ eval-gpu:
 		export OMP_NUM_THREADS=1 && \
 		torchrun --standalone --nproc_per_node=$(NPROC) \
 			-m scripts.base_eval -- \
-			--device-batch-size=$(GPU_BATCH) && \
+			--device-batch-size=$(GPU_BATCH) \
+			$(if $(EVAL_MAX_PER_TASK),--max-per-task=$(EVAL_MAX_PER_TASK)) && \
 		torchrun --standalone --nproc_per_node=$(NPROC) \
-			-m scripts.chat_eval -- -i sft
+			-m scripts.chat_eval -- -i sft \
+			$(if $(EVAL_MAX_PER_TASK),--max-per-task=$(EVAL_MAX_PER_TASK))
 
 # --- Inference ----------------------------------------------------------------
 

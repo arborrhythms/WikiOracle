@@ -39,13 +39,15 @@ EC2_KEY_NAME      ?= nanochat-key
 EC2_KEY_FILE      ?= ~/.ssh/$(EC2_KEY_NAME).pem
 EC2_DISK_SIZE     ?= 200
 EC2_USER          ?= ubuntu
-EC2_TARGET        ?= all-gpu
+EC2_TARGET        ?=
 
 # WikiOracle (Lightsail) deployment configuration
 WO_KEY_FILE       ?= ./wikiOracle.pem
 WO_USER           ?= bitnami
 WO_HOST           ?= wikiOracle.org
 WO_DEST           ?= /opt/bitnami/wordpress/files/wikiOracle.org/chat
+
+ALERT_EMAIL ?=
 
 DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
                --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)
@@ -133,6 +135,7 @@ help:
 	@echo "  DATA_SHARDS_FULL=370    Full data shards for GPU training"
 	@echo "  EC2_INSTANCE_TYPE       EC2 instance type (default: p4d.24xlarge)"
 	@echo "  EC2_DISK_SIZE           Root EBS volume in GB (default: 200)"
+	@echo "  ALERT_EMAIL             Email for idle-instance alerts (required for remote builds)"
 
 # ---- All ----------------------------------------------------------------------
 
@@ -152,13 +155,20 @@ REMOTE_ARGS := --region=$(EC2_REGION) --key-name=$(EC2_KEY_NAME) \
                --key-file=$(EC2_KEY_FILE) --user=$(EC2_USER)
 
 remote:
+ifndef ALERT_EMAIL
+	$(error ALERT_EMAIL is required for remote builds — e.g. make remote ALERT_EMAIL=you@example.com)
+endif
+ifndef EC2_TARGET
+	$(error EC2_TARGET is required for remote builds — e.g. make remote EC2_TARGET=all-gpu)
+endif
 	python3 remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
 		--disk-size=$(EC2_DISK_SIZE) \
 		--nproc=$(NPROC) \
 		--wandb-run=$(WANDB_RUN) \
 		--data-shards=$(DATA_SHARDS_FULL) \
-		--target="$(EC2_TARGET)"
+		--target="$(EC2_TARGET)" \
+		--alert-email=$(ALERT_EMAIL)
 
 remote-retrieve:
 	python3 remote.py $(REMOTE_ARGS) retrieve
@@ -173,6 +183,12 @@ remote-status:
 	python3 remote.py $(REMOTE_ARGS) status
 
 remote-deploy-launch:
+ifndef ALERT_EMAIL
+	$(error ALERT_EMAIL is required for remote builds — e.g. make remote-deploy-launch ALERT_EMAIL=you@example.com)
+endif
+ifndef EC2_TARGET
+	$(error EC2_TARGET is required for remote builds — e.g. make remote-deploy-launch EC2_TARGET=all-gpu)
+endif
 	python3 remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
 		--disk-size=$(EC2_DISK_SIZE) \
@@ -180,6 +196,7 @@ remote-deploy-launch:
 		--wandb-run=$(WANDB_RUN) \
 		--data-shards=$(DATA_SHARDS_FULL) \
 		--target="$(EC2_TARGET)" \
+		--alert-email=$(ALERT_EMAIL) \
 		--deploy $(DEPLOY_ARGS)
 
 remote-deploy:

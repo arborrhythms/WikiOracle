@@ -61,6 +61,7 @@ DEPLOY_RSYNC_EXCLUDES = [
 INSTANCE_PRICING = {
     "p4d.24xlarge": 32.77,
     "p4de.24xlarge": 40.97,
+    "p5.4xlarge": 6.88,
     "p5.48xlarge": 98.32,
     "g5.xlarge": 1.006,
     "g5.48xlarge": 16.288,

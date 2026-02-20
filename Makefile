@@ -14,7 +14,7 @@ IDENTITY_DATA    := $(NANOCHAT_BASE)/identity_conversations.jsonl
 IDENTITY_URL     := https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
 
 # GPU training defaults (override on command line, e.g. make NPROC=4 pretrain-gpu)
-NPROC            ?= 8
+NPROC            ?= 1               # 1 for p5.4xlarge (use 8 for p4d.24xlarge)
 WANDB_RUN        ?= dummy
 
 # CPU training defaults
@@ -23,17 +23,20 @@ CPU_ITERS        ?= 5000
 CPU_BATCH        ?= 32
 CPU_SEQ_LEN      ?= 512
 
-# GPU training defaults
+# GPU training defaults (p5.4xlarge — 1× H100-80GB, ~$6.88/hr)
 GPU_DEPTH        ?= 26
-GPU_BATCH        ?= 4              # 4 for A100-40GB, 16 for H100-80GB
-GPU_WINDOW       ?= L              # L for A100 (no FA3), SSSL for H100+
+GPU_BATCH        ?= 16             # 16 for H100-80GB (use 4 for A100-40GB)
+GPU_WINDOW       ?= SSSL           # SSSL for H100+ w/ FA3 (use L for A100)
+# Alternative: p4d.24xlarge — 8× A100-40GB, ~$32.77/hr
+# GPU_BATCH      ?= 4
+# GPU_WINDOW     ?= L
 
 # Data download shard counts
 DATA_SHARDS_INIT ?= 8
 DATA_SHARDS_FULL ?= 370
 
 # Remote EC2 configuration
-EC2_INSTANCE_TYPE ?= p4d.24xlarge
+EC2_INSTANCE_TYPE ?= p5.4xlarge     # 1× H100-80GB ~$6.88/hr (alt: p4d.24xlarge 8× A100 ~$32.77/hr)
 EC2_REGION        ?= us-west-2
 EC2_KEY_NAME      ?= nanochat-key
 EC2_KEY_FILE      ?= ~/.ssh/$(EC2_KEY_NAME).pem
@@ -91,7 +94,7 @@ help:
 	@echo "  make sft-cpu            Supervised fine-tuning on CPU/MPS"
 	@echo "  make train-cpu          Full pipeline: data + tok + pretrain + sft (CPU)"
 	@echo ""
-	@echo "Training (GPU - 8xH100, ~3 hours):"
+	@echo "Training (GPU - 1xH100-80GB on p5.4xlarge):"
 	@echo "  make pretrain-gpu       Pretrain base model on GPU"
 	@echo "  make sft-gpu            Supervised fine-tuning on GPU"
 	@echo "  make train-gpu          Full pipeline: data + tok + pretrain + sft (GPU)"
@@ -133,7 +136,7 @@ help:
 	@echo "  GPU_DEPTH=26            Model depth for GPU training"
 	@echo "  DATA_SHARDS_INIT=8      Initial data shards to download"
 	@echo "  DATA_SHARDS_FULL=370    Full data shards for GPU training"
-	@echo "  EC2_INSTANCE_TYPE       EC2 instance type (default: p4d.24xlarge)"
+	@echo "  EC2_INSTANCE_TYPE       EC2 instance type (default: p5.4xlarge)"
 	@echo "  EC2_DISK_SIZE           Root EBS volume in GB (default: 200)"
 	@echo "  ALERT_EMAIL             Email for idle-instance alerts (required for remote builds)"
 

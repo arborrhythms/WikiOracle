@@ -1,6 +1,8 @@
 #
-
+*.pem
 *~
 .venv/
 .ec2/
 output/
+__pycache__/
+.DS_Store

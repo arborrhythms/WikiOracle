@@ -41,6 +41,15 @@ EC2_DISK_SIZE     ?= 200
 EC2_USER          ?= ubuntu
 EC2_TARGET        ?= all-gpu
 
+# WikiOracle (Lightsail) deployment configuration
+WO_KEY_FILE       ?= ./wikiOracle.pem
+WO_USER           ?= bitnami
+WO_HOST           ?= wikiOracle.org
+WO_DEST           ?= /opt/bitnami/wordpress/files/wikiOracle.org/chat
+
+DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
+               --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)
+
 # --- Phony targets ------------------------------------------------------------
 
 .PHONY: all all-gpu some some-gpu help \
@@ -52,7 +61,9 @@ EC2_TARGET        ?= all-gpu
         eval-cpu eval-gpu \
         run-cli run-web \
         report clean clean-all \
-        remote remote-retrieve remote-ssh remote-status remote-logs
+        remote remote-retrieve remote-ssh remote-status remote-logs \
+        remote-deploy remote-deploy-launch \
+        wo-start wo-stop wo-restart wo-status wo-logs
 
 # --- Help ---------------------------------------------------------------------
 
@@ -96,6 +107,17 @@ help:
 	@echo "  make remote-ssh         SSH into running EC2 instance"
 	@echo "  make remote-status      Check EC2 instance state"
 	@echo "  make remote-logs        Tail training log on remote instance"
+	@echo ""
+	@echo "Deploy (EC2 -> WikiOracle):"
+	@echo "  make remote-deploy-launch  Launch EC2, train, deploy to WikiOracle"
+	@echo "  make remote-deploy         Deploy from running EC2 to WikiOracle"
+	@echo ""
+	@echo "WikiOracle Server:"
+	@echo "  make wo-start              Start NanoChat server on WikiOracle"
+	@echo "  make wo-stop               Stop NanoChat server on WikiOracle"
+	@echo "  make wo-restart            Restart NanoChat server on WikiOracle"
+	@echo "  make wo-status             Check NanoChat server status on WikiOracle"
+	@echo "  make wo-logs               Tail NanoChat server logs on WikiOracle"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              Remove Python caches"
@@ -149,6 +171,41 @@ remote-logs:
 
 remote-status:
 	python3 remote.py $(REMOTE_ARGS) status
+
+remote-deploy-launch:
+	python3 remote.py $(REMOTE_ARGS) launch \
+		--instance-type=$(EC2_INSTANCE_TYPE) \
+		--disk-size=$(EC2_DISK_SIZE) \
+		--nproc=$(NPROC) \
+		--wandb-run=$(WANDB_RUN) \
+		--data-shards=$(DATA_SHARDS_FULL) \
+		--target="$(EC2_TARGET)" \
+		--deploy $(DEPLOY_ARGS)
+
+remote-deploy:
+	python3 remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
+
+# --- WikiOracle Server --------------------------------------------------------
+
+WO_SSH := ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10 $(WO_USER)@$(WO_HOST)
+
+wo-start:
+	$(WO_SSH) "sudo systemctl start nanochat"
+	@echo "NanoChat server started on $(WO_HOST)"
+
+wo-stop:
+	$(WO_SSH) "sudo systemctl stop nanochat"
+	@echo "NanoChat server stopped on $(WO_HOST)"
+
+wo-restart:
+	$(WO_SSH) "sudo systemctl restart nanochat"
+	@echo "NanoChat server restarted on $(WO_HOST)"
+
+wo-status:
+	$(WO_SSH) "sudo systemctl status nanochat --no-pager -l"
+
+wo-logs:
+	$(WO_SSH) "sudo journalctl -u nanochat -f --no-pager"
 
 # --- Setup --------------------------------------------------------------------
 

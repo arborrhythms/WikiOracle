@@ -9,6 +9,8 @@ SHELL := /bin/bash
 NANOCHAT_DIR     := nanochat
 VENV_DIR         := $(NANOCHAT_DIR)/.venv
 ACTIVATE         := source "$(CURDIR)/$(VENV_DIR)/bin/activate"
+SHIM_VENV        := .venv
+SHIM_ACTIVATE    := source "$(CURDIR)/$(SHIM_VENV)/bin/activate"
 NANOCHAT_BASE    := $(CURDIR)/$(NANOCHAT_DIR)
 IDENTITY_DATA    := $(NANOCHAT_BASE)/identity_conversations.jsonl
 IDENTITY_URL     := https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
@@ -51,6 +53,7 @@ WO_HOST           ?= wikiOracle.org
 WO_DEST           ?= /opt/bitnami/wordpress/files/wikiOracle.org/chat
 
 ALERT_EMAIL ?=
+WIKIORACLE_APP ?= WikiOracle.py
 
 DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
                --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)
@@ -58,13 +61,13 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
 # --- Phony targets ------------------------------------------------------------
 
 .PHONY: all all-gpu some some-gpu help \
-        setup-cpu setup-gpu \
+        venv setup-cpu setup-gpu \
         data tokenizer \
         pretrain-cpu pretrain-gpu \
         sft-cpu sft-gpu \
         train-cpu train-gpu \
         eval-cpu eval-gpu \
-        run-cli run-web \
+        init run test run-cli run-web \
         report clean clean-all \
         remote remote-retrieve remote-ssh remote-status remote-logs \
         remote-deploy remote-deploy-launch \
@@ -82,7 +85,8 @@ help:
 	@echo "  make remote             Launch EC2 p4d.24xlarge, copy code, train, auto-terminate"
 	@echo ""
 	@echo "Setup:"
-	@echo "  make setup-cpu          Install dependencies (CPU/MPS)"
+	@echo "  make venv         Create .venv and install shim deps (flask, requests)"
+	@echo "  make setup-cpu          Install NanoChat dependencies (CPU/MPS)"
 	@echo "  make setup-gpu          Install dependencies (GPU/CUDA)"
 	@echo ""
 	@echo "Data & Tokenizer:"
@@ -100,6 +104,8 @@ help:
 	@echo "  make train-gpu          Full pipeline: data + tok + pretrain + sft (GPU)"
 	@echo ""
 	@echo "Evaluation & Inference:"
+	@echo "  make test              Run wikioracle_state unit tests"
+	@echo "  make run               Start WikiOracle local shim (WikiOracle.py)"
 	@echo "  make eval-cpu           Evaluate model (CPU)"
 	@echo "  make eval-gpu           Evaluate model (GPU)"
 	@echo "  make run-cli            Chat with the model (CLI)"
@@ -233,6 +239,10 @@ $(VENV_DIR):
 	command -v uv &> /dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$$HOME/.local/bin:$$PATH"; }
 	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv venv
 
+venv:
+	python3 -m venv $(SHIM_VENV)
+	$(SHIM_ACTIVATE) && pip install -r requirements.txt
+
 setup-cpu: $(VENV_DIR)
 	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra cpu
 
@@ -340,6 +350,16 @@ eval-gpu:
 			$(if $(EVAL_MAX_PER_TASK),-x $(EVAL_MAX_PER_TASK))
 
 # --- Inference ----------------------------------------------------------------
+
+init:
+	rm -f llm.jsonl
+	@echo "llm.jsonl removed — server will create a fresh one on next start."
+
+run:
+	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP)
+
+test:
+	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state -v
 
 run-cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \

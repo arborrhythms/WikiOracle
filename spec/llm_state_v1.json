@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v1.json",
+  "title": "WikiOracle LLM State (JSONL)",
+  "description": "Client-owned state file for WikiOracle conversations, truth entries, and directory context. Uses line-delimited JSON (JSONL): line 1 is a header object, subsequent lines are message or trust records. The server is stateless; this file is the canonical source of persistence.",
+  "type": "object",
+  "required": ["version", "schema", "date", "context", "messages", "truth"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Increment only on breaking changes."
+    },
+    "schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the canonical JSON Schema file on GitHub. Treated as an identifier; clients do not need to fetch it.",
+      "examples": ["https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v1.json"]
+    },
+    "date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp of last modification. Updated by the client whenever the file changes."
+    },
+    "context": {
+      "type": "string",
+      "description": "XHTML fragment injected into every query. Contains directory-operating instructions, project summary, and filesystem snapshot. Should be concise (target < 8 KB)."
+    },
+    "messages": {
+      "type": "array",
+      "description": "Ordered conversation log. May be long; not automatically injected wholesale—client chooses a window.",
+      "items": { "$ref": "#/$defs/message" }
+    },
+    "active_path": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Array of message IDs from root to current leaf representing the active conversation branch. If absent, the client computes the longest linear path."
+    },
+    "truth": {
+      "type": "object",
+      "required": ["trust"],
+      "description": "Truth/RAG state.",
+      "properties": {
+        "trust": {
+          "type": "array",
+          "description": "Trust entries: curated knowledge snippets with certainty scores.",
+          "items": { "$ref": "#/$defs/trustEntry" }
+        },
+        "retrieval_prefs": { "$ref": "#/$defs/retrievalPrefs" }
+      }
+    }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "required": ["id", "title", "username", "timestamp", "content"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable unique ID within the file. Recommended: m_ + sha256(username|timestamp|content)[0:16]."
+        },
+        "title": {
+          "type": "string",
+          "description": "Short human-readable label for UI display."
+        },
+        "username": {
+          "type": "string",
+          "description": "Speaker identifier. Human username (e.g. 'Alec') or LLM name+version (e.g. 'WikiOracle-LLM v1.0', 'Claude-3.7 Sonnet')."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp for the message."
+        },
+        "content": {
+          "type": "string",
+          "description": "XHTML fragment. Must be well-formed. Allowed elements: a, b, i, em, strong, code, span, br, p, div, pre, blockquote, ul, ol, li, h1-h6. No script or inline event handlers."
+        },
+        "parent_id": {
+          "type": ["string", "null"],
+          "description": "ID of parent message in the conversation tree. null for root messages. If absent, the message is auto-linked to the previous message by timestamp (backward compatibility)."
+        }
+      }
+    },
+    "trustEntry": {
+      "type": "object",
+      "required": ["id", "title", "timestamp", "certainty", "content"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable unique ID within trust[]. Recommended: t_ + sha256(title|timestamp|content)[0:16]."
+        },
+        "title": {
+          "type": "string",
+          "description": "Short title for the trust entry."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp."
+        },
+        "certainty": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Trust/confidence weight used during retrieval and ranking."
+        },
+        "content": {
+          "type": "string",
+          "description": "XHTML fragment. May include URLs via <a href='...'>. Same sanitization rules as message content."
+        }
+      }
+    },
+    "retrievalPrefs": {
+      "type": "object",
+      "description": "Retrieval configuration knobs. All optional; defaults applied by client/server.",
+      "properties": {
+        "max_entries": {
+          "type": "integer",
+          "default": 8,
+          "description": "Maximum trust entries returned per query."
+        },
+        "min_certainty": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.0,
+          "description": "Filter threshold."
+        },
+        "prefer_higher_certainty": {
+          "type": "boolean",
+          "default": true
+        },
+        "certainty_weight": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.7,
+          "description": "Ranking weight for certainty. certainty_weight + recency_weight should equal 1.0."
+        },
+        "recency_weight": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.3,
+          "description": "Ranking weight for recency."
+        }
+      }
+    }
+  }
+}

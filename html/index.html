@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>WikiOracle</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --fg: #111827;
+  --fg-muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #2563eb;
+  --accent-light: #dbeafe;
+  --bubble-user: #f3f4f6;
+  --bubble-assistant: #ffffff;
+  --input-bg: #ffffff;
+  --header-bg: #f9fafb;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--fg); }
+body { display: flex; flex-direction: column; }
+
+/* Header */
+.header { background: var(--header-bg); border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
+.header h1 { font-size: 1.1rem; font-weight: 600; flex: 1; }
+.header-btn { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg-muted); cursor: pointer; padding: 0.4rem 0.7rem; font-size: 0.8rem; transition: all 0.15s; }
+.header-btn:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
+
+/* Settings panel */
+.settings-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; }
+.settings-overlay.active { display: flex; align-items: center; justify-content: center; }
+.settings-panel { background: var(--bg); border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+.settings-panel h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+.settings-panel label { display: block; font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.3rem; margin-top: 0.8rem; }
+.settings-panel input, .settings-panel select, .settings-panel textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+.settings-panel textarea { min-height: 80px; resize: vertical; }
+.settings-row { display: flex; gap: 0.75rem; align-items: center; }
+.settings-row input[type=range] { flex: 1; }
+.settings-row .range-val { font-size: 0.85rem; color: var(--fg-muted); min-width: 2.5rem; text-align: right; }
+.settings-actions { margin-top: 1.2rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
+.btn { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-size: 0.85rem; transition: all 0.15s; }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { opacity: 0.9; }
+.btn:hover { background: var(--accent-light); }
+
+/* Tree view (top-down hierarchy) */
+.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 220px; min-height: 120px; overflow: hidden; }
+.tree-container svg { width: 100%; height: 100%; display: block; }
+.tree-tooltip { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.72rem; pointer-events: none; z-index: 10; max-width: 240px; word-wrap: break-word; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.4; }
+
+/* Chat */
+.chat-container { flex: 1; overflow-y: auto; }
+.chat-wrapper { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem 6rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
+.chat-placeholder { color: var(--fg-muted); font-size: 0.9rem; text-align: center; padding: 3rem 1rem; }
+.message { display: flex; flex-direction: column; margin-bottom: 0.25rem; position: relative; }
+.msg-meta { font-size: 0.75rem; color: var(--fg-muted); margin-bottom: 0.15rem; padding: 0 0.25rem; }
+.msg-bubble { padding: 0.7rem 1rem; border-radius: 12px; max-width: 85%; line-height: 1.5; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
+.message.user .msg-bubble { background: var(--bubble-user); align-self: flex-end; border-bottom-right-radius: 4px; }
+.message.user .msg-meta { text-align: right; }
+.message.assistant .msg-bubble { background: var(--bubble-assistant); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; }
+
+/* Message drag reorder */
+.message.msg-dragging { opacity: 0.4; }
+.message.msg-dragover { border-top: 2px solid var(--accent); }
+.message[draggable=true] { cursor: grab; }
+.message[draggable=true]:active { cursor: grabbing; }
+
+/* Input */
+.input-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 0.75rem 1rem; }
+.input-wrapper { max-width: 48rem; margin: 0 auto; display: flex; gap: 0.5rem; }
+.input-wrapper textarea { flex: 1; padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; font-family: inherit; resize: none; max-height: 120px; line-height: 1.4; }
+.send-btn { padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 0.95rem; cursor: pointer; transition: opacity 0.15s; }
+.send-btn:hover { opacity: 0.85; }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Context menu (for tree nodes) */
+.tree-context-menu { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 20; min-width: 140px; padding: 4px 0; font-size: 0.82rem; }
+.tree-context-menu .ctx-item { padding: 0.45rem 0.9rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; color: var(--fg); }
+.tree-context-menu .ctx-item:hover { background: var(--accent-light); color: var(--accent); }
+.tree-context-menu .ctx-item.ctx-danger { color: #dc2626; }
+.tree-context-menu .ctx-item.ctx-danger:hover { background: #fef2f2; color: #dc2626; }
+.tree-context-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* Status bar */
+.status-bar { font-size: 0.75rem; color: var(--fg-muted); text-align: center; padding: 0.25rem; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>WikiOracle</h1>
+  <button class="header-btn" id="btnExport" title="Export session as llm_*.jsonl">Export State</button>
+  <button class="header-btn" id="btnImport" title="Import an llm_*.jsonl file">Import State</button>
+  <button class="header-btn" id="btnSettings" title="Settings">Settings</button>
+</div>
+
+<!-- Settings overlay -->
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-panel">
+    <h2>Settings</h2>
+
+    <label for="setToken">Auth Token</label>
+    <input type="password" id="setToken" placeholder="Paste WIKIORACLE_SHIM_TOKEN">
+
+    <label for="setUsername">Your Username</label>
+    <input type="text" id="setUsername" placeholder="Alec">
+
+    <label for="setProvider">Provider</label>
+    <select id="setProvider">
+      <option value="wikioracle">WikiOracle NanoChat</option>
+      <option value="openai">OpenAI</option>
+      <option value="anthropic">Anthropic</option>
+    </select>
+
+    <label for="setModel">Model</label>
+    <input type="text" id="setModel" placeholder="nanochat-default">
+
+    <label>Temperature</label>
+    <div class="settings-row">
+      <input type="range" id="setTemp" min="0" max="2" step="0.1" value="0.7">
+      <span class="range-val" id="tempVal">0.7</span>
+    </div>
+
+    <label><input type="checkbox" id="setRag" checked> Enable RAG (use truth entries)</label>
+    <label><input type="checkbox" id="setUrlFetch"> Allow URL fetching</label>
+
+    <label>Message Window (recent turns to send)</label>
+    <div class="settings-row">
+      <input type="range" id="setWindow" min="4" max="100" step="2" value="40">
+      <span class="range-val" id="windowVal">40</span>
+    </div>
+
+    <label for="setContext">Directory Context (always injected)</label>
+    <textarea id="setContext" placeholder="Describe the directory, project, key files..."></textarea>
+
+    <div class="settings-actions">
+      <button class="btn" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tree view -->
+<div class="tree-container" id="treeContainer">
+  <svg></svg>
+</div>
+
+<!-- Chat area -->
+<div class="chat-container" id="chatContainer">
+  <div class="chat-wrapper" id="chatWrapper"></div>
+</div>
+
+<!-- Status -->
+<div class="status-bar" id="statusBar">Ready</div>
+
+<!-- Input -->
+<div class="input-bar">
+  <div class="input-wrapper">
+    <textarea id="msgInput" rows="1" placeholder="Message WikiOracle..." autofocus></textarea>
+    <button class="send-btn" id="btnSend" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<!-- Hidden file input for import -->
+<input type="file" id="fileImport" accept=".json,.jsonl" style="display:none">
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="d3tree.js?v=10"></script>
+<script src="wikioracle.js?v=13"></script>
+</body>
+</html>

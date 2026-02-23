@@ -3,6 +3,10 @@
 *~
 .venv/
 .ec2/
+.claude/
 output/
+librechat/
 __pycache__/
 .DS_Store
+llm.jsonl
+*.merged

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json",
+  "title": "WikiOracle LLM State v2 (JSONL)",
+  "description": "Hierarchical dialogue state. Grammar: Dialogue → Conversation*, Conversation → (Query|Response)* + Conversation* (children). JSONL: header line, then conversation and trust records. Conversations reference parent via 'parent' field; root conversations omit it.",
+  "type": "object",
+  "required": ["version", "schema", "date", "context", "conversations", "truth"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Schema version."
+    },
+    "schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the canonical JSON Schema file."
+    },
+    "date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp of last modification."
+    },
+    "context": {
+      "type": "string",
+      "description": "XHTML fragment injected into every query."
+    },
+    "selected_conversation": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "ID of the currently viewed conversation, or null for root (empty chat)."
+    },
+    "conversations": {
+      "type": "array",
+      "description": "Ordered tree of conversations. Each element is a root conversation; children are nested.",
+      "items": { "$ref": "#/$defs/conversation" }
+    },
+    "truth": {
+      "type": "object",
+      "required": ["trust"],
+      "properties": {
+        "trust": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/trustEntry" }
+        },
+        "retrieval_prefs": { "$ref": "#/$defs/retrievalPrefs" }
+      }
+    }
+  },
+  "$defs": {
+    "conversation": {
+      "type": "object",
+      "required": ["id", "title", "messages"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique conversation ID. Recommended: c_ + hex."
+        },
+        "title": {
+          "type": "string",
+          "description": "Short label derived from first user message."
+        },
+        "messages": {
+          "type": "array",
+          "description": "Ordered sequence of query/response messages within this conversation.",
+          "items": { "$ref": "#/$defs/message" }
+        },
+        "children": {
+          "type": "array",
+          "description": "Child conversations (branches from this conversation).",
+          "items": { "$ref": "#/$defs/conversation" },
+          "default": []
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["id", "role", "username", "timestamp", "content"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable unique message ID."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "assistant"],
+          "description": "Speaker role."
+        },
+        "username": {
+          "type": "string",
+          "description": "Speaker identifier."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content": {
+          "type": "string",
+          "description": "XHTML fragment."
+        }
+      }
+    },
+    "trustEntry": {
+      "type": "object",
+      "required": ["id", "title", "timestamp", "certainty", "content"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "certainty": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "content": { "type": "string" }
+      }
+    },
+    "retrievalPrefs": {
+      "type": "object",
+      "properties": {
+        "max_entries": { "type": "integer", "default": 8 },
+        "min_certainty": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.0 },
+        "prefer_higher_certainty": { "type": "boolean", "default": true },
+        "certainty_weight": { "type": "number", "default": 0.7 },
+        "recency_weight": { "type": "number", "default": 0.3 }
+      }
+    }
+  }
+}

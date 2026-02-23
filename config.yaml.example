@@ -1,0 +1,65 @@
+# WikiOracle configuration — example template
+# Copy to config.yaml and fill in your values. config.yaml is gitignored.
+
+# --- User --------------------------------------------------------------------
+# Your display name in chat messages.
+
+user:
+  name: User
+
+# --- LLM Providers -----------------------------------------------------------
+# name     = LLM display name in chat (tags assistant messages)
+# username = your API login / email for that provider
+# url      = API endpoint (defaults built in)
+
+providers:
+  wikioracle:
+    name: oracle
+    username: you@example.com
+
+  openai:
+    name: chatGPT
+    username: you@example.com
+    url: https://api.openai.com/v1/chat/completions
+    api_key: ""                          # or set OPENAI_API_KEY env var
+    default_model: gpt-4o
+
+  anthropic:
+    name: claude
+    username: you@example.com
+    url: https://api.anthropic.com/v1/messages
+    api_key: ""                          # or set ANTHROPIC_API_KEY env var
+    default_model: claude-sonnet-4-20250514
+
+# --- Chat settings -----------------------------------------------------------
+
+chat:
+  temperature: 0.7
+  message_window: 40                     # recent turns to send upstream
+  rag: true                              # use truth entries for retrieval
+  url_fetch: false                       # allow URL fetching in responses
+  confirm_actions: true                  # prompt before deletes, merges, etc.
+
+# --- UI defaults -------------------------------------------------------------
+
+ui:
+  default_provider: wikioracle
+  layout: flat                             # flat | horizontal | vertical
+
+# --- SSH keys ----------------------------------------------------------------
+# Referenced by the Makefile for remote operations.
+
+ssh:
+  # Web-server deployment
+  wikioracle:
+    key_file: ~/.ssh/your-deploy-key.pem
+    user: bitnami
+    host: example.com
+    dest: /var/www/html/chat
+
+  # GPU training instance
+  ec2:
+    key_file: ~/.ssh/your-ec2-key.pem
+    user: ubuntu
+    region: us-west-2
+    key_name: your-key-name

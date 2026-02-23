@@ -1,67 +1,29 @@
 // wikioracle.js — WikiOracle v2 client (conversation-based hierarchy)
+// All preferences served by the server (config.yaml + state overrides).
+// No cookies or localStorage used.
 
-// ─── Cookie helpers (wo_prefs) ───
-function b64urlEncode(str) {
-  return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
-}
-function b64urlDecode(str) {
-  str = str.replace(/-/g,"+").replace(/_/g,"/");
-  while (str.length % 4) str += "=";
-  return decodeURIComponent(escape(atob(str)));
-}
-function setCookie(name, value, days=365) {
-  const exp = new Date(Date.now() + days*864e5).toUTCString();
-  document.cookie = `${name}=${value}; Expires=${exp}; Path=/; SameSite=Lax`;
-}
-function getCookie(name) {
-  return document.cookie.split("; ").find(r => r.startsWith(name + "="))?.split("=").slice(1).join("=") || null;
-}
-
-// ─── Preferences ───
-const DEFAULT_PREFS = {
-  v: 1,
-  provider: "wikioracle",
-  model: "nanochat-default",
-  temp: 0.7,
-  username: "User",
-  tools: { rag: true, url_fetch: false },
-  truth: { max_entries: 8, min_certainty: 0.2 },
-  message_window: 40,
-  layout: "horizontal",
-};
-
-function loadPrefs() {
-  const raw = getCookie("wo_prefs");
-  if (!raw) return { ...DEFAULT_PREFS };
-  try { return { ...DEFAULT_PREFS, ...JSON.parse(b64urlDecode(raw)) }; }
-  catch { return { ...DEFAULT_PREFS }; }
-}
-
-function savePrefs(obj) {
-  setCookie("wo_prefs", b64urlEncode(JSON.stringify(obj)));
-}
-
-let prefs = loadPrefs();
+// ─── Preferences (loaded from server on init) ───
+let prefs = { provider: "wikioracle", layout: "flat", username: "User" };
 
 function applyLayout(layout) {
   const tree = document.getElementById("treeContainer");
-  if (layout === "vertical") {
+  document.body.classList.remove("layout-flat", "layout-vertical");
+  if (layout === "flat") {
+    document.body.classList.add("layout-flat");
+  } else if (layout === "vertical") {
     document.body.classList.add("layout-vertical");
-    // Reset height, use width for vertical
     tree.style.height = "";
     if (!tree.style.width) tree.style.width = "280px";
   } else {
-    document.body.classList.remove("layout-vertical");
-    // Reset width, use height for horizontal
+    // horizontal
     tree.style.width = "";
     if (!tree.style.height) tree.style.height = "220px";
   }
   if (typeof renderMessages === "function") renderMessages();
 }
 
-// ─── Token (stored in localStorage, not cookie) ───
-function getToken() { return localStorage.getItem("wo_token") || ""; }
-function setToken(t) { localStorage.setItem("wo_token", t); }
+// ─── Provider metadata (populated from /providers on init) ───
+let _providerMeta = {};  // { "openai": { model: "gpt-4o", ... }, ... }
 
 // ─── State (in-memory, synced from server) ───
 // v2 shape: { version, schema, date, context, conversations: [...tree...],
@@ -76,11 +38,15 @@ let selectedConvId = null;
 // Pending branch: when set, the next send creates a child of this conversation
 let _pendingBranchParent = null;
 
+// ─── Confirmation helper (skips dialog when confirm_actions is off) ───
+function confirmAction(msg) {
+  if (prefs.chat && prefs.chat.confirm_actions) return confirm(msg);
+  return true;
+}
+
 // ─── API helpers ───
 async function api(method, path, body) {
-  const token = getToken();
   const headers = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = "Bearer " + token;
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   const resp = await fetch(path, opts);
@@ -118,8 +84,6 @@ function navigateToNode(nodeId) {
   renderMessages();
   // Persist selected_conversation to server
   api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
-  // Save to cookie for session restore
-  _saveSelectedToCookie();
 }
 
 function branchFromNode(convId) {
@@ -146,7 +110,7 @@ function deleteConversation(convId) {
     return n;
   }
   const count = countMsgs(conv);
-  if (!confirm(`Delete "${conv.title}" and all its branches? (${count} message${count !== 1 ? "s" : ""})`)) return;
+  if (!confirmAction(`Delete "${conv.title}" and all its branches? (${count} message${count !== 1 ? "s" : ""})`)) return;
 
   // Remove from tree
   function removeFromList(list, id) {
@@ -209,6 +173,32 @@ function mergeConversation(sourceId, targetId) {
   setStatus(`Merged "${source.title}" into "${target.title}" (${target.messages.length} messages)`);
 }
 
+function _splitAfterMessage(msgIdx) {
+  if (!state || !selectedConvId) return;
+  const conv = findConversation(state.conversations, selectedConvId);
+  if (!conv || !conv.messages) return;
+  if (msgIdx < 0 || msgIdx >= conv.messages.length - 1) return; // nothing to split
+
+  const tailMessages = conv.messages.splice(msgIdx + 1);
+  const firstMsg = tailMessages[0] || {};
+  const preview = (firstMsg.content || "").replace(/<[^>]+>/g, "").slice(0, 40);
+  const newTitle = preview || "Split";
+
+  const newConv = {
+    id: tempId("conv_"),
+    title: newTitle,
+    messages: tailMessages,
+    children: conv.children || [],  // existing children follow the tail
+  };
+  conv.children = [newConv];
+
+  selectedConvId = newConv.id;
+  state.selected_conversation = newConv.id;
+  renderMessages();
+  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  setStatus(`Split after message ${msgIdx + 1} → "${newTitle}"`);
+}
+
 // ─── Message-level actions (within a conversation) ───
 
 let _msgCtxMenu = null;
@@ -246,12 +236,19 @@ function _showMsgContextMenu(event, msgIdx, totalMsgs) {
     menu.appendChild(item);
   }
 
-  // Separator
-  if (msgIdx > 0 || msgIdx < totalMsgs - 1) {
-    const sep = document.createElement("div");
-    sep.className = "ctx-sep";
-    menu.appendChild(sep);
+  // Split (after) — only if there are messages after this one
+  if (msgIdx < totalMsgs - 1) {
+    const splitItem = document.createElement("div");
+    splitItem.className = "ctx-item";
+    splitItem.textContent = "Split (after)";
+    splitItem.addEventListener("click", (e) => { e.stopPropagation(); _hideMsgContextMenu(); _splitAfterMessage(msgIdx); });
+    menu.appendChild(splitItem);
   }
+
+  // Separator
+  const sep = document.createElement("div");
+  sep.className = "ctx-sep";
+  menu.appendChild(sep);
 
   // Delete
   const delItem = document.createElement("div");
@@ -292,7 +289,7 @@ function _deleteMessage(msgIdx) {
   const msg = conv.messages[msgIdx];
   if (!msg) return;
   const preview = (msg.content || "").replace(/<[^>]+>/g, "").slice(0, 60);
-  if (!confirm(`Delete this message?\n"${preview}"`)) return;
+  if (!confirmAction(`Delete this message?\n"${preview}"`)) return;
   conv.messages.splice(msgIdx, 1);
   // If conversation is now empty, remove it too
   if (conv.messages.length === 0 && (!conv.children || conv.children.length === 0)) {
@@ -311,15 +308,57 @@ function _deleteMessage(msgIdx) {
   api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
 }
 
-// ─── Cookie for selected conversation ───
-function _saveSelectedToCookie() {
-  setCookie("wo_selected", selectedConvId || "");
-}
+// ─── Context editor (floating modal, triggered from root node) ───
+function _toggleContextEditor() {
+  let overlay = document.getElementById("contextOverlay");
 
-function _loadSelectedFromCookie() {
-  const val = getCookie("wo_selected");
-  if (!val) return null;
-  return val;
+  // Toggle off if already open
+  if (overlay && overlay.classList.contains("active")) {
+    overlay.classList.remove("active");
+    return;
+  }
+
+  // Create overlay on first use
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "contextOverlay";
+    overlay.className = "context-overlay";
+    overlay.innerHTML = `
+      <div class="context-panel">
+        <h2>Context</h2>
+        <p>Injected into every LLM call as background information.</p>
+        <textarea id="contextTextarea" placeholder="Describe the project, key facts, instructions..."></textarea>
+        <div class="settings-actions">
+          <button class="btn" id="ctxCancel">Cancel</button>
+          <button class="btn btn-primary" id="ctxSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    // Close on overlay background click
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) overlay.classList.remove("active");
+    });
+    document.getElementById("ctxCancel").addEventListener("click", function() {
+      overlay.classList.remove("active");
+    });
+    document.getElementById("ctxSave").addEventListener("click", function() {
+      const newText = document.getElementById("contextTextarea").value.trim();
+      const currentPlain = (state?.context || "").replace(/<[^>]+>/g, "").trim();
+      if (state && newText !== currentPlain) {
+        state.context = newText;
+        api("POST", "/state", state).catch(e => setStatus("Error saving context: " + e.message));
+        setStatus("Context saved");
+      }
+      overlay.classList.remove("active");
+    });
+  }
+
+  // Populate and show
+  const rawCtx = state?.context || "";
+  document.getElementById("contextTextarea").value = rawCtx.replace(/<[^>]+>/g, "").trim();
+  overlay.classList.add("active");
+  document.getElementById("contextTextarea").focus();
 }
 
 // ─── UI rendering ───
@@ -330,7 +369,7 @@ function renderMessages() {
   if (!state) state = {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
 
-  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation };
+  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor };
 
   // Determine which messages to show
   let visible = [];
@@ -430,6 +469,13 @@ function setStatus(text) {
   console.log("[WikiOracle]", text);
 }
 
+function _updatePlaceholder() {
+  const input = document.getElementById("msgInput");
+  const meta = _providerMeta[prefs.provider];
+  const name = meta ? meta.name : prefs.provider;
+  input.placeholder = `Message ${name}...`;
+}
+
 // ─── Send message ───
 async function sendMessage() {
   const input = document.getElementById("msgInput");
@@ -506,13 +552,9 @@ async function sendMessage() {
       conversation_id: conversationId || undefined,
       branch_from: branchFrom || undefined,
       prefs: {
-        ...prefs,
-        temp: prefs.temp,
         provider: prefs.provider,
-        model: prefs.model,
+        model: (_providerMeta[prefs.provider] || {}).model || "",
         username: prefs.username,
-        tools: prefs.tools,
-        message_window: prefs.message_window,
       },
     });
     state = data.state || state;
@@ -524,7 +566,6 @@ async function sendMessage() {
     }
 
     renderMessages();
-    _saveSelectedToCookie();
     setStatus("Ready");
   } catch (e) {
     // Rollback: reload state from server
@@ -543,58 +584,61 @@ async function sendMessage() {
 
 // ─── Settings panel ───
 function openSettings() {
-  document.getElementById("setToken").value = getToken();
   document.getElementById("setUsername").value = prefs.username || "User";
   document.getElementById("setProvider").value = prefs.provider || "wikioracle";
-  document.getElementById("setModel").value = prefs.model || "nanochat-default";
-  document.getElementById("setTemp").value = prefs.temp || 0.7;
-  document.getElementById("tempVal").textContent = prefs.temp || 0.7;
-  document.getElementById("setRag").checked = prefs.tools?.rag !== false;
-  document.getElementById("setUrlFetch").checked = prefs.tools?.url_fetch === true;
-  document.getElementById("setWindow").value = prefs.message_window || 40;
-  document.getElementById("windowVal").textContent = prefs.message_window || 40;
-  document.getElementById("setLayout").value = prefs.layout || "horizontal";
-  document.getElementById("setContext").value = state?.context || "";
+  document.getElementById("setLayout").value = prefs.layout || "flat";
+
+  // Chat settings
+  const chat = prefs.chat || {};
+  const tempSlider = document.getElementById("setTemp");
+  tempSlider.value = chat.temperature ?? 0.7;
+  document.getElementById("setTempVal").textContent = tempSlider.value;
+  const winSlider = document.getElementById("setWindow");
+  winSlider.value = chat.message_window ?? 40;
+  document.getElementById("setWindowVal").textContent = winSlider.value;
+  document.getElementById("setRag").checked = chat.rag !== false;
+  document.getElementById("setUrlFetch").checked = !!chat.url_fetch;
+  document.getElementById("setConfirm").checked = !!chat.confirm_actions;
+
   document.getElementById("settingsOverlay").classList.add("active");
 }
 function closeSettings() {
   document.getElementById("settingsOverlay").classList.remove("active");
 }
-function saveSettings() {
-  const token = document.getElementById("setToken").value.trim();
-  if (token) setToken(token);
-  prefs.username = document.getElementById("setUsername").value.trim() || "User";
+async function saveSettings() {
   prefs.provider = document.getElementById("setProvider").value;
-  prefs.model = document.getElementById("setModel").value.trim();
-  prefs.temp = parseFloat(document.getElementById("setTemp").value);
-  prefs.tools = {
-    rag: document.getElementById("setRag").checked,
-    url_fetch: document.getElementById("setUrlFetch").checked,
-  };
-  prefs.message_window = parseInt(document.getElementById("setWindow").value);
+  prefs.username = document.getElementById("setUsername").value.trim() || "User";
   prefs.layout = document.getElementById("setLayout").value;
 
-  const newContext = document.getElementById("setContext").value.trim();
-  if (state && newContext !== state.context) {
-    state.context = newContext;
-    api("POST", "/state", state).catch(e => setStatus("Error saving context: " + e.message));
-  }
+  // Chat settings
+  prefs.chat = {
+    temperature: parseFloat(document.getElementById("setTemp").value),
+    message_window: parseInt(document.getElementById("setWindow").value, 10),
+    rag: document.getElementById("setRag").checked,
+    url_fetch: document.getElementById("setUrlFetch").checked,
+    confirm_actions: document.getElementById("setConfirm").checked,
+  };
 
-  savePrefs(prefs);
   applyLayout(prefs.layout);
+  _updatePlaceholder();
   closeSettings();
-  setStatus("Settings saved");
+
+  // Persist UI prefs to server — await before reporting success
+  try {
+    await api("POST", "/prefs", {
+      provider: prefs.provider,
+      username: prefs.username,
+      layout: prefs.layout,
+      chat: prefs.chat,
+    });
+    setStatus("Settings saved");
+  } catch (e) {
+    setStatus("Error saving settings: " + e.message);
+  }
 }
 
 // ─── Bind UI events ───
 function bindEvents() {
-  document.getElementById("setTemp").addEventListener("input", function() {
-    document.getElementById("tempVal").textContent = this.value;
-  });
-  document.getElementById("setWindow").addEventListener("input", function() {
-    document.getElementById("windowVal").textContent = this.value;
-  });
-
   // Export (v2 JSONL)
   document.getElementById("btnExport").addEventListener("click", function() {
     if (!state) { setStatus("No state to export"); return; }
@@ -733,6 +777,12 @@ function bindEvents() {
 
   // Settings
   document.getElementById("btnSettings").addEventListener("click", openSettings);
+  document.getElementById("setTemp").addEventListener("input", function() {
+    document.getElementById("setTempVal").textContent = this.value;
+  });
+  document.getElementById("setWindow").addEventListener("input", function() {
+    document.getElementById("setWindowVal").textContent = this.value;
+  });
   document.getElementById("settingsOverlay").addEventListener("click", function(e) {
     // Close settings when clicking the background overlay (not the panel itself)
     if (e.target === this) closeSettings();
@@ -752,15 +802,26 @@ function bindEvents() {
   });
 }
 
-// ─── Init: load state from server ───
+// ─── Init: load prefs + state from server ───
 async function init() {
   try {
-    setStatus("Loading state...");
+    setStatus("Loading...");
+
+    // 1) Load prefs from server (config.yaml + state overrides)
+    try {
+      const prefData = await api("GET", "/prefs");
+      prefs = prefData.prefs || prefs;
+    } catch (e) {
+      console.warn("[WikiOracle] Failed to load prefs:", e);
+    }
+
+    // 2) Load provider metadata and populate dropdown
     try {
       const provData = await api("GET", "/providers");
+      _providerMeta = provData.providers || {};
       const sel = document.getElementById("setProvider");
       sel.innerHTML = "";
-      for (const [key, info] of Object.entries(provData.providers)) {
+      for (const [key, info] of Object.entries(_providerMeta)) {
         const opt = document.createElement("option");
         opt.value = key;
         opt.textContent = info.name + (info.model ? ` (${info.model})` : "");
@@ -768,15 +829,17 @@ async function init() {
       }
     } catch {}
 
+    // 3) Apply layout and update placeholder from prefs
+    applyLayout(prefs.layout);
+    _updatePlaceholder();
+
+    // 4) Load state
     const data = await api("GET", "/state");
     state = data.state || {};
     if (!Array.isArray(state.conversations)) state.conversations = [];
 
-    // Restore selected conversation from cookie, then from server state
-    const cookieSelected = _loadSelectedFromCookie();
-    if (cookieSelected && findConversation(state.conversations, cookieSelected)) {
-      selectedConvId = cookieSelected;
-    } else if (state.selected_conversation && findConversation(state.conversations, state.selected_conversation)) {
+    // Restore selected conversation from server state
+    if (state.selected_conversation && findConversation(state.conversations, state.selected_conversation)) {
       selectedConvId = state.selected_conversation;
     } else {
       selectedConvId = null; // root
@@ -794,5 +857,4 @@ async function init() {
 
 // ─── Boot ───
 bindEvents();
-applyLayout(prefs.layout);
 init();

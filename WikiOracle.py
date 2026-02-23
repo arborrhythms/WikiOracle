@@ -8,7 +8,6 @@ deterministic merge/import of exported llm_*.jsonl files.
 Usage:
     # Server mode (default)
     export WIKIORACLE_STATE_FILE="/abs/path/to/llm.jsonl"
-    export WIKIORACLE_SHIM_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
     python WikiOracle.py
 
     # CLI merge mode
@@ -21,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import hmac
 import json
 import os
 import re
@@ -70,7 +68,6 @@ from wikioracle_state import (
 @dataclass
 class Config:
     state_file: Path
-    shim_token: str
     base_url: str = "https://wikioracle.org"
     api_path: str = "/chat/completions"
     bind_host: str = "127.0.0.1"
@@ -99,8 +96,6 @@ def load_config() -> Config:
         os.environ.get("WIKIORACLE_STATE_FILE", str(Path.cwd() / "llm.jsonl"))
     ).expanduser().resolve()
 
-    shim_token = os.environ.get("WIKIORACLE_SHIM_TOKEN", "").strip()
-
     allowed_origins_raw = os.environ.get(
         "WIKIORACLE_ALLOWED_ORIGINS",
         "http://127.0.0.1:8787,http://localhost:8787",
@@ -109,7 +104,6 @@ def load_config() -> Config:
 
     return Config(
         state_file=state_file,
-        shim_token=shim_token,
         base_url=os.environ.get("WIKIORACLE_BASE_URL", "https://wikioracle.org").rstrip("/"),
         api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/chat/completions"),
         bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "127.0.0.1"),
@@ -126,29 +120,84 @@ def load_config() -> Config:
 
 
 # ---------------------------------------------------------------------------
+# config.yaml loader
+# ---------------------------------------------------------------------------
+_CONFIG_YAML_STATUS = ""  # human-readable load status for startup banner
+
+def _load_config_yaml() -> Dict[str, Any]:
+    """Load config.yaml from the project directory (next to WikiOracle.py)."""
+    global _CONFIG_YAML_STATUS
+    try:
+        import yaml
+    except ImportError:
+        _CONFIG_YAML_STATUS = "pyyaml not installed (pip install pyyaml)"
+        return {}
+    cfg_path = Path(__file__).resolve().parent / "config.yaml"
+    if not cfg_path.exists():
+        _CONFIG_YAML_STATUS = f"not found at {cfg_path}"
+        return {}
+    try:
+        with open(cfg_path) as f:
+            data = yaml.safe_load(f) or {}
+        if data:
+            _CONFIG_YAML_STATUS = f"loaded ({len(data)} keys) from {cfg_path}"
+        else:
+            _CONFIG_YAML_STATUS = f"empty or unparseable at {cfg_path}"
+        return data
+    except Exception as exc:
+        _CONFIG_YAML_STATUS = f"parse error: {exc}"
+        return {}
+
+
+_CONFIG_YAML = _load_config_yaml()
+
+
+# ---------------------------------------------------------------------------
 # Provider configuration
 # ---------------------------------------------------------------------------
 def _build_providers() -> Dict[str, Dict[str, Any]]:
+    yaml_providers = _CONFIG_YAML.get("providers", {})
+
     providers: Dict[str, Dict[str, Any]] = {
         "wikioracle": {
             "name": "WikiOracle NanoChat",
             "streaming": True,
         },
-    }
-    if os.getenv("OPENAI_API_KEY"):
-        providers["openai"] = {
+        "openai": {
             "name": "OpenAI",
-            "api_key": os.getenv("OPENAI_API_KEY"),
+            "url": "https://api.openai.com/v1/chat/completions",
+            "api_key": os.getenv("OPENAI_API_KEY", ""),
             "default_model": os.getenv("OPENAI_MODEL", "gpt-4o"),
             "streaming": False,
-        }
-    if os.getenv("ANTHROPIC_API_KEY"):
-        providers["anthropic"] = {
+        },
+        "anthropic": {
             "name": "Anthropic",
-            "api_key": os.getenv("ANTHROPIC_API_KEY"),
+            "url": "https://api.anthropic.com/v1/messages",
+            "api_key": os.getenv("ANTHROPIC_API_KEY", ""),
             "default_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             "streaming": False,
-        }
+        },
+    }
+
+    # Merge config.yaml values (YAML overrides defaults; env vars still win)
+    for key, ycfg in yaml_providers.items():
+        if not isinstance(ycfg, dict):
+            continue
+        if key not in providers:
+            providers[key] = {"name": key, "streaming": False}
+        pcfg = providers[key]
+        if ycfg.get("name"):
+            pcfg["name"] = ycfg["name"]
+        if ycfg.get("username"):
+            pcfg["username"] = ycfg["username"]
+        if ycfg.get("url"):
+            pcfg["url"] = ycfg["url"]
+        if ycfg.get("default_model"):
+            pcfg.setdefault("default_model", ycfg["default_model"])
+        # YAML api_key fills in when no env var is set
+        if ycfg.get("api_key") and not pcfg.get("api_key"):
+            pcfg["api_key"] = ycfg["api_key"]
+
     return providers
 
 
@@ -178,15 +227,6 @@ def _save_state(cfg: Config, state: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Auth helper
 # ---------------------------------------------------------------------------
-def _auth_ok(expected_token: str) -> bool:
-    if not expected_token:
-        return True  # No token configured = no auth required
-    header = flask_request.headers.get("Authorization", "")
-    if not header.startswith("Bearer "):
-        return False
-    return hmac.compare_digest(header[len("Bearer "):], expected_token)
-
-
 # ---------------------------------------------------------------------------
 # Upstream providers (v2: conversation-aware context building)
 # ---------------------------------------------------------------------------
@@ -244,12 +284,28 @@ def _build_messages_for_upstream(
 
     # 4) Current user message
     messages.append({"role": "user", "content": user_message})
+
+    # 5) Debug testpoint: ask LLM to identify itself
+    if DEBUG_MODE:
+        messages.append({
+            "role": "user",
+            "content": "[TESTPOINT] In your reply, start with a single line: "
+                       "'I am [YOUR_MODEL_NAME].' where YOUR_MODEL_NAME is your "
+                       "actual model identifier (e.g. GPT-4o, Claude, etc). "
+                       "Then continue with your normal answer."
+        })
+
     return messages
 
 
 def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str:
     """Call NanoChat /chat/completions (SSE streaming, buffered)."""
     url = cfg.base_url + cfg.api_path
+    if DEBUG_MODE:
+        print(f"[DEBUG] NanoChat → {url}")
+        print(f"[DEBUG] NanoChat messages ({len(messages)}):")
+        for i, m in enumerate(messages):
+            print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
     payload = {"messages": messages, "temperature": temperature, "max_tokens": 1024}
     resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
                          timeout=cfg.timeout_s, stream=True)
@@ -272,11 +328,16 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str
 
 
 def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -> str:
-    url = "https://api.openai.com/v1/chat/completions"
+    url = provider_cfg.get("url", "https://api.openai.com/v1/chat/completions")
     payload = {
         "model": provider_cfg.get("default_model", "gpt-4o"),
         "messages": messages, "temperature": temperature, "max_tokens": 2048,
     }
+    if DEBUG_MODE:
+        print(f"[DEBUG] OpenAI → {url}")
+        print(f"[DEBUG] OpenAI messages ({len(messages)}):")
+        for i, m in enumerate(messages):
+            print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {provider_cfg['api_key']}"}
     resp = requests.post(url, json=payload, headers=headers, timeout=120)
     if resp.status_code >= 400:
@@ -314,29 +375,60 @@ def _call_anthropic(messages: List[Dict], temperature: float, provider_cfg: Dict
         payload["system"] = system_text
     if temperature > 0:
         payload["temperature"] = temperature
+    url = provider_cfg.get("url", "https://api.anthropic.com/v1/messages")
+    if DEBUG_MODE:
+        print(f"[DEBUG] Anthropic → {url}")
+        print(f"[DEBUG] Anthropic system: {system_text[:200] if system_text else '(none)'}")
+        print(f"[DEBUG] Anthropic messages ({len(cleaned)}):")
+        for i, m in enumerate(cleaned):
+            print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
     headers = {
         "Content-Type": "application/json",
         "x-api-key": provider_cfg["api_key"],
         "anthropic-version": "2023-06-01",
     }
-    resp = requests.post("https://api.anthropic.com/v1/messages", json=payload,
-                         headers=headers, timeout=120)
+    resp = requests.post(url, json=payload, headers=headers, timeout=120)
     if resp.status_code >= 400:
         return f"[Error from Anthropic: HTTP {resp.status_code}] {resp.text[:500]}"
     blocks = resp.json().get("content", [])
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or "[No content]"
 
 
-def _call_provider(cfg: Config, messages: List[Dict], temperature: float, provider: str) -> str:
+def _call_provider(cfg: Config, messages: List[Dict], temperature: float,
+                    provider: str, client_api_key: str = "",
+                    client_model: str = "") -> str:
     if provider == "wikioracle":
+        if DEBUG_MODE:
+            print(f"[DEBUG] → _call_nanochat (wikioracle.org)")
         return _call_nanochat(cfg, messages, temperature)
     pcfg = PROVIDERS.get(provider)
     if not pcfg:
         return f"[Unknown provider: {provider}. Available: {', '.join(PROVIDERS.keys())}]"
+    # Build effective config: client prefs override defaults
+    effective_cfg = dict(pcfg)
+    if not effective_cfg.get("api_key") and client_api_key:
+        effective_cfg["api_key"] = client_api_key
+    if client_model:
+        effective_cfg["default_model"] = client_model
+    if not effective_cfg.get("api_key"):
+        # Hot-reload config.yaml in case keys were added after server start
+        fresh = _load_config_yaml()
+        fresh_key = (fresh.get("providers", {}).get(provider) or {}).get("api_key", "")
+        if fresh_key:
+            effective_cfg["api_key"] = fresh_key
+            # Update cached PROVIDERS so subsequent calls don't need to reload
+            if provider in PROVIDERS:
+                PROVIDERS[provider]["api_key"] = fresh_key
+        else:
+            return f"[No API key for {provider}. Add it to config.yaml.]"
     if provider == "openai":
-        return _call_openai(messages, temperature, pcfg)
+        if DEBUG_MODE:
+            print(f"[DEBUG] → _call_openai ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
+        return _call_openai(messages, temperature, effective_cfg)
     if provider == "anthropic":
-        return _call_anthropic(messages, temperature, pcfg)
+        if DEBUG_MODE:
+            print(f"[DEBUG] → _call_anthropic ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
+        return _call_anthropic(messages, temperature, effective_cfg)
     return f"[Provider '{provider}' not implemented]"
 
 
@@ -513,10 +605,10 @@ def _fan_out_and_aggregate(
     user_message: str,
     prefs: Dict[str, Any],
     conversation_id: str | None = None,
+    temperature: float = 0.7,
 ) -> tuple:
     trust_entries = state.get("truth", {}).get("trust", [])
     provider_entries = get_provider_entries(trust_entries)
-    temperature = max(0.0, min(2.0, float(prefs.get("temp", 0.7))))
 
     if not provider_entries:
         raise ValueError("No provider trust entries found")
@@ -638,8 +730,7 @@ def create_app(cfg: Config) -> Flask:
 
     @app.route("/info", methods=["GET"])
     def info():
-        if not _auth_ok(cfg.shim_token):
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
         try:
             state = _load_state(cfg)
             return jsonify({
@@ -656,8 +747,7 @@ def create_app(cfg: Config) -> Flask:
 
     @app.route("/state", methods=["GET", "POST"])
     def state_endpoint():
-        if not _auth_ok(cfg.shim_token):
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
         if flask_request.method == "GET":
             try:
                 state = _load_state(cfg)
@@ -681,8 +771,7 @@ def create_app(cfg: Config) -> Flask:
     def chat():
         if flask_request.method == "OPTIONS":
             return ("", 204)
-        if not _auth_ok(cfg.shim_token):
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
 
         body = flask_request.get_json(force=True, silent=True) or {}
         user_msg = (body.get("message") or "").strip()
@@ -690,8 +779,27 @@ def create_app(cfg: Config) -> Flask:
             return jsonify({"ok": False, "error": "missing_message"}), 400
 
         prefs = body.get("prefs", {}) if isinstance(body.get("prefs"), dict) else {}
+        yaml_chat = _CONFIG_YAML.get("chat", {})
         provider = prefs.get("provider", "wikioracle")
-        temperature = max(0.0, min(2.0, float(prefs.get("temp", 0.7))))
+        client_model = (prefs.get("model") or "").strip()
+        print(f"[WikiOracle] Chat request: provider='{provider}' (from client prefs)")
+
+        # Load ui_prefs.chat overrides (Settings dialog → state file)
+        try:
+            _state_for_prefs = _load_state(cfg)
+            ui_chat = _state_for_prefs.get("ui_prefs", {}).get("chat", {})
+        except Exception:
+            ui_chat = {}
+
+        # Priority: per-request prefs > ui_prefs.chat > config.yaml defaults
+        temperature = max(0.0, min(2.0, float(
+            prefs.get("temp", ui_chat.get("temperature", yaml_chat.get("temperature", 0.7)))
+        )))
+        if "tools" not in prefs:
+            prefs["tools"] = {}
+        prefs["tools"].setdefault("rag", ui_chat.get("rag", yaml_chat.get("rag", True)))
+        prefs["tools"].setdefault("url_fetch", ui_chat.get("url_fetch", yaml_chat.get("url_fetch", False)))
+        prefs.setdefault("message_window", ui_chat.get("message_window", yaml_chat.get("message_window", 40)))
 
         # v2 conversation routing
         conversation_id = body.get("conversation_id")  # append to this conversation
@@ -708,15 +816,30 @@ def create_app(cfg: Config) -> Flask:
             dyn_providers = get_provider_entries(trust)
 
             if dyn_providers:
-                response_text, _transient = _fan_out_and_aggregate(
-                    cfg, state, user_msg, prefs, context_conv_id
-                )
                 primary_entry, primary_config = dyn_providers[0]
+                print(f"[WikiOracle] Chat: using DYNAMIC provider '{primary_config.get('name')}' "
+                      f"(from trust entry), secondaries={len(dyn_providers)-1}")
+                response_text, _transient = _fan_out_and_aggregate(
+                    cfg, state, user_msg, prefs, context_conv_id,
+                    temperature=temperature,
+                )
                 llm_provider_name = primary_config.get("name", "unknown")
                 llm_model = primary_config.get("model", "")
             else:
+                context_text = strip_xhtml(state.get("context", ""))
+                print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
+                      f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
+                      f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
                 messages = _build_messages_for_upstream(state, user_msg, prefs, context_conv_id)
-                response_text = _call_provider(cfg, messages, temperature, provider)
+                if DEBUG_MODE:
+                    print(f"[DEBUG] Upstream messages ({len(messages)} total):")
+                    for i, m in enumerate(messages):
+                        role = m.get("role", "?")
+                        content = m.get("content", "")
+                        print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
+                response_text = _call_provider(cfg, messages, temperature, provider, "", client_model)
+                if DEBUG_MODE:
+                    print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
                 llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
                 llm_model = prefs.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
 
@@ -724,14 +847,12 @@ def create_app(cfg: Config) -> Flask:
             user_content = ensure_xhtml(user_msg)
             assistant_content = ensure_xhtml(response_text)
             now = utc_now_iso()
-            username = prefs.get("username", "User")
-            provider_name = llm_provider_name
-            model_name = llm_model
-            llm_username = f"{provider_name} ({model_name})" if model_name else provider_name
+            user_display = _CONFIG_YAML.get("user", {}).get("name", "User")
+            llm_display = llm_provider_name  # provider.name from YAML
 
             user_entry = {
                 "role": "user",
-                "username": username,
+                "username": user_display,
                 "timestamp": now,
                 "content": user_content,
             }
@@ -739,7 +860,7 @@ def create_app(cfg: Config) -> Flask:
 
             assistant_entry = {
                 "role": "assistant",
-                "username": llm_username,
+                "username": llm_display,
                 "timestamp": now,
                 "content": assistant_content,
             }
@@ -790,8 +911,7 @@ def create_app(cfg: Config) -> Flask:
     def merge_endpoint():
         if flask_request.method == "OPTIONS":
             return ("", 204)
-        if not _auth_ok(cfg.shim_token):
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
 
         body = flask_request.get_json(force=True, silent=True) or {}
 
@@ -842,8 +962,7 @@ def create_app(cfg: Config) -> Flask:
 
     @app.route("/providers", methods=["GET"])
     def providers():
-        if not _auth_ok(cfg.shim_token):
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
         result = {}
         for key, pcfg in PROVIDERS.items():
             result[key] = {
@@ -852,6 +971,56 @@ def create_app(cfg: Config) -> Flask:
                 "model": pcfg.get("default_model", ""),
             }
         return jsonify({"providers": result})
+
+    @app.route("/prefs", methods=["GET", "POST"])
+    def prefs_endpoint():
+        """Serve and persist UI preferences (config.yaml defaults + state overrides)."""
+
+
+        yaml_ui = _CONFIG_YAML.get("ui", {})
+        yaml_chat = _CONFIG_YAML.get("chat", {})
+
+        if flask_request.method == "GET":
+            try:
+                state = _load_state(cfg)
+            except Exception:
+                state = {}
+            overrides = state.get("ui_prefs", {})
+            chat_overrides = overrides.get("chat", {})
+            provider = overrides.get("provider", yaml_ui.get("default_provider", "wikioracle"))
+            prefs = {
+                "provider": provider,
+                "layout": overrides.get("layout", yaml_ui.get("layout", "flat")),
+                "username": overrides.get("username", _CONFIG_YAML.get("user", {}).get("name", "User")),
+                "chat": {
+                    "temperature": chat_overrides.get("temperature", yaml_chat.get("temperature", 0.7)),
+                    "message_window": chat_overrides.get("message_window", yaml_chat.get("message_window", 40)),
+                    "rag": chat_overrides.get("rag", yaml_chat.get("rag", True)),
+                    "url_fetch": chat_overrides.get("url_fetch", yaml_chat.get("url_fetch", False)),
+                    "confirm_actions": chat_overrides.get("confirm_actions", yaml_chat.get("confirm_actions", False)),
+                },
+            }
+            return jsonify({"prefs": prefs})
+        else:
+            # POST: save overrides to state.ui_prefs
+            body = flask_request.get_json(force=True, silent=True) or {}
+            try:
+                state = _load_state(cfg)
+                ui_prefs = state.get("ui_prefs", {})
+                for key in ("provider", "layout", "username"):
+                    if key in body:
+                        ui_prefs[key] = body[key]
+                if "chat" in body and isinstance(body["chat"], dict):
+                    chat_prefs = ui_prefs.get("chat", {})
+                    for key in ("temperature", "message_window", "rag", "url_fetch", "confirm_actions"):
+                        if key in body["chat"]:
+                            chat_prefs[key] = body["chat"][key]
+                    ui_prefs["chat"] = chat_prefs
+                state["ui_prefs"] = ui_prefs
+                _save_state(cfg, state)
+                return jsonify({"ok": True})
+            except Exception as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
 
     # Static file serving — all UI assets live in html/ subdirectory
     try:
@@ -906,8 +1075,11 @@ def run_cli_merge(cfg: Config, incoming_files: List[Path]) -> int:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+DEBUG_MODE = False
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WikiOracle local shim")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("serve", help="Run Flask shim server (default)")
     merge_parser = sub.add_parser("merge", help="Merge llm_*.jsonl files into state")
@@ -916,7 +1088,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    global DEBUG_MODE
     args = parse_args()
+    DEBUG_MODE = args.debug
     cfg = load_config()
 
     if args.cmd == "merge":
@@ -934,7 +1108,23 @@ def main() -> int:
     print(f"{'='*60}")
     print(f"  State file : {cfg.state_file}")
     print(f"  Bind       : {cfg.bind_host}:{cfg.bind_port}")
-    print(f"  Providers  : {', '.join(PROVIDERS.keys())}")
+    prov_info = []
+    for k, p in PROVIDERS.items():
+        has_key = bool(p.get("api_key"))
+        model = p.get("default_model", "")
+        url = p.get("url", "")
+        status = "ok" if has_key or k == "wikioracle" else "NO KEY"
+        parts = [status]
+        if model:
+            parts.append(model)
+        if url:
+            parts.append(url)
+        prov_info.append(f"{k}({', '.join(parts)})")
+    print(f"  Providers  :")
+    for pi in prov_info:
+        print(f"    {pi}")
+    print(f"  Config YAML: {_CONFIG_YAML_STATUS}")
+    print(f"  Debug      : {'ON' if DEBUG_MODE else 'off'}")
     print(f"  UI         : http://{cfg.bind_host}:{cfg.bind_port}/")
     print(f"{'='*60}\n")
 

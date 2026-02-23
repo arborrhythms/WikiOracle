@@ -3970,3 +3970,8 @@ If you want, I can now write:
   <span>This conversation was exported on 2026-02-23T00:07:20.972Z using <a href="https://echoes.r2bits.com">Echoes</a> by R2bits.</span>
   <span>Export Format Version: 1.0</span>
 </div>
+
+
+---
+## TODO
+- [ ] Re-enable temperature control in settings GUI

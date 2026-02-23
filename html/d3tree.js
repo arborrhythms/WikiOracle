@@ -293,7 +293,7 @@ function renderTree(hierarchyData, callbacks) {
             const srcCount = (d.data.messages || []).length;
             const tgtCount = (_dragTarget.data.messages || []).length;
             const targetLabel = _dragTarget.data.title;
-            if (confirm(`Merge "${d.data.title}" (${srcCount} msgs) into "${targetLabel}" (${tgtCount} msgs)?\nMessages will be combined into one conversation.`)) {
+            if ((typeof confirmAction === "function" ? confirmAction : confirm)(`Merge "${d.data.title}" (${srcCount} msgs) into "${targetLabel}" (${tgtCount} msgs)?\nMessages will be combined into one conversation.`)) {
               if (callbacks.onMerge) callbacks.onMerge(sourceId, targetId);
             }
           }
@@ -320,7 +320,9 @@ function renderTree(hierarchyData, callbacks) {
     if (_clickTimer) clearTimeout(_clickTimer);
     _clickTimer = setTimeout(() => {
       if (d.data.id === "root") {
+        // Click root → toggle context editor; also navigate to root
         if (callbacks.onNavigate) callbacks.onNavigate(null);
+        if (callbacks.onEditContext) callbacks.onEditContext();
       } else {
         if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
       }

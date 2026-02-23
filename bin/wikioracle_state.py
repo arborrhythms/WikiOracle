@@ -479,6 +479,9 @@ def state_to_jsonl(state: dict) -> str:
     sel = state.get("selected_conversation")
     if sel is not None:
         header["selected_conversation"] = sel
+    ui_prefs = state.get("ui_prefs")
+    if ui_prefs:
+        header["ui_prefs"] = ui_prefs
     lines.append(json.dumps(header, ensure_ascii=False))
 
     # Conversation records (flattened)
@@ -531,6 +534,8 @@ def jsonl_to_state(text: str) -> dict:
             state["truth"]["retrieval_prefs"] = obj.get("retrieval_prefs", {})
             if "selected_conversation" in obj:
                 state["selected_conversation"] = obj["selected_conversation"]
+            if "ui_prefs" in obj and isinstance(obj["ui_prefs"], dict):
+                state["ui_prefs"] = obj["ui_prefs"]
             # v1 compat
             if "active_path" in obj:
                 state["_v1_active_path"] = obj["active_path"]

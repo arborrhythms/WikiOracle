@@ -45,19 +45,18 @@ body { display: flex; flex-direction: column; }
 .btn:hover { background: var(--accent-light); }
 
 /* Tree view (top-down hierarchy) */
-.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 220px; min-height: 120px; overflow: hidden; }
-.tree-container svg { width: 100%; height: 100%; display: block; }
+.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 220px; min-height: 120px; overflow: auto; }
+.tree-container svg { display: block; min-width: 100%; min-height: 100%; }
 .tree-tooltip { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.72rem; pointer-events: none; z-index: 10; max-width: 240px; word-wrap: break-word; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.4; }
 
 /* Chat */
 .chat-container { flex: 1; overflow-y: auto; }
-.chat-wrapper { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem 6rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
+.chat-wrapper { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
 .chat-placeholder { color: var(--fg-muted); font-size: 0.9rem; text-align: center; padding: 3rem 1rem; }
 .message { display: flex; flex-direction: column; margin-bottom: 0.25rem; position: relative; }
 .msg-meta { font-size: 0.75rem; color: var(--fg-muted); margin-bottom: 0.15rem; padding: 0 0.25rem; }
 .msg-bubble { padding: 0.7rem 1rem; border-radius: 12px; max-width: 85%; line-height: 1.5; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
-.message.user .msg-bubble { background: var(--bubble-user); align-self: flex-end; border-bottom-right-radius: 4px; }
-.message.user .msg-meta { text-align: right; }
+.message.user .msg-bubble { background: var(--bubble-user); align-self: flex-start; border-bottom-left-radius: 4px; }
 .message.assistant .msg-bubble { background: var(--bubble-assistant); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; }
 
 /* Message drag reorder */
@@ -67,7 +66,7 @@ body { display: flex; flex-direction: column; }
 .message[draggable=true]:active { cursor: grabbing; }
 
 /* Input */
-.input-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 0.75rem 1rem; }
+.input-bar { flex-shrink: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 0.75rem 1rem; }
 .input-wrapper { max-width: 48rem; margin: 0 auto; display: flex; gap: 0.5rem; }
 .input-wrapper textarea { flex: 1; padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; font-family: inherit; resize: none; max-height: 120px; line-height: 1.4; }
 .send-btn { padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 0.95rem; cursor: pointer; transition: opacity 0.15s; }
@@ -82,8 +81,19 @@ body { display: flex; flex-direction: column; }
 .tree-context-menu .ctx-item.ctx-danger:hover { background: #fef2f2; color: #dc2626; }
 .tree-context-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
 
-/* Status bar */
-.status-bar { font-size: 0.75rem; color: var(--fg-muted); text-align: center; padding: 0.25rem; }
+/* Resize divider between tree and chat */
+.resize-divider { flex-shrink: 0; height: 6px; background: var(--border); cursor: row-resize; position: relative; z-index: 5; transition: background 0.15s; }
+.resize-divider:hover, .resize-divider.active { background: var(--accent); }
+.resize-divider::after { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background: var(--fg-muted); border-radius: 1px; opacity: 0.4; }
+.resize-divider:hover::after, .resize-divider.active::after { opacity: 0.8; background: #fff; }
+
+/* Vertical (side-by-side) layout */
+.main-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+body.layout-vertical .main-area { flex-direction: row; }
+body.layout-vertical .tree-container { height: auto; width: 280px; min-width: 120px; min-height: auto; border-bottom: none; border-right: 1px solid var(--border); }
+body.layout-vertical .resize-divider { height: auto; width: 6px; cursor: col-resize; }
+body.layout-vertical .resize-divider::after { width: 2px; height: 32px; }
+body.layout-vertical .chat-container { flex: 1; }
 </style>
 </head>
 <body>
@@ -132,6 +142,12 @@ body { display: flex; flex-direction: column; }
       <span class="range-val" id="windowVal">40</span>
     </div>
 
+    <label for="setLayout">Layout</label>
+    <select id="setLayout">
+      <option value="horizontal">Horizontal (tree on top)</option>
+      <option value="vertical">Vertical (tree on left)</option>
+    </select>
+
     <label for="setContext">Directory Context (always injected)</label>
     <textarea id="setContext" placeholder="Describe the directory, project, key files..."></textarea>
 
@@ -142,18 +158,21 @@ body { display: flex; flex-direction: column; }
   </div>
 </div>
 
-<!-- Tree view -->
-<div class="tree-container" id="treeContainer">
-  <svg></svg>
-</div>
+<!-- Main area (tree + divider + chat) -->
+<div class="main-area" id="mainArea">
+  <!-- Tree view -->
+  <div class="tree-container" id="treeContainer">
+    <svg></svg>
+  </div>
 
-<!-- Chat area -->
-<div class="chat-container" id="chatContainer">
-  <div class="chat-wrapper" id="chatWrapper"></div>
-</div>
+  <!-- Draggable divider -->
+  <div class="resize-divider" id="resizeDivider"></div>
 
-<!-- Status -->
-<div class="status-bar" id="statusBar">Ready</div>
+  <!-- Chat area -->
+  <div class="chat-container" id="chatContainer">
+    <div class="chat-wrapper" id="chatWrapper"></div>
+  </div>
+</div>
 
 <!-- Input -->
 <div class="input-bar">
@@ -167,7 +186,55 @@ body { display: flex; flex-direction: column; }
 <input type="file" id="fileImport" accept=".json,.jsonl" style="display:none">
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="d3tree.js?v=10"></script>
-<script src="wikioracle.js?v=13"></script>
+<script src="d3tree.js?v=12"></script>
+<script src="wikioracle.js?v=15"></script>
+<script>
+// Draggable divider between tree and chat (supports horizontal + vertical layout)
+(function() {
+  const divider = document.getElementById("resizeDivider");
+  const tree = document.getElementById("treeContainer");
+  let dragging = false, startPos = 0, startSize = 0;
+
+  function isVertical() {
+    return document.body.classList.contains("layout-vertical");
+  }
+
+  divider.addEventListener("mousedown", function(e) {
+    e.preventDefault();
+    dragging = true;
+    if (isVertical()) {
+      startPos = e.clientX;
+      startSize = tree.offsetWidth;
+    } else {
+      startPos = e.clientY;
+      startSize = tree.offsetHeight;
+    }
+    divider.classList.add("active");
+    document.body.style.cursor = isVertical() ? "col-resize" : "row-resize";
+    document.body.style.userSelect = "none";
+  });
+
+  document.addEventListener("mousemove", function(e) {
+    if (!dragging) return;
+    if (isVertical()) {
+      const newW = Math.max(120, Math.min(window.innerWidth * 0.6, startSize + (e.clientX - startPos)));
+      tree.style.width = newW + "px";
+    } else {
+      const newH = Math.max(60, Math.min(window.innerHeight * 0.7, startSize + (e.clientY - startPos)));
+      tree.style.height = newH + "px";
+    }
+  });
+
+  document.addEventListener("mouseup", function() {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove("active");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    // Re-render tree to fit new size
+    if (typeof renderMessages === "function") renderMessages();
+  });
+})();
+</script>
 </body>
 </html>

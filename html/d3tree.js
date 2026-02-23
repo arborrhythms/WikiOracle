@@ -50,8 +50,9 @@ function renderTree(hierarchyData, callbacks) {
   const svgEl = container.querySelector("svg");
   if (!svgEl) return;
 
-  const width = svgEl.clientWidth || container.clientWidth || 600;
-  const height = svgEl.clientHeight || container.clientHeight || 200;
+  // Use container dimensions (not SVG) — SVG may have auto sizing
+  const width = container.clientWidth || 600;
+  const height = container.clientHeight || 200;
 
   // Tooltip
   if (!_tooltip) {
@@ -72,23 +73,39 @@ function renderTree(hierarchyData, callbacks) {
   // Build hierarchy
   const root = d3.hierarchy(hierarchyData);
 
-  // Top-down tree layout
-  const margin = { top: 20, right: 40, bottom: 20, left: 40 };
-  const innerW = width - margin.left - margin.right;
-  const innerH = height - margin.top - margin.bottom;
+  const margin = { top: 20, right: 20, bottom: 20, left: 20 };
+
+  // Size tree to its content — nodes only need enough space for clean edges
+  const leaves = root.leaves().length || 1;
+  const depthCount = root.height;
+  const needW = leaves * 100;                  // ~100px per leaf for breadth
+  const needH = (depthCount + 1) * 60;        // ~60px per depth level
 
   const treeLayout = d3.tree()
-    .size([innerW, innerH])
+    .size([needW, needH])
     .separation((a, b) => (a.parent === b.parent ? 1.2 : 1.8));
   treeLayout(root);
+
+  // Content box
+  const contentW = needW + margin.left + margin.right;
+  const contentH = needH + margin.top + margin.bottom;
+
+  // SVG fills the container (at minimum), or expands for scrolling if content is larger
+  const svgW = Math.max(width, contentW);
+  const svgH = Math.max(height, contentH);
 
   // Clear and draw
   const svg = d3.select(svgEl);
   svg.selectAll("*").remove();
-  svg.attr("viewBox", `0 0 ${width} ${height}`);
+  svg.attr("viewBox", `0 0 ${svgW} ${svgH}`)
+     .attr("width", svgW).attr("height", svgH);
+
+  // Center the tree content within the SVG
+  const offsetX = (svgW - contentW) / 2 + margin.left;
+  const offsetY = (svgH - contentH) / 2 + margin.top;
 
   const g = svg.append("g")
-    .attr("transform", `translate(${margin.left},${margin.top})`);
+    .attr("transform", `translate(${offsetX},${offsetY})`);
 
   // Links — curved top-down
   g.selectAll(".conv-link")

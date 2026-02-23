@@ -27,6 +27,7 @@ const DEFAULT_PREFS = {
   tools: { rag: true, url_fetch: false },
   truth: { max_entries: 8, min_certainty: 0.2 },
   message_window: 40,
+  layout: "horizontal",
 };
 
 function loadPrefs() {
@@ -41,6 +42,22 @@ function savePrefs(obj) {
 }
 
 let prefs = loadPrefs();
+
+function applyLayout(layout) {
+  const tree = document.getElementById("treeContainer");
+  if (layout === "vertical") {
+    document.body.classList.add("layout-vertical");
+    // Reset height, use width for vertical
+    tree.style.height = "";
+    if (!tree.style.width) tree.style.width = "280px";
+  } else {
+    document.body.classList.remove("layout-vertical");
+    // Reset width, use height for horizontal
+    tree.style.width = "";
+    if (!tree.style.height) tree.style.height = "220px";
+  }
+  if (typeof renderMessages === "function") renderMessages();
+}
 
 // ─── Token (stored in localStorage, not cookie) ───
 function getToken() { return localStorage.getItem("wo_token") || ""; }
@@ -409,7 +426,8 @@ function renderMessages() {
 }
 
 function setStatus(text) {
-  document.getElementById("statusBar").textContent = text;
+  // Status bar removed — log to console for debugging
+  console.log("[WikiOracle]", text);
 }
 
 // ─── Send message ───
@@ -535,6 +553,7 @@ function openSettings() {
   document.getElementById("setUrlFetch").checked = prefs.tools?.url_fetch === true;
   document.getElementById("setWindow").value = prefs.message_window || 40;
   document.getElementById("windowVal").textContent = prefs.message_window || 40;
+  document.getElementById("setLayout").value = prefs.layout || "horizontal";
   document.getElementById("setContext").value = state?.context || "";
   document.getElementById("settingsOverlay").classList.add("active");
 }
@@ -553,6 +572,7 @@ function saveSettings() {
     url_fetch: document.getElementById("setUrlFetch").checked,
   };
   prefs.message_window = parseInt(document.getElementById("setWindow").value);
+  prefs.layout = document.getElementById("setLayout").value;
 
   const newContext = document.getElementById("setContext").value.trim();
   if (state && newContext !== state.context) {
@@ -561,6 +581,7 @@ function saveSettings() {
   }
 
   savePrefs(prefs);
+  applyLayout(prefs.layout);
   closeSettings();
   setStatus("Settings saved");
 }
@@ -712,6 +733,10 @@ function bindEvents() {
 
   // Settings
   document.getElementById("btnSettings").addEventListener("click", openSettings);
+  document.getElementById("settingsOverlay").addEventListener("click", function(e) {
+    // Close settings when clicking the background overlay (not the panel itself)
+    if (e.target === this) closeSettings();
+  });
 
   // Textarea auto-resize + Enter to send
   const msgInput = document.getElementById("msgInput");
@@ -769,4 +794,5 @@ async function init() {
 
 // ─── Boot ───
 bindEvents();
+applyLayout(prefs.layout);
 init();

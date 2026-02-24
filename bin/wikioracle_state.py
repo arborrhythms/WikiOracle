@@ -27,12 +27,12 @@ from typing import Any, Callable, Iterable
 
 SCHEMA_URL_V2 = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json"
 SCHEMA_URL_V1 = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v1.json"
-SCHEMA_URL = SCHEMA_URL_V2
-SCHEMA_BASENAME = "llm_state_v2.json"
-STATE_VERSION = 2
-STATE_SCHEMA_ID = "wikioracle.llm_state"
+SCHEMA_URL = SCHEMA_URL_V2  # Canonical schema URL for newly written states.
+SCHEMA_BASENAME = "llm_state_v2.json"  # Basename accepted when URL host/path vary.
+STATE_VERSION = 2  # Current supported state grammar version.
+STATE_SCHEMA_ID = "wikioracle.llm_state"  # Stable schema family identifier.
 
-DEFAULT_OUTPUT = ""
+DEFAULT_OUTPUT = ""  # Default output-format instruction when none is configured.
 
 
 class StateValidationError(ValueError):
@@ -43,10 +43,12 @@ class StateValidationError(ValueError):
 # Timestamp helpers
 # ---------------------------------------------------------------------------
 def utc_now_iso() -> str:
+    """Return the current UTC timestamp in canonical ISO-8601 Zulu format."""
     return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _is_iso8601_utc(timestamp: Any) -> bool:
+    """Validate strict YYYY-MM-DDTHH:MM:SSZ timestamp strings."""
     if not isinstance(timestamp, str):
         return False
     try:
@@ -57,12 +59,14 @@ def _is_iso8601_utc(timestamp: Any) -> bool:
 
 
 def _coerce_timestamp(value: Any) -> str:
+    """Return value when valid; otherwise replace with current UTC timestamp."""
     if _is_iso8601_utc(value):
         return str(value)
     return utc_now_iso()
 
 
 def _timestamp_sort_key(timestamp: str) -> tuple:
+    """Convert timestamp into a deterministic sortable key tuple."""
     try:
         dt = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ")
         return (int(dt.replace(tzinfo=timezone.utc).timestamp()), timestamp)
@@ -74,6 +78,7 @@ def _timestamp_sort_key(timestamp: str) -> tuple:
 # Schema helpers
 # ---------------------------------------------------------------------------
 def schema_url_matches(value: Any) -> bool:
+    """Accept v1/v2 schema URLs even if query/hash differs."""
     if not isinstance(value, str) or not value:
         return False
     if value in (SCHEMA_URL_V2, SCHEMA_URL_V1):
@@ -86,6 +91,7 @@ def schema_url_matches(value: Any) -> bool:
 # XHTML helpers
 # ---------------------------------------------------------------------------
 def canonicalize_xhtml(fragment: Any) -> str:
+    """Normalize user content into safe, minimal XHTML-ish fragments."""
     if not isinstance(fragment, str) or not fragment.strip():
         return "<div/>"
     candidate = fragment.strip()
@@ -108,10 +114,12 @@ def canonicalize_xhtml(fragment: Any) -> str:
 
 
 def ensure_xhtml(fragment: Any) -> str:
+    """Public wrapper for canonicalize_xhtml for call-site readability."""
     return canonicalize_xhtml(fragment)
 
 
 def strip_xhtml(content: str) -> str:
+    """Remove tags from XHTML content for title/snippet extraction."""
     return re.sub(r"<[^>]+>", "", content).strip()
 
 
@@ -119,10 +127,12 @@ def strip_xhtml(content: str) -> str:
 # Hashing / ID helpers
 # ---------------------------------------------------------------------------
 def _stable_sha256(text: str) -> str:
+    """Return SHA-256 hex digest for deterministic ID generation."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _message_fingerprint(message: dict) -> str:
+    """Build a stable hash input for message identity derivation."""
     username = str(message.get("username", "")).strip()
     timestamp = str(message.get("time", "")).strip()
     content = canonicalize_xhtml(message.get("content", ""))
@@ -130,6 +140,7 @@ def _message_fingerprint(message: dict) -> str:
 
 
 def _trust_fingerprint(entry: dict) -> str:
+    """Build a stable hash input for trust-entry identity derivation."""
     title = str(entry.get("title", "")).strip()
     timestamp = str(entry.get("time", "")).strip()
     certainty = str(entry.get("certainty", "")).strip()
@@ -138,6 +149,7 @@ def _trust_fingerprint(entry: dict) -> str:
 
 
 def ensure_message_id(message: dict) -> str:
+    """Ensure a message has an ID, deriving one deterministically if missing."""
     msg_id = str(message.get("id", "")).strip()
     if msg_id:
         return msg_id
@@ -147,6 +159,7 @@ def ensure_message_id(message: dict) -> str:
 
 
 def ensure_conversation_id(conv: dict) -> str:
+    """Ensure a conversation has an ID, deriving one from title/first message."""
     cid = str(conv.get("id", "")).strip()
     if cid:
         return cid
@@ -162,6 +175,7 @@ def ensure_conversation_id(conv: dict) -> str:
 
 
 def ensure_trust_id(entry: dict) -> str:
+    """Ensure a trust entry has an ID, deriving one deterministically if missing."""
     trust_id = str(entry.get("id", "")).strip()
     if trust_id:
         return trust_id
@@ -226,6 +240,7 @@ def _normalize_conversation(raw: Any) -> dict:
 
 
 def _normalize_trust_entry(raw: Any) -> dict:
+    """Normalize a trust record and clamp certainty into [0.0, 1.0]."""
     item = dict(raw) if isinstance(raw, dict) else {}
     item["type"] = "trust"
     item["title"] = str(item.get("title", "Trust entry"))
@@ -282,6 +297,7 @@ def migrate_v1_to_v2(v1_state: dict) -> dict:
 
     # Walk chains to group into conversations
     def walk_chain(start_id):
+        """Follow single-child links starting at start_id to collect one chain."""
         msgs = []
         cur = start_id
         while cur:
@@ -297,6 +313,7 @@ def migrate_v1_to_v2(v1_state: dict) -> dict:
         return msgs
 
     def build_conv(start_id):
+        """Build one conversation node (plus child branches) from a chain root."""
         chain = walk_chain(start_id)
         if not chain:
             return None
@@ -658,6 +675,7 @@ def get_ancestor_chain(conversations: list, conv_id: str) -> list:
     Each element is the conversation dict. Returns [] if not found.
     """
     def _search(convs, target, path):
+        """Depth-first search that returns the first root-to-target path found."""
         for conv in convs:
             new_path = path + [conv]
             if conv.get("id") == target:
@@ -735,6 +753,7 @@ def all_message_ids(conversations: list) -> set:
 # Merge: collision-safe
 # ---------------------------------------------------------------------------
 def _resolve_id_collision(desired_id: str, payload: dict, existing: dict, *, prefix: str) -> str:
+    """Resolve ID collisions deterministically with hash and numeric suffixes."""
     if desired_id not in existing:
         return desired_id
     if existing[desired_id] == payload:
@@ -755,6 +774,7 @@ def _flatten_all_conversations(convs: list) -> list:
     """Flatten tree into list of (conv_dict_without_children, parent_id) tuples."""
     result = []
     def _walk(conv_list, parent_id=None):
+        """Traverse all conversations and collect flat node/parent tuples."""
         for conv in conv_list:
             flat = {k: v for k, v in conv.items() if k != "children"}
             result.append((flat, parent_id))
@@ -764,6 +784,7 @@ def _flatten_all_conversations(convs: list) -> list:
 
 
 def _sort_by_timestamp(items: list) -> list:
+    """Sort records by timestamp then ID for deterministic merge output."""
     return sorted(items, key=lambda x: (_timestamp_sort_key(x.get("time", "")), x.get("id", "")))
 
 
@@ -795,6 +816,7 @@ def extract_context_deltas(conversations: Iterable[dict], limit: int = 12) -> li
 
 
 def build_context_draft(base_context: str, deltas: list, max_context_chars: int = 8000) -> str:
+    """Append merge deltas to base context, capped by max_context_chars."""
     base = ensure_xhtml(base_context)
     if not deltas:
         return base
@@ -888,6 +910,7 @@ def merge_many_states(
     keep_base_context: bool = True,
     context_rewriter: Callable | None = None,
 ) -> tuple:
+    """Merge multiple incoming states sequentially and return merge history."""
     current = ensure_minimal_state(base_raw, strict=True)
     history: list = []
     for incoming in incoming_states:
@@ -934,6 +957,7 @@ def resolve_cwd(messages: list, active_path: list | None = None) -> list:
     if active_path and all(mid in graph["all_ids"] for mid in active_path):
         return list(active_path)
     def _dfs(nid):
+        """Return the longest descendant path that starts at nid."""
         kids = graph["children"].get(nid, [])
         if not kids:
             return [nid]
@@ -985,6 +1009,7 @@ ALLOWED_KEY_DIR = Path.home() / ".wikioracle" / "keys"
 
 
 def parse_provider_block(content: str) -> dict | None:
+    """Parse the first <provider> XML block from trust-entry content."""
     if not isinstance(content, str) or "<provider" not in content:
         return None
     try:
@@ -995,6 +1020,7 @@ def parse_provider_block(content: str) -> dict | None:
     if prov is None:
         return None
     def _text(tag, default=""):
+        """Read and strip child text from provider XML nodes."""
         el = prov.find(tag)
         return (el.text or "").strip() if el is not None else default
     result = {
@@ -1017,6 +1043,7 @@ def parse_provider_block(content: str) -> dict | None:
 
 
 def parse_src_block(content: str) -> dict | None:
+    """Parse the first <src> XML block from trust-entry content."""
     if not isinstance(content, str) or "<src" not in content:
         return None
     try:
@@ -1027,6 +1054,7 @@ def parse_src_block(content: str) -> dict | None:
     if src is None:
         return None
     def _text(tag, default=""):
+        """Read and strip child text from src XML nodes."""
         el = src.find(tag)
         return (el.text or "").strip() if el is not None else default
     return {
@@ -1037,6 +1065,7 @@ def parse_src_block(content: str) -> dict | None:
 
 
 def resolve_api_key(raw_key: str) -> str:
+    """Resolve file:// API keys from allowlisted paths; otherwise return raw value."""
     if not raw_key or not raw_key.startswith("file://"):
         return raw_key
     rel_path = raw_key[len("file://"):]
@@ -1057,6 +1086,7 @@ def resolve_api_key(raw_key: str) -> str:
 
 
 def resolve_src_content(src_config: dict) -> str:
+    """Load file-backed <src> content from allowlisted paths."""
     path = src_config.get("path", "")
     if not path:
         return ""
@@ -1080,6 +1110,7 @@ def resolve_src_content(src_config: dict) -> str:
 
 
 def _provider_sort_key(entry: dict) -> tuple:
+    """Sort trust entries by certainty (desc), timestamp (desc), then ID."""
     certainty = entry.get("certainty", 0.0)
     ts = entry.get("time", "")
     eid = entry.get("id", "")
@@ -1087,6 +1118,7 @@ def _provider_sort_key(entry: dict) -> tuple:
 
 
 def get_provider_entries(trust_entries: list) -> list:
+    """Extract and rank trust entries that contain valid <provider> blocks."""
     result = []
     for entry in trust_entries:
         prov = parse_provider_block(entry.get("content", ""))
@@ -1097,6 +1129,7 @@ def get_provider_entries(trust_entries: list) -> list:
 
 
 def get_src_entries(trust_entries: list) -> list:
+    """Extract and rank trust entries that contain valid <src> blocks."""
     result = []
     for entry in trust_entries:
         src = parse_src_block(entry.get("content", ""))
@@ -1107,5 +1140,6 @@ def get_src_entries(trust_entries: list) -> list:
 
 
 def get_primary_provider(trust_entries: list) -> tuple | None:
+    """Return the highest-ranked provider entry/config pair, if any."""
     entries = get_provider_entries(trust_entries)
     return entries[0] if entries else None

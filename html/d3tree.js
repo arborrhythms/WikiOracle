@@ -324,7 +324,7 @@ function renderTree(hierarchyData, callbacks) {
       } else {
         if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
       }
-    }, 200);
+    }, 350);
   });
 
   // ─── Double-click / double-tap: context menu ───

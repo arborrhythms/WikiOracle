@@ -78,24 +78,27 @@ from prompt_bundle import (
 # ---------------------------------------------------------------------------
 @dataclass
 class Config:
-    state_file: Path
-    base_url: str = "https://wikioracle.org"
-    api_path: str = "/chat/completions"
-    bind_host: str = "127.0.0.1"
-    bind_port: int = 8787
-    timeout_s: float = 120.0
-    max_state_bytes: int = 5_000_000
-    max_context_chars: int = 40_000
-    reject_symlinks: bool = True
-    auto_merge_on_start: bool = True
-    auto_context_rewrite: bool = False
-    merged_suffix: str = ".merged"
+    """Runtime configuration for the local shim process."""
+
+    state_file: Path  # Canonical on-disk state location (ignored in stateless mode).
+    base_url: str = "https://wikioracle.org"  # Upstream NanoChat-compatible base URL.
+    api_path: str = "/chat/completions"  # Upstream endpoint path appended to base_url.
+    bind_host: str = "127.0.0.1"  # Local interface to bind the Flask server.
+    bind_port: int = 8787  # Local port for browser/UI traffic.
+    timeout_s: float = 120.0  # Network timeout for provider requests.
+    max_state_bytes: int = 5_000_000  # Hard upper bound for serialized state size.
+    max_context_chars: int = 40_000  # Context rewrite cap for merge appendix generation.
+    reject_symlinks: bool = True  # Refuse symlinked state files for safer local ownership.
+    auto_merge_on_start: bool = True  # Auto-import llm_*.jsonl/.json files at startup.
+    auto_context_rewrite: bool = False  # Enable delta-based context append during merges.
+    merged_suffix: str = ".merged"  # Suffix applied to files after successful import.
     allowed_origins: set = field(default_factory=lambda: {
         "http://127.0.0.1:8787", "http://localhost:8787"
     })
 
 
 def _env_bool(name: str, default: bool) -> bool:
+    """Read a permissive boolean env var with a default fallback."""
     raw = os.environ.get(name)
     if raw is None:
         return default
@@ -103,6 +106,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def load_config() -> Config:
+    """Build Config from environment variables with safe defaults."""
     state_file = Path(
         os.environ.get("WIKIORACLE_STATE_FILE", str(Path.cwd() / "llm.jsonl"))
     ).expanduser().resolve()
@@ -179,6 +183,7 @@ def _effective_output_format(prefs: Dict[str, Any], yaml_chat: Dict[str, Any]) -
 # Provider configuration
 # ---------------------------------------------------------------------------
 def _build_providers() -> Dict[str, Dict[str, Any]]:
+    """Construct provider registry from defaults + config.yaml overrides."""
     yaml_providers = _CONFIG_YAML.get("providers", {})
 
     providers: Dict[str, Dict[str, Any]] = {
@@ -231,6 +236,7 @@ PROVIDERS = _build_providers()
 # State I/O wrappers
 # ---------------------------------------------------------------------------
 def _load_state(cfg: Config, *, strict: bool = True) -> Dict[str, Any]:
+    """Load and validate state from cfg.state_file with configured guardrails."""
     return load_state_file(
         cfg.state_file, strict=strict,
         max_bytes=cfg.max_state_bytes,
@@ -239,6 +245,7 @@ def _load_state(cfg: Config, *, strict: bool = True) -> Dict[str, Any]:
 
 
 def _save_state(cfg: Config, state: Dict[str, Any]) -> None:
+    """Normalize, size-check, and atomically persist state to disk."""
     normalized = ensure_minimal_state(state, strict=True)
     normalized["time"] = utc_now_iso()
     serialized = json.dumps(normalized, ensure_ascii=False)
@@ -312,6 +319,7 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str
 
 
 def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -> str:
+    """Call an OpenAI-compatible chat/completions endpoint and return text."""
     url = provider_cfg.get("url", "https://api.openai.com/v1/chat/completions")
     payload = {
         "model": provider_cfg.get("default_model", "gpt-4o"),
@@ -445,6 +453,7 @@ def _call_provider(cfg: Config, bundle: PromptBundle | None, temperature: float,
 def _call_dynamic_provider(
     provider_config: dict, messages: List[Dict], temperature: float, cfg: Config,
 ) -> str:
+    """Route a trust-entry provider config to Anthropic, NanoChat, or OpenAI path."""
     api_url = provider_config.get("api_url", "")
     raw_key = provider_config.get("api_key", "")
     model = provider_config.get("model", "")
@@ -465,6 +474,7 @@ def _call_dynamic_openai(
     api_url: str, api_key: str, model: str,
     messages: List[Dict], temperature: float, timeout: int, max_tokens: int,
 ) -> str:
+    """Call a dynamic OpenAI-compatible endpoint from a <provider> trust entry."""
     url = api_url or "https://api.openai.com/v1/chat/completions"
     payload = {"model": model or "gpt-4o", "messages": messages,
                "temperature": temperature, "max_tokens": max_tokens}
@@ -481,6 +491,7 @@ def _call_dynamic_anthropic(
     api_url: str, api_key: str, model: str,
     messages: List[Dict], temperature: float, timeout: int, max_tokens: int,
 ) -> str:
+    """Call a dynamic Anthropic endpoint from a <provider> trust entry."""
     system_text = ""
     api_messages = []
     for msg in messages:
@@ -557,6 +568,7 @@ def _fan_out_and_aggregate(
     provider_sources: List[Source] = []
     if secondaries:
         def _call_for_eval(pconfig, messages):
+            """Adapter used by evaluate_providers for secondary fan-out calls."""
             return _call_dynamic_provider(pconfig, messages, temperature, cfg)
 
         provider_sources = evaluate_providers(
@@ -619,6 +631,7 @@ def _fan_out_and_aggregate(
 # Merge scan
 # ---------------------------------------------------------------------------
 def _scan_and_merge_imports(cfg: Config) -> Dict[str, Any]:
+    """Auto-merge import candidates beside state_file and emit a merge report."""
     report: Dict[str, Any] = {"found": 0, "merged": 0, "errors": [], "files": []}
     if not cfg.auto_merge_on_start:
         return report
@@ -658,12 +671,14 @@ def _scan_and_merge_imports(cfg: Config) -> Dict[str, Any]:
 # Flask app factory
 # ---------------------------------------------------------------------------
 def create_app(cfg: Config, url_prefix: str = "") -> Flask:
+    """Create and configure the WikiOracle Flask application instance."""
     app = Flask(__name__, static_folder=None)
     startup_merge_report = _scan_and_merge_imports(cfg) if not STATELESS_MODE else {}
 
     # CORS
     @app.after_request
     def add_cors_headers(response):
+        """Apply restrictive CORS headers for approved local origins."""
         origin = flask_request.headers.get("Origin", "")
         if origin and origin in cfg.allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -674,10 +689,12 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/health", methods=["GET"])
     def health():
+        """Simple liveness endpoint for local health checks."""
         return jsonify({"ok": True})
 
     @app.route(url_prefix + "/server_info", methods=["GET"])
     def server_info():
+        """Expose server-mode flags that do not require state access."""
         return jsonify({
             "stateless": STATELESS_MODE,
             "url_prefix": url_prefix,
@@ -685,6 +702,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/info", methods=["GET"])
     def info():
+        """Return state/schema/provider metadata for UI diagnostics."""
 
         try:
             state = _load_state(cfg)
@@ -702,19 +720,27 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/state", methods=["GET", "POST"])
     def state_endpoint():
+        """Read or replace local state depending on HTTP method."""
+        global _MEMORY_STATE
 
         if flask_request.method == "GET":
             try:
+                if STATELESS_MODE and _MEMORY_STATE is not None:
+                    return jsonify({"state": _MEMORY_STATE})
                 state = _load_state(cfg)
+                if STATELESS_MODE:
+                    _MEMORY_STATE = state
                 return jsonify({"state": state})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
         else:
-            if STATELESS_MODE:
-                return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
             data = flask_request.get_json(force=True, silent=True)
             if not isinstance(data, dict):
                 return jsonify({"ok": False, "error": "invalid_state"}), 400
+            if STATELESS_MODE:
+                # Update in-memory state without writing to disk
+                _MEMORY_STATE = data
+                return jsonify({"ok": True})
             version = data.get("version")
             if version not in (1, 2):
                 return jsonify({"ok": False, "error": "unsupported_version"}), 400
@@ -726,6 +752,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/chat", methods=["POST", "OPTIONS"])
     def chat():
+        """Process a chat turn, update conversation state, and return reply text."""
         if flask_request.method == "OPTIONS":
             return ("", 204)
 
@@ -762,7 +789,14 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         branch_from = body.get("branch_from")           # create child of this conversation
 
         try:
-            state = _load_state(cfg)
+            global _MEMORY_STATE
+            if STATELESS_MODE and _MEMORY_STATE is not None:
+                import copy
+                state = copy.deepcopy(_MEMORY_STATE)
+            else:
+                state = _load_state(cfg)
+                if STATELESS_MODE:
+                    _MEMORY_STATE = state
             user_timestamp = utc_now_iso()
 
             # Determine which conversation to use for upstream context
@@ -861,7 +895,9 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
             state["conversations"] = conversations
 
-            if not STATELESS_MODE:
+            if STATELESS_MODE:
+                _MEMORY_STATE = state
+            else:
                 _save_state(cfg, state)
                 # Reload after save to get normalized state
                 state = _load_state(cfg)
@@ -872,6 +908,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/merge", methods=["POST", "OPTIONS"])
     def merge_endpoint():
+        """Merge imported state payloads/files into the canonical local state."""
         if flask_request.method == "OPTIONS":
             return ("", 204)
         if STATELESS_MODE:
@@ -983,6 +1020,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/providers", methods=["GET"])
     def providers():
+        """Expose non-secret provider metadata for UI model selectors."""
 
         result = {}
         for key, pcfg in PROVIDERS.items():
@@ -1060,6 +1098,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/", methods=["GET"])
     def ui_index():
+        """Serve the UI entrypoint page."""
         ui_path = ui_dir / "index.html"
         if ui_path.exists():
             return send_from_directory(str(ui_dir), "index.html")
@@ -1067,6 +1106,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/<path:filename>", methods=["GET"])
     def static_files(filename):
+        """Serve whitelisted static asset extensions from html/."""
         safe_ext = {".html", ".css", ".js", ".svg", ".png", ".ico", ".json", ".jsonl"}
         if Path(filename).suffix.lower() in safe_ext:
             fp = (ui_dir / filename).resolve()
@@ -1081,6 +1121,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 # CLI merge
 # ---------------------------------------------------------------------------
 def run_cli_merge(cfg: Config, incoming_files: List[Path]) -> int:
+    """CLI path: merge one or more incoming state files and persist result."""
     base = _load_state(cfg, strict=False)
     summaries: List[Dict] = []
 
@@ -1107,8 +1148,10 @@ def run_cli_merge(cfg: Config, incoming_files: List[Path]) -> int:
 # ---------------------------------------------------------------------------
 DEBUG_MODE = False
 STATELESS_MODE = False
+_MEMORY_STATE = None  # In-memory state for stateless mode (persists across requests)
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for serve/merge execution modes."""
     parser = argparse.ArgumentParser(description="WikiOracle local shim")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("--stateless", action="store_true",
@@ -1123,6 +1166,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Entrypoint for server startup and one-shot CLI merge execution."""
     global DEBUG_MODE, STATELESS_MODE
     args = parse_args()
     DEBUG_MODE = args.debug

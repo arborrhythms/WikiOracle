@@ -29,10 +29,10 @@ from wikioracle_state import DEFAULT_OUTPUT  # noqa: F401
 @dataclass
 class Source:
     """A single retrieved trust entry with certainty score."""
-    source_id: str
-    title: str
-    certainty: float
-    content: str
+    source_id: str  # Stable entry identifier used for traceability.
+    title: str  # Human-readable source label shown to the model/user.
+    certainty: float  # Confidence score used in ranking/display.
+    content: str  # Plaintext/XHTML snippet injected into prompts.
     kind: str = "fact"          # "fact" | "provider" | "src" | "url" | "transient"
     time: str = ""
 
@@ -48,12 +48,12 @@ class PromptBundle:
         query:    current user message
         output:   short instruction describing the output format
     """
-    system: str = ""
-    history: List[Dict[str, str]] = field(default_factory=list)
-    sources: List[Source] = field(default_factory=list)
-    transient_sources: List[Source] = field(default_factory=list)
-    query: str = ""
-    output: str = ""
+    system: str = ""  # Global instructions/context.
+    history: List[Dict[str, str]] = field(default_factory=list)  # Prior turns on active path.
+    sources: List[Source] = field(default_factory=list)  # Ranked retrieval evidence.
+    transient_sources: List[Source] = field(default_factory=list)  # Legacy ad hoc provider snippets.
+    query: str = ""  # Current user message.
+    output: str = ""  # Output-format guidance appended to prompts.
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +183,7 @@ def evaluate_providers(
     results: List[Source] = []
 
     def _evaluate_one(pair):
+        """Evaluate one provider entry and convert output to a Source object."""
         entry, pconfig = pair
         try:
             response = call_fn(pconfig, messages)

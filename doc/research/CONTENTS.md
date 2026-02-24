@@ -1,5 +1,5 @@
 # CONTENTS
-Generated: 2026-01-25
+Updated: 2026-02-24
 
 This directory contains short, technical summaries on truthfulness, hallucination reduction, epistemic grounding, and verification for large language models, plus converted arXiv papers and project notes.
 
@@ -11,10 +11,9 @@ This directory contains short, technical summaries on truthfulness, hallucinatio
 5. Epistemic calibration and assertiveness (`Ghafouri2024_EpistemicIntegrity.md`)
 6. Honesty and knowledge boundaries (`Li2024_HonestySurvey.md`, `Li2024_KnowledgeBoundary.md`)
 
-## Core packet docs
-- `README.md`: main narrative packet summary and usage guidance.
-- `README_DETAILED.md`: deployment and architecture notes for WikiOracle/NanoChat workflow.
+## Indexing
 - `CONTENTS.md`: this index file.
+- Top-level project context lives in `../CONTENTS.md` and the repository `README.md`.
 
 ## Survey and methods summaries
 - `Huang2023_HallucinationSurvey.md`: A Survey on Hallucination in Large Language Models (2023), https://arxiv.org/abs/2311.05232
@@ -34,3 +33,4 @@ This directory contains short, technical summaries on truthfulness, hallucinatio
 
 ## Additional notes
 - `Concept_Note_AlecRogers.md`: project-specific concept note.
+- `Apertus_Small_Compute_Request.md`: proposal draft for small-compute access.

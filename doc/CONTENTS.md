@@ -1,5 +1,9 @@
 # CONTENTS
-- `WhatIsTruth.md`: short conceptual note on truth and consistency goals for the project.
-- `WikiOracle.md`: project framing and core systems claims for the WikiOracle initiative.
-- `guidance.md`: implementation/policy guidance used during project planning.
-- `Apertus_Small_Compute_Request.md`: application for compute at SwissAI
+Updated: 2026-02-24
+
+- `WhatIsTruth.md`: compact note on truth criteria and consistency goals.
+- `WikiOracle.md`: project framing and high-level architecture direction.
+- `HowToEnsureSafety.md`: safety-focused constraints and operational guidance.
+- `architecture.md`: system-level architecture notes for local shim + training/deploy flow.
+- `display.md`: display/rendering notes for state and UI representation.
+- `research/CONTENTS.md`: index of research notes, surveys, and converted papers.

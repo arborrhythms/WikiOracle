@@ -20,6 +20,7 @@ function _saveLocalPrefs() {
 }
 
 const _STATE_KEY = "wikioracle_state";
+const _CONFIG_KEY = "wikioracle_config";
 
 function _loadLocalState() {
   try {
@@ -29,7 +30,14 @@ function _loadLocalState() {
 }
 
 function _saveLocalState() {
-  try { localStorage.setItem(_STATE_KEY, JSON.stringify({ context: state.context, output: state.output })); } catch {}
+  try { localStorage.setItem(_STATE_KEY, JSON.stringify(state)); } catch {}
+}
+
+// Persist state: always POST to server (keeps _MEMORY_STATE in sync);
+// also save to localStorage in stateless mode as client-side backup.
+function _persistState() {
+  if (_serverInfo.stateless) _saveLocalState();
+  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
 }
 
 function applyLayout(layout) {
@@ -114,14 +122,14 @@ function navigateToNode(nodeId) {
   state.selected_conversation = nodeId;
   renderMessages();
   // Persist selected_conversation to server
-  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  _persistState();
 }
 
 function branchFromNode(convId) {
-  // Double-click a node → show empty chat, pending branch parent set
+  // Double-click a node → show empty chat, highlight the branch-from node
   if (!state || !convId) return;
   _pendingBranchParent = convId;
-  selectedConvId = null; // show empty chat
+  selectedConvId = convId; // keep branch-from node highlighted in tree
   renderMessages();
   const conv = findConversation(state.conversations || [], convId);
   const label = conv ? conv.title.slice(0, 40) : convId.slice(0, 12);
@@ -155,7 +163,7 @@ function deleteConversation(convId) {
   selectedConvId = null;
   state.selected_conversation = null;
   renderMessages();
-  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  _persistState();
   setStatus(`Deleted "${conv.title}"`);
 }
 
@@ -200,7 +208,7 @@ function mergeConversation(sourceId, targetId) {
   }
 
   renderMessages();
-  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  _persistState();
   setStatus(`Merged "${source.title}" into "${target.title}" (${target.messages.length} messages)`);
 }
 
@@ -226,7 +234,7 @@ function _splitAfterMessage(msgIdx) {
   selectedConvId = newConv.id;
   state.selected_conversation = newConv.id;
   renderMessages();
-  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  _persistState();
   setStatus(`Split after message ${msgIdx + 1} → "${newTitle}"`);
 }
 
@@ -310,7 +318,7 @@ function _moveMessage(fromIdx, toIdx) {
   const [msg] = conv.messages.splice(fromIdx, 1);
   conv.messages.splice(toIdx, 0, msg);
   renderMessages();
-  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  _persistState();
 }
 
 function _deleteMessage(msgIdx) {
@@ -336,7 +344,7 @@ function _deleteMessage(msgIdx) {
     state.selected_conversation = null;
   }
   renderMessages();
-  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  _persistState();
 }
 
 // ─── Spec defaults (cached after first fetch) ───
@@ -394,11 +402,7 @@ function _toggleContextEditor() {
       const currentPlain = (state?.context || "").replace(/<[^>]+>/g, "").trim();
       if (state && newText !== currentPlain) {
         state.context = newText;
-        if (_serverInfo.stateless) {
-          _saveLocalState();
-        } else {
-          api("POST", "/state", state).catch(e => setStatus("Error saving context: " + e.message));
-        }
+        _persistState();
         setStatus("Context saved");
       }
       overlay.classList.remove("active");
@@ -452,11 +456,7 @@ function _toggleOutputEditor() {
       const newText = document.getElementById("outputTextarea").value.trim();
       if (state) {
         state.output = newText;
-        if (_serverInfo.stateless) {
-          _saveLocalState();
-        } else {
-          api("POST", "/state", state).catch(e => setStatus("Error saving output: " + e.message));
-        }
+        _persistState();
         setStatus("Output saved");
       }
       overlay.classList.remove("active");
@@ -481,9 +481,18 @@ function renderMessages() {
 
   const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor, onEditOutput: _toggleOutputEditor };
 
+  // Validate selectedConvId: if it points to a missing conversation, reset to root
+  if (selectedConvId !== null && !findConversation(state.conversations, selectedConvId)) {
+    selectedConvId = null;
+    state.selected_conversation = null;
+  }
+
   // Determine which messages to show
+  // When _pendingBranchParent is set, show empty chat (ready for new branch)
   let visible = [];
-  if (selectedConvId !== null) {
+  if (_pendingBranchParent) {
+    // Empty chat — user is about to type a new branch message
+  } else if (selectedConvId !== null) {
     const conv = findConversation(state.conversations, selectedConvId);
     if (conv) {
       visible = conv.messages || [];
@@ -676,6 +685,7 @@ async function sendMessage() {
       selectedConvId = state.selected_conversation;
     }
 
+    _persistState();
     renderMessages();
     setStatus("Ready");
   } catch (e) {
@@ -756,7 +766,6 @@ async function saveSettings() {
 
 // ─── Config editor (edit config.yaml) ───
 async function _openConfigEditor() {
-  if (_serverInfo.stateless) { setStatus("Editing disabled (stateless mode)"); return; }
   // Close the settings panel first
   closeSettings();
 
@@ -797,13 +806,19 @@ async function _openConfigEditor() {
       const errEl = document.getElementById("configEditorError");
       errEl.style.display = "none";
       try {
-        const resp = await api("POST", "/config", { yaml: textarea.value });
-        if (resp.ok) {
+        if (_serverInfo.stateless) {
+          localStorage.setItem(_CONFIG_KEY, textarea.value);
           overlay.classList.remove("active");
-          setStatus("config.yaml saved");
+          setStatus("config.yaml saved (localStorage)");
         } else {
-          errEl.textContent = resp.error || "Unknown error";
-          errEl.style.display = "block";
+          const resp = await api("POST", "/config", { yaml: textarea.value });
+          if (resp.ok) {
+            overlay.classList.remove("active");
+            setStatus("config.yaml saved");
+          } else {
+            errEl.textContent = resp.error || "Unknown error";
+            errEl.style.display = "block";
+          }
         }
       } catch (e) {
         errEl.textContent = e.message;
@@ -819,11 +834,26 @@ async function _openConfigEditor() {
   textarea.value = "Loading...";
   overlay.classList.add("active");
 
-  try {
-    const data = await api("GET", "/config");
-    textarea.value = data.yaml || "";
-  } catch (e) {
-    textarea.value = "# Error loading config: " + e.message;
+  if (_serverInfo.stateless) {
+    const saved = localStorage.getItem(_CONFIG_KEY);
+    if (saved !== null) {
+      textarea.value = saved;
+    } else {
+      // First open: seed from server's spec defaults
+      try {
+        const data = await api("GET", "/config");
+        textarea.value = data.yaml || "";
+      } catch (e) {
+        textarea.value = "# Error loading config: " + e.message;
+      }
+    }
+  } else {
+    try {
+      const data = await api("GET", "/config");
+      textarea.value = data.yaml || "";
+    } catch (e) {
+      textarea.value = "# Error loading config: " + e.message;
+    }
   }
   textarea.focus();
 }
@@ -1104,11 +1134,7 @@ async function init() {
       console.warn("[WikiOracle] Failed to load server_info:", e);
     }
 
-    // Apply stateless mode to UI elements
-    if (_serverInfo.stateless) {
-      const cfgBtn = document.getElementById("btnEditConfig");
-      if (cfgBtn) { cfgBtn.disabled = true; cfgBtn.title = "Disabled (stateless mode)"; cfgBtn.style.opacity = "0.4"; }
-    }
+    // (stateless mode: config editor uses localStorage — button stays enabled)
 
     // 1) Load prefs: server defaults first, then localStorage overlay in stateless mode
     try {
@@ -1145,15 +1171,22 @@ async function init() {
     applyLayout(prefs.layout);
     _updatePlaceholder();
 
-    // 4) Load state (server defaults, then localStorage overrides in stateless mode)
+    // 4) Load state: server provides seed defaults; localStorage is the full
+    //    persistent copy in stateless mode (conversations, context, output, etc.)
     const data = await api("GET", "/state");
     state = data.state || {};
     if (!Array.isArray(state.conversations)) state.conversations = [];
     if (_serverInfo.stateless) {
       const localState = _loadLocalState();
       if (localState) {
-        if (localState.context != null) state.context = localState.context;
-        if (localState.output != null) state.output = localState.output;
+        // Full override: localStorage IS the state in stateless mode.
+        // Preserve server-provided schema/version, but take everything else from local.
+        const serverVersion = state.version;
+        const serverSchema = state.schema;
+        Object.assign(state, localState);
+        if (serverVersion) state.version = serverVersion;
+        if (serverSchema) state.schema = serverSchema;
+        if (!Array.isArray(state.conversations)) state.conversations = [];
       }
     }
 

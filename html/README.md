@@ -20,6 +20,7 @@ Root (/)
 | File | Purpose |
 |---|---|
 | `index.html` | Single-page app shell — layout, CSS, settings panel |
+| `reading.css` | Shared reading/layout styles for chat and tree panels |
 | `wikioracle.js` | Client logic — state management, API calls, message rendering, drag/context-menu interactions |
 | `d3tree.js` | D3.js tree renderer — hierarchy layout, click/double-click/right-click navigation, drag-to-merge |
 | `404.html` | Fallback error page |

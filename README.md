@@ -55,7 +55,7 @@ Contributions of many kinds are welcome:
 
 ## Installing and Building
 
-The operational details are maintained in `README_DETAILED.md`. The short version:
+Operational details are split across `Makefile`, `remote.py`, and the docs in `doc/`.
 
 - Two-machine deployment model:
   - EC2 GPU instance (ephemeral) for training.
@@ -63,7 +63,7 @@ The operational details are maintained in `README_DETAILED.md`. The short versio
 - Primary orchestration files:
   - `Makefile` for local and remote workflows.
   - `remote.py` for EC2 lifecycle, training orchestration, deployment, and retrieval.
-- NanoChat model code lives in `nanochat/` (submodule).
+- NanoChat model code lives in `nanochat/`.
 
 Prerequisites:
 - Python 3 and `make`.
@@ -82,7 +82,7 @@ Typical install/setup paths:
   - `make data`
   - `make tokenizer`
 
-Remote training/deploy flow (condensed from `README_DETAILED.md`):
+Remote training/deploy flow:
 1. `make remote` (or `make remote-deploy-launch`) launches EC2 and starts training.
 2. Training runs in detached mode and is polled to completion.
 3. Deploy flow (`make remote-deploy-launch` or `make remote-deploy`) has Lightsail pull artifacts from EC2.
@@ -107,8 +107,10 @@ This invokes `WikiOracle.py` via the `WIKIORACLE_APP` Make variable (default: `W
 
 Common runtime environment variables for the local shim:
 - `WIKIORACLE_STATE_FILE` (path to local state file, default: `llm.jsonl`)
-- `WIKIORACLE_SHIM_TOKEN` (bearer token used by the browser client)
-- `WIKIORACLE_BASE_URL` and `WIKIORACLE_API_PATH` (upstream endpoint routing)
+- `WIKIORACLE_BASE_URL` (upstream base URL, default: `https://wikioracle.org`)
+- `WIKIORACLE_API_PATH` (upstream chat path, default: `/chat/chat/completions`)
+- `WIKIORACLE_STATELESS` (set truthy to disable all writes and use in-memory state)
+- `WIKIORACLE_URL_PREFIX` (optional reverse-proxy path prefix)
 
 ## Local Shim & Client-Owned State
 
@@ -119,15 +121,14 @@ WikiOracle includes a local Flask server (`WikiOracle.py`) that enables chatting
 - `WikiOracle.py` — Local shim server (binds to `127.0.0.1:8787`). Proxies chat requests upstream and persists state to a single `llm.jsonl` file. Also supports CLI merge: `python WikiOracle.py merge llm_*.jsonl`
 - `bin/wikioracle_state.py` — State validation, JSONL I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction.
 - `test/test_wikioracle_state.py` — Automated tests for state and merge semantics.
-- `index.html` — Single-page web UI with chat, settings panel (`wo_prefs` cookie), and export/import/merge buttons.
-- `llm.jsonl` — Client-owned state file (line-delimited JSON). See `spec/llm_state_v1.json` for the formal schema.
+- `html/index.html` — Single-page web UI shell with chat, settings, and merge tools.
+- `llm.jsonl` — Client-owned state file (line-delimited JSON). See `spec/llm_state_v2.json` for the formal schema.
 
 **Quickstart:**
 
 ```bash
 export WIKIORACLE_STATE_FILE="/path/to/your/project/llm.jsonl"
-export WIKIORACLE_SHIM_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-pip install flask requests
+pip install -r requirements.txt
 python WikiOracle.py
 ```
 

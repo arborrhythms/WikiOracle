@@ -23,8 +23,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-STATE_DIR = Path(__file__).parent / ".ec2"
-OUTPUT_DIR = Path(__file__).parent / "output"
+STATE_DIR = Path(__file__).parent / ".ec2"  # Local metadata/cache for the active EC2 run.
+OUTPUT_DIR = Path(__file__).parent / "output"  # Retrieved artifacts and generated run summaries.
 
 # EC2 instances are ephemeral — new host key each launch, IPs get recycled.
 # Strict host-key checking would break every run; PEM auth is the real security.
@@ -268,6 +268,7 @@ def deploy_to_wikioracle(args, ec2_key_file, ec2_user, ec2_ip):
 
 
 def cmd_launch(args):
+    """Launch remote training, monitor progress, then retrieve/deploy artifacts."""
     key_file = os.path.expanduser(args.key_file)
     region = args.region
 
@@ -859,12 +860,14 @@ def cmd_deploy(args):
 
 
 def cmd_ssh(args):
+    """Replace current process with an interactive SSH session to the instance."""
     ip = read_state("instance-ip")
     key_file = os.path.expanduser(args.key_file)
     os.execvp("ssh", ssh_cmd(key_file, args.user, ip))
 
 
 def cmd_logs(args):
+    """Replace current process with remote tail -f of the training log."""
     ip = read_state("instance-ip")
     key_file = os.path.expanduser(args.key_file)
     os.execvp("ssh", ssh_cmd(key_file, args.user, ip) + ["tail", "-f", "~/train.log"])
@@ -910,6 +913,7 @@ def detect_stage(key_file, user, ip):
 
 
 def cmd_status(args):
+    """Print current instance/training status and a coarse progress estimate."""
     instance_id = read_state("instance-id")
     ip = read_state("instance-ip")
     key_file = os.path.expanduser(args.key_file)
@@ -1010,6 +1014,7 @@ def _add_wo_args(parser):
 
 
 def main():
+    """Parse CLI args and dispatch to the selected remote workflow command."""
     parser = argparse.ArgumentParser(description="EC2 remote training for NanoChat")
     parser.add_argument("--region", default="us-west-2")
     parser.add_argument("--key-name", default="nanochat-key")

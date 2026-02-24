@@ -32,6 +32,8 @@ SCHEMA_BASENAME = "llm_state_v2.json"
 STATE_VERSION = 2
 STATE_SCHEMA_ID = "wikioracle.llm_state"
 
+DEFAULT_OUTPUT = ""
+
 
 class StateValidationError(ValueError):
     """Raised when state payload shape is incompatible with expectations."""
@@ -122,14 +124,14 @@ def _stable_sha256(text: str) -> str:
 
 def _message_fingerprint(message: dict) -> str:
     username = str(message.get("username", "")).strip()
-    timestamp = str(message.get("timestamp", "")).strip()
+    timestamp = str(message.get("time", "")).strip()
     content = canonicalize_xhtml(message.get("content", ""))
     return _stable_sha256(f"{username}|{timestamp}|{content}")
 
 
 def _trust_fingerprint(entry: dict) -> str:
     title = str(entry.get("title", "")).strip()
-    timestamp = str(entry.get("timestamp", "")).strip()
+    timestamp = str(entry.get("time", "")).strip()
     certainty = str(entry.get("certainty", "")).strip()
     content = canonicalize_xhtml(entry.get("content", ""))
     return _stable_sha256(f"{title}|{timestamp}|{certainty}|{content}")
@@ -153,7 +155,7 @@ def ensure_conversation_id(conv: dict) -> str:
     msgs = conv.get("messages", [])
     seed = title
     if msgs:
-        seed += "|" + str(msgs[0].get("id", "")) + "|" + str(msgs[0].get("timestamp", ""))
+        seed += "|" + str(msgs[0].get("id", "")) + "|" + str(msgs[0].get("time", ""))
     cid = "c_" + _stable_sha256(seed)[:16]
     conv["id"] = cid
     return cid
@@ -176,7 +178,7 @@ def _normalize_inner_message(raw: Any) -> dict:
     item = dict(raw) if isinstance(raw, dict) else {}
     ensure_message_id(item)
     item["username"] = str(item.get("username", "Unknown"))
-    item["timestamp"] = _coerce_timestamp(item.get("timestamp"))
+    item["time"] = _coerce_timestamp(item.get("time"))
     item["content"] = ensure_xhtml(item.get("content", ""))
     # Determine role from username if not set
     role = item.get("role", "")
@@ -193,15 +195,26 @@ def _normalize_inner_message(raw: Any) -> dict:
     return item
 
 
+def _derive_conversation_title(messages: list) -> str:
+    """Derive a title from the first user message, or first message if no user."""
+    first_user = next((m for m in messages if m.get("role") == "user"), None)
+    if first_user:
+        return strip_xhtml(first_user.get("content", ""))[:50] or "(untitled)"
+    if messages:
+        return strip_xhtml(messages[0].get("content", ""))[:50] or "(untitled)"
+    return "(untitled)"
+
+
 def _normalize_conversation(raw: Any) -> dict:
     """Normalize a conversation node."""
     item = dict(raw) if isinstance(raw, dict) else {}
     ensure_conversation_id(item)
-    item["title"] = str(item.get("title", "(untitled)"))
     msgs = item.get("messages", [])
     if not isinstance(msgs, list):
         msgs = []
     item["messages"] = [_normalize_inner_message(m) for m in msgs]
+    # Title is always derived from messages (never stored in JSONL)
+    item["title"] = _derive_conversation_title(item["messages"])
     children = item.get("children", [])
     if not isinstance(children, list):
         children = []
@@ -216,7 +229,7 @@ def _normalize_trust_entry(raw: Any) -> dict:
     item = dict(raw) if isinstance(raw, dict) else {}
     item["type"] = "trust"
     item["title"] = str(item.get("title", "Trust entry"))
-    item["timestamp"] = _coerce_timestamp(item.get("timestamp"))
+    item["time"] = _coerce_timestamp(item.get("time"))
     certainty = item.get("certainty", 0.0)
     try:
         certainty = float(certainty)
@@ -226,10 +239,6 @@ def _normalize_trust_entry(raw: Any) -> dict:
     item["content"] = ensure_xhtml(item.get("content", ""))
     ensure_trust_id(item)
     return item
-
-
-def _normalize_retrieval_prefs(raw: Any) -> dict:
-    return dict(raw) if isinstance(raw, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +265,7 @@ def migrate_v1_to_v2(v1_state: dict) -> dict:
     children: dict = {}
     root_ids: list = []
     ordered = sorted(messages, key=lambda m: (
-        _timestamp_sort_key(m.get("timestamp", "")), m.get("id", "")
+        _timestamp_sort_key(m.get("time", "")), m.get("id", "")
     ))
     prev_id = None
     for msg in ordered:
@@ -305,7 +314,7 @@ def migrate_v1_to_v2(v1_state: dict) -> dict:
                 "id": m["id"],
                 "role": "assistant" if is_assistant else "user",
                 "username": username,
-                "timestamp": m.get("timestamp", ""),
+                "time": m.get("time", ""),
                 "content": m.get("content", ""),
             })
 
@@ -372,10 +381,11 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raise StateValidationError(f"Unsupported schema URL: {schema}")
     state["schema"] = str(schema) if isinstance(schema, str) and schema else SCHEMA_URL
 
-    date = state.get("date")
-    if strict and not _is_iso8601_utc(date):
-        raise StateValidationError("State.date must be ISO8601 UTC")
-    state["date"] = _coerce_timestamp(date)
+    time_val = state.get("time") or state.get("date")  # compat: accept "date" from old files
+    if strict and not _is_iso8601_utc(time_val):
+        raise StateValidationError("State.time must be ISO8601 UTC")
+    state["time"] = _coerce_timestamp(time_val)
+    state.pop("date", None)  # clean up legacy key
 
     context = state.get("context", "<div/>")
     if strict and not isinstance(context, str):
@@ -392,18 +402,24 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
 
     state["selected_conversation"] = state.get("selected_conversation", None)
 
-    # Truth
-    truth = state.get("truth", {"trust": [], "retrieval_prefs": {}})
+    # Output format instructions (always present; defaults like context)
+    output = state.get("output")
+    if isinstance(output, str) and output.strip():
+        state["output"] = output.strip()
+    else:
+        state["output"] = DEFAULT_OUTPUT
+
+    # Truth (retrieval_prefs now lives in config.yaml)
+    truth = state.get("truth", {"trust": []})
     if strict and not isinstance(truth, dict):
         raise StateValidationError("State.truth must be an object")
     if not isinstance(truth, dict):
-        truth = {"trust": [], "retrieval_prefs": {}}
+        truth = {"trust": []}
     trust = truth.get("trust")
     if not isinstance(trust, list):
         trust = []
     state["truth"] = {
         "trust": [_normalize_trust_entry(v) for v in trust],
-        "retrieval_prefs": _normalize_retrieval_prefs(truth.get("retrieval_prefs")),
     }
 
     # Clean up legacy fields
@@ -423,7 +439,6 @@ def _flatten_conversations(convs: list, parent_id: str | None = None) -> list:
         record = {
             "type": "conversation",
             "id": conv["id"],
-            "title": conv.get("title", ""),
             "messages": conv.get("messages", []),
         }
         if parent_id is not None:
@@ -444,7 +459,6 @@ def _nest_conversations(flat_records: list) -> list:
         cid = rec.get("id", "")
         by_id[cid] = {
             "id": cid,
-            "title": rec.get("title", ""),
             "messages": rec.get("messages", []),
             "children": [],
         }
@@ -472,16 +486,13 @@ def state_to_jsonl(state: dict) -> str:
         "type": "header",
         "version": state.get("version", STATE_VERSION),
         "schema": state.get("schema", SCHEMA_URL),
-        "date": state.get("date", utc_now_iso()),
+        "time": state.get("time", utc_now_iso()),
         "context": state.get("context", "<div/>"),
-        "retrieval_prefs": state.get("truth", {}).get("retrieval_prefs", {}),
+        "output": state.get("output", DEFAULT_OUTPUT),
     }
     sel = state.get("selected_conversation")
     if sel is not None:
         header["selected_conversation"] = sel
-    ui_prefs = state.get("ui_prefs")
-    if ui_prefs:
-        header["ui_prefs"] = ui_prefs
     lines.append(json.dumps(header, ensure_ascii=False))
 
     # Conversation records (flattened)
@@ -503,10 +514,10 @@ def jsonl_to_state(text: str) -> dict:
     state = {
         "version": STATE_VERSION,
         "schema": SCHEMA_URL,
-        "date": utc_now_iso(),
+        "time": utc_now_iso(),
         "context": "<div/>",
         "conversations": [],
-        "truth": {"trust": [], "retrieval_prefs": {}},
+        "truth": {"trust": []},
         "selected_conversation": None,
     }
 
@@ -529,13 +540,14 @@ def jsonl_to_state(text: str) -> dict:
             detected_version = obj.get("version", 1)
             state["version"] = detected_version
             state["schema"] = obj.get("schema", SCHEMA_URL)
-            state["date"] = obj.get("date", state["date"])
+            state["time"] = obj.get("time") or obj.get("date") or state["time"]
             state["context"] = obj.get("context", state["context"])
-            state["truth"]["retrieval_prefs"] = obj.get("retrieval_prefs", {})
+            # retrieval_prefs now lives in config.yaml; ignored from old files
             if "selected_conversation" in obj:
                 state["selected_conversation"] = obj["selected_conversation"]
-            if "ui_prefs" in obj and isinstance(obj["ui_prefs"], dict):
-                state["ui_prefs"] = obj["ui_prefs"]
+            # ui_prefs removed — all preferences live in config.yaml
+            if "output" in obj and isinstance(obj["output"], str) and obj["output"].strip():
+                state["output"] = obj["output"].strip()
             # v1 compat
             if "active_path" in obj:
                 state["_v1_active_path"] = obj["active_path"]
@@ -752,7 +764,7 @@ def _flatten_all_conversations(convs: list) -> list:
 
 
 def _sort_by_timestamp(items: list) -> list:
-    return sorted(items, key=lambda x: (_timestamp_sort_key(x.get("timestamp", "")), x.get("id", "")))
+    return sorted(items, key=lambda x: (_timestamp_sort_key(x.get("time", "")), x.get("id", "")))
 
 
 # ---------------------------------------------------------------------------
@@ -846,10 +858,6 @@ def merge_llm_states(
     out = copy.deepcopy(base)
     out["truth"]["trust"] = _sort_by_timestamp(list(existing_trust.values()))
 
-    base_prefs = out["truth"].get("retrieval_prefs") or {}
-    incoming_prefs = incoming["truth"].get("retrieval_prefs") or {}
-    out["truth"]["retrieval_prefs"] = base_prefs if base_prefs else incoming_prefs
-
     if keep_base_context:
         new_context = out["context"]
     else:
@@ -862,7 +870,7 @@ def merge_llm_states(
         except Exception:
             pass
     out["context"] = ensure_xhtml(new_context)
-    out["date"] = utc_now_iso()
+    out["time"] = utc_now_iso()
 
     merge_meta = {
         "conversations_added": len(new_convs),
@@ -901,7 +909,7 @@ def build_message_graph(messages: list) -> dict:
     children: dict = {}
     root_ids: list = []
     ordered = sorted(messages, key=lambda m: (
-        _timestamp_sort_key(m.get("timestamp", "")), m.get("id", "")
+        _timestamp_sort_key(m.get("time", "")), m.get("id", "")
     ))
     prev_id = None
     for msg in ordered:
@@ -1073,7 +1081,7 @@ def resolve_src_content(src_config: dict) -> str:
 
 def _provider_sort_key(entry: dict) -> tuple:
     certainty = entry.get("certainty", 0.0)
-    ts = entry.get("timestamp", "")
+    ts = entry.get("time", "")
     eid = entry.get("id", "")
     return (-certainty, _timestamp_sort_key(ts)[0] * -1, eid)
 

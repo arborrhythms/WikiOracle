@@ -75,7 +75,8 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         report clean clean-all \
         remote remote-retrieve remote-ssh remote-status remote-logs \
         remote-deploy remote-deploy-launch \
-        wo-start wo-stop wo-restart wo-status wo-logs
+        wo-start wo-stop wo-restart wo-status wo-logs \
+        wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs
 
 # --- Help ---------------------------------------------------------------------
 
@@ -127,12 +128,20 @@ help:
 	@echo "  make remote-deploy-launch  Launch EC2, train, deploy to WikiOracle"
 	@echo "  make remote-deploy         Deploy from running EC2 to WikiOracle"
 	@echo ""
-	@echo "WikiOracle Server:"
+	@echo "WikiOracle Server (NanoChat LLM):"
 	@echo "  make wo-start              Start NanoChat server on WikiOracle"
 	@echo "  make wo-stop               Stop NanoChat server on WikiOracle"
 	@echo "  make wo-restart            Restart NanoChat server on WikiOracle"
 	@echo "  make wo-status             Check NanoChat server status on WikiOracle"
 	@echo "  make wo-logs               Tail NanoChat server logs on WikiOracle"
+	@echo ""
+	@echo "WikiOracle Chat Shim (served at /chat):"
+	@echo "  make wo-chat-deploy        Deploy chat shim files to WikiOracle"
+	@echo "  make wo-chat-start         Start chat shim on WikiOracle"
+	@echo "  make wo-chat-stop          Stop chat shim on WikiOracle"
+	@echo "  make wo-chat-restart       Restart chat shim on WikiOracle"
+	@echo "  make wo-chat-status        Check chat shim status on WikiOracle"
+	@echo "  make wo-chat-logs          Tail chat shim logs on WikiOracle"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              Remove Python caches"
@@ -215,7 +224,7 @@ endif
 remote-deploy:
 	python3 remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
 
-# --- WikiOracle Server --------------------------------------------------------
+# --- WikiOracle Server (NanoChat LLM) -----------------------------------------
 
 WO_SSH := ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10 $(WO_USER)@$(WO_HOST)
 
@@ -236,6 +245,41 @@ wo-status:
 
 wo-logs:
 	$(WO_SSH) "sudo journalctl -u nanochat -f --no-pager"
+
+# --- WikiOracle Chat Shim (served at /chat on WikiOracle.org) ----------------
+# The chat shim runs as a stateless Flask app behind the WordPress reverse proxy.
+# It listens on 127.0.0.1:8787 and serves from /chat URL prefix.
+
+WO_CHAT_DEST     := $(WO_DEST)
+WO_CHAT_FILES    := WikiOracle.py config.yaml requirements.txt html bin spec
+
+.PHONY: wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs
+
+wo-chat-deploy:
+	@echo "Deploying WikiOracle chat shim to $(WO_HOST):$(WO_CHAT_DEST) ..."
+	rsync -avz --delete --exclude .venv \
+		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
+		$(WO_CHAT_FILES) \
+		$(WO_USER)@$(WO_HOST):$(WO_CHAT_DEST)/
+	@echo "Chat shim deployed. Run 'make wo-chat-restart' to apply."
+
+wo-chat-start:
+	$(WO_SSH) "sudo systemctl start wikioracle-chat"
+	@echo "WikiOracle chat shim started on $(WO_HOST)"
+
+wo-chat-stop:
+	$(WO_SSH) "sudo systemctl stop wikioracle-chat"
+	@echo "WikiOracle chat shim stopped on $(WO_HOST)"
+
+wo-chat-restart:
+	$(WO_SSH) "sudo systemctl restart wikioracle-chat"
+	@echo "WikiOracle chat shim restarted on $(WO_HOST)"
+
+wo-chat-status:
+	$(WO_SSH) "sudo systemctl status wikioracle-chat --no-pager -l"
+
+wo-chat-logs:
+	$(WO_SSH) "sudo journalctl -u wikioracle-chat -f --no-pager"
 
 # --- Setup --------------------------------------------------------------------
 
@@ -366,7 +410,7 @@ debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
 test:
-	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state -v
+	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle -v
 
 run-cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \

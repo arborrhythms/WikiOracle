@@ -1,0 +1,27 @@
+# WikiOracle Chat Shim — systemd service
+# Install: sudo cp wikioracle-chat.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable wikioracle-chat
+#
+# The shim runs in stateless mode behind the WordPress/Apache reverse proxy.
+# Apache ProxyPass /chat http://127.0.0.1:8787/chat
+# Apache ProxyPassReverse /chat http://127.0.0.1:8787/chat
+
+[Unit]
+Description=WikiOracle Chat Shim (stateless Flask)
+After=network.target
+
+[Service]
+Type=simple
+User=bitnami
+WorkingDirectory=/opt/bitnami/wordpress/files/wikiOracle.org/chat
+ExecStart=/opt/bitnami/wordpress/files/wikiOracle.org/chat/.venv/bin/python3 \
+    WikiOracle.py --stateless --url-prefix /chat
+Restart=on-failure
+RestartSec=5
+Environment=WIKIORACLE_BIND_HOST=127.0.0.1
+Environment=WIKIORACLE_BIND_PORT=8787
+Environment=WIKIORACLE_API_PATH=/nanochat/chat/completions
+Environment=WIKIORACLE_STATE_FILE=/opt/bitnami/wordpress/files/wikiOracle.org/chat/llm.jsonl
+
+[Install]
+WantedBy=multi-user.target

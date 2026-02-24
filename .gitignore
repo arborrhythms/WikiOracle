@@ -8,6 +8,6 @@ output/
 librechat/
 __pycache__/
 .DS_Store
-llm.jsonl
+/llm.jsonl
 *.merged
-config.yaml
+/config.yaml

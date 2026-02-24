@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 from wikioracle_state import (
     ALLOWED_KEY_DIR,
+    DEFAULT_OUTPUT,
     SCHEMA_URL,
     SCHEMA_URL_V1,
     SCHEMA_URL_V2,
@@ -51,11 +52,11 @@ def _make_state(**overrides):
     base = {
         "version": 2,
         "schema": SCHEMA_URL,
-        "date": "2026-02-23T00:00:00Z",
+        "time": "2026-02-23T00:00:00Z",
         "context": "<div>Test</div>",
         "conversations": [],
         "selected_conversation": None,
-        "truth": {"trust": [], "retrieval_prefs": {}},
+        "truth": {"trust": []},
     }
     base.update(overrides)
     return base
@@ -71,13 +72,13 @@ def _make_conv(id, title, messages, children=None):
     }
 
 
-def _make_msg(id, role, username, content, timestamp="2026-02-23T00:00:01Z"):
+def _make_msg(id, role, username, content, time="2026-02-23T00:00:01Z"):
     """Shorthand to create a message."""
     return {
         "id": id,
         "role": role,
         "username": username,
-        "timestamp": timestamp,
+        "time": time,
         "content": content,
     }
 
@@ -95,33 +96,33 @@ class TestEnsureMinimalState(unittest.TestCase):
 
     def test_strict_rejects_bad_version(self):
         with self.assertRaises(StateValidationError):
-            ensure_minimal_state({"version": 99, "schema": SCHEMA_URL, "date": "2026-01-01T00:00:00Z",
+            ensure_minimal_state({"version": 99, "schema": SCHEMA_URL, "time": "2026-01-01T00:00:00Z",
                                   "context": "<div/>", "conversations": [], "truth": {"trust": []}}, strict=True)
 
     def test_strict_rejects_bad_schema(self):
         with self.assertRaises(StateValidationError):
-            ensure_minimal_state({"version": 2, "schema": "bad", "date": "2026-01-01T00:00:00Z",
+            ensure_minimal_state({"version": 2, "schema": "bad", "time": "2026-01-01T00:00:00Z",
                                   "context": "<div/>", "conversations": [], "truth": {"trust": []}}, strict=True)
 
     def test_conversations_normalized(self):
         state = ensure_minimal_state(_make_state(conversations=[
-            {"id": "c_1", "title": "test", "messages": [
+            {"id": "c_1", "messages": [
                 {"id": "m_1", "role": "user", "username": "Alec",
-                 "timestamp": "2026-02-23T00:00:01Z", "content": "Hello"}
+                 "time": "2026-02-23T00:00:01Z", "content": "Hello"}
             ]}
         ]), strict=True)
         conv = state["conversations"][0]
         self.assertEqual(conv["id"], "c_1")
-        self.assertEqual(conv["title"], "test")
+        # Title is derived from first user message, not stored
+        self.assertEqual(conv["title"], "Hello")
         self.assertEqual(len(conv["messages"]), 1)
         self.assertEqual(conv["messages"][0]["role"], "user")
         self.assertEqual(conv["children"], [])
 
     def test_trust_certainty_clamped(self):
         state = ensure_minimal_state(_make_state(truth={
-            "trust": [{"title": "X", "certainty": 5.0, "content": "test", "timestamp": "2026-01-01T00:00:00Z"}],
-            "retrieval_prefs": {}
-        }), strict=True)
+            "trust": [{"title": "X", "certainty": 5.0, "content": "test", "time": "2026-01-01T00:00:00Z"}],
+                    }), strict=True)
         self.assertEqual(state["truth"]["trust"][0]["certainty"], 1.0)
 
     def test_auto_migrates_v1(self):
@@ -129,15 +130,15 @@ class TestEnsureMinimalState(unittest.TestCase):
         v1 = {
             "version": 1,
             "schema": SCHEMA_URL_V1,
-            "date": "2026-02-23T00:00:00Z",
+            "time": "2026-02-23T00:00:00Z",
             "context": "<div>V1</div>",
             "messages": [
                 {"id": "m_1", "parent_id": None, "username": "Alec",
-                 "timestamp": "2026-02-23T00:00:01Z", "content": "<p>hello</p>"},
+                 "time": "2026-02-23T00:00:01Z", "content": "<p>hello</p>"},
                 {"id": "m_2", "parent_id": "m_1", "username": "WikiOracle NanoChat",
-                 "timestamp": "2026-02-23T00:00:02Z", "content": "<p>hi</p>"},
+                 "time": "2026-02-23T00:00:02Z", "content": "<p>hi</p>"},
             ],
-            "truth": {"trust": [], "retrieval_prefs": {}},
+            "truth": {"trust": []},
         }
         state = ensure_minimal_state(v1, strict=False)
         self.assertEqual(state["version"], 2)
@@ -151,7 +152,7 @@ class TestEnsureMinimalState(unittest.TestCase):
 
     def test_removes_legacy_fields(self):
         state = ensure_minimal_state({
-            "version": 2, "schema": SCHEMA_URL, "date": "2026-02-23T00:00:00Z",
+            "version": 2, "schema": SCHEMA_URL, "time": "2026-02-23T00:00:00Z",
             "context": "<div/>", "conversations": [],
             "messages": [{"id": "m_1"}],  # legacy
             "active_path": ["m_1"],  # legacy
@@ -173,13 +174,13 @@ class TestV1MigrationDetailed(unittest.TestCase):
             "version": 1,
             "messages": [
                 {"id": "m_1", "parent_id": None, "username": "Alec",
-                 "timestamp": "2026-02-23T00:00:01Z", "content": "<p>Q1</p>"},
+                 "time": "2026-02-23T00:00:01Z", "content": "<p>Q1</p>"},
                 {"id": "m_2", "parent_id": "m_1", "username": "Bot",
-                 "timestamp": "2026-02-23T00:00:02Z", "content": "<p>A1</p>"},
+                 "time": "2026-02-23T00:00:02Z", "content": "<p>A1</p>"},
                 {"id": "m_3", "parent_id": "m_2", "username": "Alec",
-                 "timestamp": "2026-02-23T00:00:03Z", "content": "<p>Q2</p>"},
+                 "time": "2026-02-23T00:00:03Z", "content": "<p>Q2</p>"},
                 {"id": "m_4", "parent_id": "m_3", "username": "Bot",
-                 "timestamp": "2026-02-23T00:00:04Z", "content": "<p>A2</p>"},
+                 "time": "2026-02-23T00:00:04Z", "content": "<p>A2</p>"},
             ],
             "truth": {"trust": []},
         }
@@ -195,13 +196,13 @@ class TestV1MigrationDetailed(unittest.TestCase):
             "version": 1,
             "messages": [
                 {"id": "m_1", "parent_id": None, "username": "Alec",
-                 "timestamp": "2026-02-23T00:00:01Z", "content": "<p>Root</p>"},
+                 "time": "2026-02-23T00:00:01Z", "content": "<p>Root</p>"},
                 {"id": "m_2", "parent_id": "m_1", "username": "Bot",
-                 "timestamp": "2026-02-23T00:00:02Z", "content": "<p>Reply</p>"},
+                 "time": "2026-02-23T00:00:02Z", "content": "<p>Reply</p>"},
                 {"id": "m_3", "parent_id": "m_2", "username": "Alec",
-                 "timestamp": "2026-02-23T00:00:03Z", "content": "<p>Branch A</p>"},
+                 "time": "2026-02-23T00:00:03Z", "content": "<p>Branch A</p>"},
                 {"id": "m_4", "parent_id": "m_2", "username": "Alec",
-                 "timestamp": "2026-02-23T00:00:04Z", "content": "<p>Branch B</p>"},
+                 "time": "2026-02-23T00:00:04Z", "content": "<p>Branch B</p>"},
             ],
             "truth": {"trust": []},
         }
@@ -224,13 +225,13 @@ class TestJSONLRoundTrip(unittest.TestCase):
                 _make_conv("c_1", "hello", [
                     _make_msg("m_1", "user", "Alec", "<p>Hello</p>"),
                     _make_msg("m_2", "assistant", "Bot", "<p>Hi</p>",
-                              timestamp="2026-02-23T00:00:02Z"),
+                              time="2026-02-23T00:00:02Z"),
                 ]),
             ],
             truth={"trust": [
-                {"id": "t_1", "title": "Fact", "timestamp": "2026-02-23T00:00:00Z",
+                {"id": "t_1", "title": "Fact", "time": "2026-02-23T00:00:00Z",
                  "certainty": 0.9, "content": "<div>Truth</div>"}
-            ], "retrieval_prefs": {"max_entries": 8}}
+            ]}
         ), strict=True)
 
         jsonl_text = state_to_jsonl(original)
@@ -281,11 +282,11 @@ class TestJSONLRoundTrip(unittest.TestCase):
         state = {
             "version": 1,
             "schema": SCHEMA_URL_V1,
-            "date": "2026-02-23T00:00:00Z",
+            "time": "2026-02-23T00:00:00Z",
             "context": "<div/>",
             "messages": [
                 {"id": "m_1", "username": "Alec", "parent_id": None,
-                 "timestamp": "2026-02-23T00:00:01Z", "content": "<p>Hi</p>"}
+                 "time": "2026-02-23T00:00:01Z", "content": "<p>Hi</p>"}
             ],
             "truth": {"trust": []},
         }
@@ -363,7 +364,7 @@ class TestConversationTree(unittest.TestCase):
 
     def test_add_message_to_conversation(self):
         new_msg = {"id": "m_new", "role": "user", "username": "Alec",
-                   "timestamp": "2026-02-23T00:01:00Z", "content": "<p>New</p>"}
+                   "time": "2026-02-23T00:01:00Z", "content": "<p>New</p>"}
         result = add_message_to_conversation(self.tree, "c_2", new_msg)
         self.assertTrue(result)
         conv = find_conversation(self.tree, "c_2")
@@ -377,7 +378,7 @@ class TestConversationTree(unittest.TestCase):
     def test_add_child_conversation(self):
         new_conv = {"id": "c_new", "title": "new branch", "messages": [
             {"id": "m_new", "role": "user", "username": "Alec",
-             "timestamp": "2026-02-23T00:01:00Z", "content": "<p>Branch</p>"}
+             "time": "2026-02-23T00:01:00Z", "content": "<p>Branch</p>"}
         ]}
         result = add_child_conversation(self.tree, "c_2", new_conv)
         self.assertTrue(result)
@@ -448,32 +449,17 @@ class TestMerge(unittest.TestCase):
     def test_merge_trust_entries(self):
         base = ensure_minimal_state(_make_state(truth={
             "trust": [{"id": "t_1", "title": "Fact A", "certainty": 0.8,
-                       "timestamp": "2026-02-23T00:00:00Z", "content": "<div>A</div>"}],
-            "retrieval_prefs": {"max_entries": 8}
+                       "time": "2026-02-23T00:00:00Z", "content": "<div>A</div>"}],
         }), strict=True)
 
         incoming = ensure_minimal_state(_make_state(truth={
             "trust": [{"id": "t_2", "title": "Fact B", "certainty": 0.6,
-                       "timestamp": "2026-02-23T00:01:00Z", "content": "<div>B</div>"}],
-            "retrieval_prefs": {}
+                       "time": "2026-02-23T00:01:00Z", "content": "<div>B</div>"}],
         }), strict=True)
 
         merged, meta = merge_llm_states(base, incoming)
         self.assertEqual(len(merged["truth"]["trust"]), 2)
         self.assertEqual(meta["trust_added"], 1)
-
-    def test_merge_keeps_base_retrieval_prefs(self):
-        base = ensure_minimal_state(_make_state(truth={
-            "trust": [],
-            "retrieval_prefs": {"max_entries": 12, "min_certainty": 0.3}
-        }), strict=True)
-        incoming = ensure_minimal_state(_make_state(truth={
-            "trust": [],
-            "retrieval_prefs": {"max_entries": 4}
-        }), strict=True)
-
-        merged, _ = merge_llm_states(base, incoming)
-        self.assertEqual(merged["truth"]["retrieval_prefs"]["max_entries"], 12)
 
     def test_merge_child_attached_to_parent(self):
         """Child conversation from incoming is attached to existing parent."""
@@ -555,7 +541,7 @@ class TestSymlinkRejection(unittest.TestCase):
     def test_rejects_symlink_on_load(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             real = Path(tmpdir) / "real.jsonl"
-            real.write_text('{"type":"header","version":2,"schema":"' + SCHEMA_URL + '","date":"2026-01-01T00:00:00Z","context":"<div/>","retrieval_prefs":{}}')
+            real.write_text('{"type":"header","version":2,"schema":"' + SCHEMA_URL + '","time":"2026-01-01T00:00:00Z","context":"<div/>"}')
             link = Path(tmpdir) / "link.jsonl"
             link.symlink_to(real)
             with self.assertRaises(StateValidationError):
@@ -612,13 +598,13 @@ class TestProviderParsing(unittest.TestCase):
     def test_get_provider_entries_sorted(self):
         entries = [
             {"id": "t_1", "title": "P1", "certainty": 0.8,
-             "timestamp": "2026-02-23T00:00:01Z",
+             "time": "2026-02-23T00:00:01Z",
              "content": "<provider><name>p1</name><api_url>http://a</api_url><api_key>k1</api_key></provider>"},
             {"id": "t_2", "title": "P2", "certainty": 0.9,
-             "timestamp": "2026-02-23T00:00:02Z",
+             "time": "2026-02-23T00:00:02Z",
              "content": "<provider><name>p2</name><api_url>http://b</api_url><api_key>k2</api_key></provider>"},
             {"id": "t_3", "title": "P3", "certainty": 0.9,
-             "timestamp": "2026-02-23T00:00:03Z",
+             "time": "2026-02-23T00:00:03Z",
              "content": "<provider><name>p3</name><api_url>http://c</api_url><api_key>k3</api_key></provider>"},
         ]
         result = get_provider_entries(entries)
@@ -629,9 +615,9 @@ class TestProviderParsing(unittest.TestCase):
 
     def test_get_primary_provider(self):
         entries = [
-            {"id": "t_1", "certainty": 0.5, "timestamp": "2026-02-23T00:00:01Z",
+            {"id": "t_1", "certainty": 0.5, "time": "2026-02-23T00:00:01Z",
              "content": "<provider><name>low</name><api_url>x</api_url><api_key>k</api_key></provider>"},
-            {"id": "t_2", "certainty": 0.95, "timestamp": "2026-02-23T00:00:01Z",
+            {"id": "t_2", "certainty": 0.95, "time": "2026-02-23T00:00:01Z",
              "content": "<provider><name>high</name><api_url>y</api_url><api_key>k</api_key></provider>"},
         ]
         result = get_primary_provider(entries)
@@ -640,7 +626,7 @@ class TestProviderParsing(unittest.TestCase):
 
     def test_get_primary_provider_none(self):
         result = get_primary_provider([
-            {"id": "t_1", "certainty": 0.5, "timestamp": "2026-02-23T00:00:01Z",
+            {"id": "t_1", "certainty": 0.5, "time": "2026-02-23T00:00:01Z",
              "content": "<div>Normal trust entry</div>"},
         ])
         self.assertIsNone(result)
@@ -669,9 +655,9 @@ class TestSrcParsing(unittest.TestCase):
 
     def test_get_src_entries(self):
         entries = [
-            {"id": "t_1", "certainty": 0.7, "timestamp": "2026-02-23T00:00:01Z",
+            {"id": "t_1", "certainty": 0.7, "time": "2026-02-23T00:00:01Z",
              "content": "<src><name>a</name><path>file://x</path></src>"},
-            {"id": "t_2", "certainty": 0.5, "timestamp": "2026-02-23T00:00:01Z",
+            {"id": "t_2", "certainty": 0.5, "time": "2026-02-23T00:00:01Z",
              "content": "<div>Normal</div>"},
         ]
         result = get_src_entries(entries)
@@ -694,6 +680,41 @@ class TestSelectedConversationRoundtrip(unittest.TestCase):
         restored = jsonl_to_state(jsonl_text)
         restored = ensure_minimal_state(restored, strict=True)
         self.assertEqual(restored["selected_conversation"], "c_1")
+
+
+class TestOutputField(unittest.TestCase):
+    """Test state.output persistence and defaults."""
+
+    def test_output_preserved_in_ensure_minimal_state(self):
+        """Non-empty output string survives normalization."""
+        state = ensure_minimal_state({"output": "Custom format."})
+        self.assertEqual(state["output"], "Custom format.")
+
+    def test_output_defaults_when_whitespace(self):
+        """Whitespace-only output gets the default."""
+        state = ensure_minimal_state({"output": "  \n  "})
+        self.assertEqual(state["output"], DEFAULT_OUTPUT)
+
+    def test_output_defaults_when_missing(self):
+        """Missing output gets the default."""
+        state = ensure_minimal_state({})
+        self.assertEqual(state["output"], DEFAULT_OUTPUT)
+
+    def test_output_jsonl_roundtrip(self):
+        """Output survives JSONL serialization round-trip."""
+        state = ensure_minimal_state({"output": "Return JSON."})
+        jsonl_text = state_to_jsonl(state)
+        restored = jsonl_to_state(jsonl_text)
+        restored = ensure_minimal_state(restored)
+        self.assertEqual(restored["output"], "Return JSON.")
+
+    def test_default_output_roundtrip(self):
+        """Default output persists through JSONL round-trip."""
+        state = ensure_minimal_state({})
+        jsonl_text = state_to_jsonl(state)
+        restored = jsonl_to_state(jsonl_text)
+        restored = ensure_minimal_state(restored)
+        self.assertEqual(restored["output"], DEFAULT_OUTPUT)
 
 
 if __name__ == "__main__":

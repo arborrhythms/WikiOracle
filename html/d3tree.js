@@ -1,6 +1,6 @@
 // d3tree.js — D3.js top-down branching hierarchy for WikiOracle v2
 // State IS the tree (conversations with children). No groupConversations needed.
-// Supports: click (navigate), double-click (branch), right-click (context menu),
+// Supports: click (navigate), double-click/double-tap (context menu), right-click,
 //           drag-and-drop (merge: reparent dragged node under drop target).
 
 // Internal state
@@ -320,30 +320,58 @@ function renderTree(hierarchyData, callbacks) {
     if (_clickTimer) clearTimeout(_clickTimer);
     _clickTimer = setTimeout(() => {
       if (d.data.id === "root") {
-        // Click root → toggle context editor; also navigate to root
         if (callbacks.onNavigate) callbacks.onNavigate(null);
-        if (callbacks.onEditContext) callbacks.onEditContext();
       } else {
         if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
       }
     }, 200);
   });
 
-  // ─── Double-click: persistent context menu (works on touch/mobile too) ───
+  // ─── Double-click / double-tap: context menu ───
   node.on("dblclick", function(event, d) {
     event.preventDefault();
     event.stopPropagation();
     if (_clickTimer) { clearTimeout(_clickTimer); _clickTimer = null; }
-    if (d.data.id === "root") return;
-    _showContextMenu(event, d.data, callbacks, container);
+    _triggerContextMenu(event, d);
   });
+
+  // Touch double-tap detection (dblclick doesn't fire on most mobile browsers)
+  let _lastTapTime = 0;
+  let _lastTapTarget = null;
+  node.on("touchend.doubletap", function(event, d) {
+    const now = Date.now();
+    const isSameNode = (_lastTapTarget === d);
+    if (isSameNode && (now - _lastTapTime) < 350) {
+      // Double-tap detected
+      event.preventDefault();
+      if (_clickTimer) { clearTimeout(_clickTimer); _clickTimer = null; }
+      // Use touch position for menu placement
+      const touch = event.changedTouches && event.changedTouches[0];
+      const synth = touch ? { clientX: touch.clientX, clientY: touch.clientY,
+                              pageX: touch.pageX, pageY: touch.pageY,
+                              preventDefault: () => {}, stopPropagation: () => {} } : event;
+      _triggerContextMenu(synth, d);
+      _lastTapTime = 0;
+      _lastTapTarget = null;
+    } else {
+      _lastTapTime = now;
+      _lastTapTarget = d;
+    }
+  });
+
+  function _triggerContextMenu(event, d) {
+    if (d.data.id === "root") {
+      _showRootContextMenu(event, callbacks);
+    } else {
+      _showContextMenu(event, d.data, callbacks, container);
+    }
+  }
 
   // ─── Right-click: also context menu (desktop) ───
   node.on("contextmenu", function(event, d) {
     event.preventDefault();
     event.stopPropagation();
-    if (d.data.id === "root") return;
-    _showContextMenu(event, d.data, callbacks, container);
+    _triggerContextMenu(event, d);
   });
 
   // Close context menu when clicking outside of it (with grace period)
@@ -395,6 +423,43 @@ function _hideContextMenu() {
     _ctxMenu = null;
   }
 }
+
+function _showRootContextMenu(event, callbacks) {
+  _hideContextMenu();
+
+  const menu = document.createElement("div");
+  menu.className = "tree-context-menu";
+  menu.style.position = "fixed";
+  menu.style.left = (event.clientX + 4) + "px";
+  menu.style.top = (event.clientY + 4) + "px";
+
+  menu._justOpened = true;
+  setTimeout(() => { menu._justOpened = false; }, 300);
+
+  const ctxItem = document.createElement("div");
+  ctxItem.className = "ctx-item";
+  ctxItem.textContent = "Edit Context";
+  ctxItem.addEventListener("click", function(e) {
+    e.stopPropagation();
+    _hideContextMenu();
+    if (callbacks.onEditContext) callbacks.onEditContext();
+  });
+  menu.appendChild(ctxItem);
+
+  const outItem = document.createElement("div");
+  outItem.className = "ctx-item";
+  outItem.textContent = "Edit Output";
+  outItem.addEventListener("click", function(e) {
+    e.stopPropagation();
+    _hideContextMenu();
+    if (callbacks.onEditOutput) callbacks.onEditOutput();
+  });
+  menu.appendChild(outItem);
+
+  document.body.appendChild(menu);
+  _ctxMenu = menu;
+}
+
 
 function _showContextMenu(event, nodeData, callbacks, container) {
   _hideContextMenu();

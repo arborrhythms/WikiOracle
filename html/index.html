@@ -82,12 +82,14 @@ body { display: flex; flex-direction: column; }
 .tree-context-menu .ctx-item.ctx-danger { color: #dc2626; }
 .tree-context-menu .ctx-item.ctx-danger:hover { background: #fef2f2; color: #dc2626; }
 .tree-context-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.tree-context-menu .ctx-item.ctx-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
 /* Resize divider between tree and chat */
-.resize-divider { flex-shrink: 0; height: 6px; background: var(--border); cursor: row-resize; position: relative; z-index: 5; transition: background 0.15s; }
+.resize-divider { flex-shrink: 0; height: 6px; background: var(--border); cursor: row-resize; position: relative; z-index: 5; transition: background 0.15s; touch-action: none; }
 .resize-divider:hover, .resize-divider.active { background: var(--accent); }
 .resize-divider::after { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background: var(--fg-muted); border-radius: 1px; opacity: 0.4; }
 .resize-divider:hover::after, .resize-divider.active::after { opacity: 0.8; background: #fff; }
+@media (pointer: coarse) { .resize-divider { height: 12px; } body.layout-vertical .resize-divider { width: 12px; } }
 
 /* Context editor modal (reuses settings overlay pattern) */
 .context-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; }
@@ -117,6 +119,7 @@ body.layout-vertical .chat-container { flex: 1; }
 <div class="header">
   <h1><a href="https://WikiOracle.org" target="_blank" style="color:inherit;text-decoration:none">WikiOracle</a></h1>
   <button class="header-btn" id="btnSettings" title="Settings">Settings</button>
+  <button class="header-btn" id="btnRead" title="Open conversations in a readable view">Read</button>
   <button class="header-btn" id="btnImport" title="Import an llm_*.jsonl file">Import State</button>
   <button class="header-btn" id="btnExport" title="Export session as llm_*.jsonl">Export State</button>
 </div>
@@ -167,6 +170,10 @@ body.layout-vertical .chat-container { flex: 1; }
       <input type="checkbox" id="setConfirm"> Confirm deletes and merges
     </label>
 
+    <div style="margin-top: 1.2rem; border-top: 1px solid var(--border); padding-top: 0.8rem;">
+      <button class="btn" id="btnEditConfig" style="width:100%;">Edit config.yaml</button>
+    </div>
+
     <div class="settings-actions">
       <button class="btn" onclick="closeSettings()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>
@@ -202,10 +209,10 @@ body.layout-vertical .chat-container { flex: 1; }
 <input type="file" id="fileImport" accept=".json,.jsonl" style="display:none">
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="d3tree.js?v=14"></script>
-<script src="wikioracle.js?v=22"></script>
+<script src="d3tree.js?v=15"></script>
+<script src="wikioracle.js?v=25"></script>
 <script>
-// Draggable divider between tree and chat (supports horizontal + vertical layout)
+// Draggable divider between tree and chat (supports mouse + touch, horizontal + vertical)
 (function() {
   const divider = document.getElementById("resizeDivider");
   const tree = document.getElementById("treeContainer");
@@ -215,41 +222,55 @@ body.layout-vertical .chat-container { flex: 1; }
     return document.body.classList.contains("layout-vertical");
   }
 
-  divider.addEventListener("mousedown", function(e) {
-    e.preventDefault();
+  function startDrag(clientX, clientY) {
     dragging = true;
-    if (isVertical()) {
-      startPos = e.clientX;
-      startSize = tree.offsetWidth;
-    } else {
-      startPos = e.clientY;
-      startSize = tree.offsetHeight;
-    }
+    if (isVertical()) { startPos = clientX; startSize = tree.offsetWidth; }
+    else              { startPos = clientY; startSize = tree.offsetHeight; }
     divider.classList.add("active");
     document.body.style.cursor = isVertical() ? "col-resize" : "row-resize";
     document.body.style.userSelect = "none";
-  });
+  }
 
-  document.addEventListener("mousemove", function(e) {
+  function moveDrag(clientX, clientY) {
     if (!dragging) return;
     if (isVertical()) {
-      const newW = Math.max(120, Math.min(window.innerWidth * 0.6, startSize + (e.clientX - startPos)));
+      const newW = Math.max(120, Math.min(window.innerWidth * 0.6, startSize + (clientX - startPos)));
       tree.style.width = newW + "px";
     } else {
-      const newH = Math.max(60, Math.min(window.innerHeight * 0.7, startSize + (e.clientY - startPos)));
+      const newH = Math.max(60, Math.min(window.innerHeight * 0.7, startSize + (clientY - startPos)));
       tree.style.height = newH + "px";
     }
-  });
+  }
 
-  document.addEventListener("mouseup", function() {
+  function endDrag() {
     if (!dragging) return;
     dragging = false;
     divider.classList.remove("active");
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
-    // Re-render tree to fit new size
     if (typeof renderMessages === "function") renderMessages();
-  });
+  }
+
+  // Mouse events
+  divider.addEventListener("mousedown", function(e) { e.preventDefault(); startDrag(e.clientX, e.clientY); });
+  document.addEventListener("mousemove", function(e) { moveDrag(e.clientX, e.clientY); });
+  document.addEventListener("mouseup", endDrag);
+
+  // Touch events
+  divider.addEventListener("touchstart", function(e) {
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener("touchmove", function(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener("touchend", endDrag);
+  document.addEventListener("touchcancel", endDrag);
 })();
 </script>
 </body>

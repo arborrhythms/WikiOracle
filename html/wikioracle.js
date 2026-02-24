@@ -1,9 +1,36 @@
 // wikioracle.js — WikiOracle v2 client (conversation-based hierarchy)
-// All preferences served by the server (config.yaml + state overrides).
-// No cookies or localStorage used.
+// Preferences: served by config.yaml when writable; localStorage when stateless.
 
-// ─── Preferences (loaded from server on init) ───
+// ─── Server info (loaded on init) ───
+let _serverInfo = { stateless: false, url_prefix: "" };
+
+// ─── Preferences (loaded from server on init, localStorage overlay in stateless) ───
 let prefs = { provider: "wikioracle", layout: "flat", username: "User" };
+const _PREFS_KEY = "wikioracle_prefs";
+
+function _loadLocalPrefs() {
+  try {
+    const raw = localStorage.getItem(_PREFS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function _saveLocalPrefs() {
+  try { localStorage.setItem(_PREFS_KEY, JSON.stringify(prefs)); } catch {}
+}
+
+const _STATE_KEY = "wikioracle_state";
+
+function _loadLocalState() {
+  try {
+    const raw = localStorage.getItem(_STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function _saveLocalState() {
+  try { localStorage.setItem(_STATE_KEY, JSON.stringify({ context: state.context, output: state.output })); } catch {}
+}
 
 function applyLayout(layout) {
   const tree = document.getElementById("treeContainer");
@@ -45,11 +72,15 @@ function confirmAction(msg) {
 }
 
 // ─── API helpers ───
+function _apiPath(path) {
+  return (_serverInfo.url_prefix || "") + path;
+}
+
 async function api(method, path, body) {
   const headers = { "Content-Type": "application/json" };
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(path, opts);
+  const resp = await fetch(_apiPath(path), opts);
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
@@ -308,6 +339,17 @@ function _deleteMessage(msgIdx) {
   api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
 }
 
+// ─── Spec defaults (cached after first fetch) ───
+let _specDefaults = null;
+async function _getSpecDefaults() {
+  if (!_specDefaults) {
+    try { _specDefaults = await api("GET", "/spec_defaults"); }
+    catch (e) { _specDefaults = { context: "<div/>", output: "", config_yaml: "" }; }
+  }
+  return _specDefaults;
+}
+
+
 // ─── Context editor (floating modal, triggered from root node) ───
 function _toggleContextEditor() {
   let overlay = document.getElementById("contextOverlay");
@@ -329,6 +371,7 @@ function _toggleContextEditor() {
         <p>Injected into every LLM call as background information.</p>
         <textarea id="contextTextarea" placeholder="Describe the project, key facts, instructions..."></textarea>
         <div class="settings-actions">
+          <button class="btn" id="ctxReset">Reset</button>
           <button class="btn" id="ctxCancel">Cancel</button>
           <button class="btn btn-primary" id="ctxSave">Save</button>
         </div>
@@ -339,6 +382,10 @@ function _toggleContextEditor() {
     overlay.addEventListener("click", function(e) {
       if (e.target === overlay) overlay.classList.remove("active");
     });
+    document.getElementById("ctxReset").addEventListener("click", async function() {
+      const defaults = await _getSpecDefaults();
+      document.getElementById("contextTextarea").value = defaults.context.replace(/<[^>]+>/g, "").trim();
+    });
     document.getElementById("ctxCancel").addEventListener("click", function() {
       overlay.classList.remove("active");
     });
@@ -347,7 +394,11 @@ function _toggleContextEditor() {
       const currentPlain = (state?.context || "").replace(/<[^>]+>/g, "").trim();
       if (state && newText !== currentPlain) {
         state.context = newText;
-        api("POST", "/state", state).catch(e => setStatus("Error saving context: " + e.message));
+        if (_serverInfo.stateless) {
+          _saveLocalState();
+        } else {
+          api("POST", "/state", state).catch(e => setStatus("Error saving context: " + e.message));
+        }
         setStatus("Context saved");
       }
       overlay.classList.remove("active");
@@ -361,6 +412,65 @@ function _toggleContextEditor() {
   document.getElementById("contextTextarea").focus();
 }
 
+// ─── Output editor (floating modal, triggered from root context menu) ───
+function _toggleOutputEditor() {
+  let overlay = document.getElementById("outputOverlay");
+
+  if (overlay && overlay.classList.contains("active")) {
+    overlay.classList.remove("active");
+    return;
+  }
+
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "outputOverlay";
+    overlay.className = "context-overlay";
+    overlay.innerHTML = `
+      <div class="context-panel">
+        <h2>Output</h2>
+        <p>Instructions appended to every LLM call describing the desired response format.</p>
+        <textarea id="outputTextarea" placeholder="Describe the desired output format..."></textarea>
+        <div class="settings-actions">
+          <button class="btn" id="outReset">Reset</button>
+          <button class="btn" id="outCancel">Cancel</button>
+          <button class="btn btn-primary" id="outSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) overlay.classList.remove("active");
+    });
+    document.getElementById("outCancel").addEventListener("click", function() {
+      overlay.classList.remove("active");
+    });
+    document.getElementById("outReset").addEventListener("click", async function() {
+      const defaults = await _getSpecDefaults();
+      document.getElementById("outputTextarea").value = defaults.output ?? "";
+    });
+    document.getElementById("outSave").addEventListener("click", function() {
+      const newText = document.getElementById("outputTextarea").value.trim();
+      if (state) {
+        state.output = newText;
+        if (_serverInfo.stateless) {
+          _saveLocalState();
+        } else {
+          api("POST", "/state", state).catch(e => setStatus("Error saving output: " + e.message));
+        }
+        setStatus("Output saved");
+      }
+      overlay.classList.remove("active");
+    });
+  }
+
+  // Populate from state (always present after server normalization)
+  const current = state?.output ?? "";
+  document.getElementById("outputTextarea").value = current;
+  overlay.classList.add("active");
+  document.getElementById("outputTextarea").focus();
+}
+
+
 // ─── UI rendering ───
 function renderMessages() {
   const wrapper = document.getElementById("chatWrapper");
@@ -369,7 +479,7 @@ function renderMessages() {
   if (!state) state = {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
 
-  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor };
+  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor, onEditOutput: _toggleOutputEditor };
 
   // Determine which messages to show
   let visible = [];
@@ -395,7 +505,7 @@ function renderMessages() {
 
     const meta = document.createElement("div");
     meta.className = "msg-meta";
-    const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "";
+    const ts = msg.time ? new Date(msg.time).toLocaleString() : "";
     meta.textContent = `${msg.username || ""} · ${ts}`;
 
     const bubble = document.createElement("div");
@@ -513,7 +623,7 @@ async function sendMessage() {
     id: optimisticMsgId,
     role: "user",
     username: prefs.username || "User",
-    timestamp: now,
+    time: now,
     content: `<p>${text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</p>`,
     _pending: true,
   };
@@ -555,6 +665,7 @@ async function sendMessage() {
         provider: prefs.provider,
         model: (_providerMeta[prefs.provider] || {}).model || "",
         username: prefs.username,
+        chat: prefs.chat || {},
       },
     });
     state = data.state || state;
@@ -612,6 +723,7 @@ async function saveSettings() {
 
   // Chat settings
   prefs.chat = {
+    ...(prefs.chat || {}),
     temperature: parseFloat(document.getElementById("setTemp").value),
     message_window: parseInt(document.getElementById("setWindow").value, 10),
     rag: document.getElementById("setRag").checked,
@@ -623,18 +735,181 @@ async function saveSettings() {
   _updatePlaceholder();
   closeSettings();
 
-  // Persist UI prefs to server — await before reporting success
-  try {
-    await api("POST", "/prefs", {
-      provider: prefs.provider,
-      username: prefs.username,
-      layout: prefs.layout,
-      chat: prefs.chat,
-    });
-    setStatus("Settings saved");
-  } catch (e) {
-    setStatus("Error saving settings: " + e.message);
+  // Persist prefs: localStorage in stateless mode, server otherwise
+  if (_serverInfo.stateless) {
+    _saveLocalPrefs();
+    setStatus("Settings saved (local)");
+  } else {
+    try {
+      await api("POST", "/prefs", {
+        provider: prefs.provider,
+        username: prefs.username,
+        layout: prefs.layout,
+        chat: prefs.chat,
+      });
+      setStatus("Settings saved");
+    } catch (e) {
+      setStatus("Error saving settings: " + e.message);
+    }
   }
+}
+
+// ─── Config editor (edit config.yaml) ───
+async function _openConfigEditor() {
+  if (_serverInfo.stateless) { setStatus("Editing disabled (stateless mode)"); return; }
+  // Close the settings panel first
+  closeSettings();
+
+  let overlay = document.getElementById("configOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "configOverlay";
+    overlay.className = "context-overlay"; // reuse context overlay style
+    overlay.innerHTML = `
+      <div class="context-panel" style="max-width:560px;">
+        <h2>config.yaml</h2>
+        <textarea id="configEditorTextarea" style="width:100%; min-height:300px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.82rem; line-height:1.5; tab-size:2; resize:vertical; padding:0.6rem; border:1px solid var(--border); border-radius:6px;"></textarea>
+        <div id="configEditorError" style="display:none; color:#dc2626; font-size:0.8rem; margin-top:0.4rem;"></div>
+        <div class="settings-actions" style="margin-top:0.8rem;">
+          <button class="btn" id="cfgReset">Reset</button>
+          <button class="btn" id="cfgCancel">Cancel</button>
+          <button class="btn btn-primary" id="cfgOk">OK</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) overlay.classList.remove("active");
+    });
+    document.getElementById("cfgReset").addEventListener("click", async function() {
+      const defaults = await _getSpecDefaults();
+      if (defaults.config_yaml) {
+        document.getElementById("configEditorTextarea").value = defaults.config_yaml;
+      } else {
+        setStatus("spec/config.yaml not found");
+      }
+    });
+    document.getElementById("cfgCancel").addEventListener("click", function() {
+      overlay.classList.remove("active");
+    });
+    document.getElementById("cfgOk").addEventListener("click", async function() {
+      const textarea = document.getElementById("configEditorTextarea");
+      const errEl = document.getElementById("configEditorError");
+      errEl.style.display = "none";
+      try {
+        const resp = await api("POST", "/config", { yaml: textarea.value });
+        if (resp.ok) {
+          overlay.classList.remove("active");
+          setStatus("config.yaml saved");
+        } else {
+          errEl.textContent = resp.error || "Unknown error";
+          errEl.style.display = "block";
+        }
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.style.display = "block";
+      }
+    });
+  }
+
+  // Load current config
+  const textarea = document.getElementById("configEditorTextarea");
+  const errEl = document.getElementById("configEditorError");
+  errEl.style.display = "none";
+  textarea.value = "Loading...";
+  overlay.classList.add("active");
+
+  try {
+    const data = await api("GET", "/config");
+    textarea.value = data.yaml || "";
+  } catch (e) {
+    textarea.value = "# Error loading config: " + e.message;
+  }
+  textarea.focus();
+}
+
+// ─── Read view (XHTML export to new window) ───
+const _READING_CSS_FALLBACK = `
+body { font-family: Georgia, serif; line-height: 1.8; color: #1a1a1a; background: #fafaf8; max-width: 52rem; margin: 0 auto; padding: 2rem 1.5rem; }
+h1 { font-size: 1.6rem; margin-bottom: 0.5rem; }
+.meta { font-size: 0.85rem; color: #888; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #e0e0e0; }
+.conversation { margin-bottom: 1.5rem; padding-left: 1.2rem; border-left: 2px solid #d0d0d0; }
+.conv-title { font-size: 0.9rem; font-weight: 600; color: #555; margin-bottom: 0.6rem; }
+p.message { margin-bottom: 0.6rem; font-size: 0.95rem; white-space: pre-wrap; }
+p.message strong { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+p.message.user strong { color: #2563eb; }
+p.message.assistant strong { color: #059669; }
+`;
+
+function _serializeConversations(conversations) {
+  if (!conversations || !conversations.length) return "";
+  let html = "";
+  for (const conv of conversations) {
+    const title = (conv.title || "Untitled").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    html += `<div class="conversation" data-id="${conv.id || ''}">\n`;
+    html += `  <div class="conv-title">${title}</div>\n`;
+    for (const msg of (conv.messages || [])) {
+      const role = msg.role || "user";
+      const username = (msg.username || role).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const content = (msg.content || "").replace(/<[^>]+>/g, "").trim();
+      const escaped = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      html += `  <p class="message ${role}" data-role="${role}"><strong>${username}:</strong> ${escaped}</p>\n`;
+    }
+    // Recurse into children
+    if (conv.children && conv.children.length) {
+      html += _serializeConversations(conv.children);
+    }
+    html += `</div>\n`;
+  }
+  return html;
+}
+
+async function _openReadView() {
+  if (!state || !state.conversations || !state.conversations.length) {
+    setStatus("No conversations to display.");
+    return;
+  }
+
+  // Fetch reading.css and inline it
+  let css = _READING_CSS_FALLBACK;
+  try {
+    const resp = await fetch(_apiPath("/reading.css"));
+    if (resp.ok) {
+      css = await resp.text();
+    }
+  } catch (e) {
+    // fallback CSS already set
+  }
+
+  const body = _serializeConversations(state.conversations);
+  const now = new Date().toLocaleString();
+  const doc = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WikiOracle — Read View</title>
+<style>
+${css}
+</style>
+</head>
+<body>
+<h1>WikiOracle</h1>
+<div class="meta">Exported ${now} — ${state.conversations.length} root conversation${state.conversations.length !== 1 ? "s" : ""}</div>
+${body}
+</body>
+</html>`;
+
+  const blob = new Blob([doc], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank");
+  if (!win) {
+    // Fallback for aggressive popup blockers: navigate in current tab
+    window.location.href = url;
+    return;
+  }
+  // Revoke after a delay so the new tab has time to load
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // ─── Bind UI events ───
@@ -788,6 +1063,12 @@ function bindEvents() {
     if (e.target === this) closeSettings();
   });
 
+  // Edit config.yaml button
+  document.getElementById("btnEditConfig").addEventListener("click", _openConfigEditor);
+
+  // Read button
+  document.getElementById("btnRead").addEventListener("click", _openReadView);
+
   // Textarea auto-resize + Enter to send
   const msgInput = document.getElementById("msgInput");
   msgInput.addEventListener("input", function() {
@@ -807,12 +1088,43 @@ async function init() {
   try {
     setStatus("Loading...");
 
-    // 1) Load prefs from server (config.yaml + state overrides)
+    // 0) Load server info (stateless flag, url_prefix)
+    //    url_prefix is detected from the page URL: if we're at /chat/,
+    //    API calls go to /chat/state etc.  Fallback: ask the server.
+    const pagePath = window.location.pathname.replace(/\/+$/, "");
+    if (pagePath && pagePath !== "/") {
+      _serverInfo.url_prefix = pagePath;
+    }
+    try {
+      const info = await api("GET", "/server_info");
+      _serverInfo = info;
+      // If server tells us a prefix and we didn't already detect one, use it
+      if (info.url_prefix && !pagePath) _serverInfo.url_prefix = info.url_prefix;
+    } catch (e) {
+      console.warn("[WikiOracle] Failed to load server_info:", e);
+    }
+
+    // Apply stateless mode to UI elements
+    if (_serverInfo.stateless) {
+      const cfgBtn = document.getElementById("btnEditConfig");
+      if (cfgBtn) { cfgBtn.disabled = true; cfgBtn.title = "Disabled (stateless mode)"; cfgBtn.style.opacity = "0.4"; }
+    }
+
+    // 1) Load prefs: server defaults first, then localStorage overlay in stateless mode
     try {
       const prefData = await api("GET", "/prefs");
       prefs = prefData.prefs || prefs;
     } catch (e) {
       console.warn("[WikiOracle] Failed to load prefs:", e);
+    }
+    if (_serverInfo.stateless) {
+      const local = _loadLocalPrefs();
+      if (local) {
+        // Merge: local overrides server defaults, preserving nested chat keys
+        const serverChat = prefs.chat || {};
+        Object.assign(prefs, local);
+        prefs.chat = { ...serverChat, ...(local.chat || {}) };
+      }
     }
 
     // 2) Load provider metadata and populate dropdown
@@ -833,10 +1145,17 @@ async function init() {
     applyLayout(prefs.layout);
     _updatePlaceholder();
 
-    // 4) Load state
+    // 4) Load state (server defaults, then localStorage overrides in stateless mode)
     const data = await api("GET", "/state");
     state = data.state || {};
     if (!Array.isArray(state.conversations)) state.conversations = [];
+    if (_serverInfo.stateless) {
+      const localState = _loadLocalState();
+      if (localState) {
+        if (localState.context != null) state.context = localState.context;
+        if (localState.output != null) state.output = localState.output;
+      }
+    }
 
     // Restore selected conversation from server state
     if (state.selected_conversation && findConversation(state.conversations, state.selected_conversation)) {

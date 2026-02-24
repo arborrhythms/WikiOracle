@@ -60,6 +60,17 @@ from wikioracle_state import (
     strip_xhtml,
     utc_now_iso,
 )
+from prompt_bundle import (
+    DEFAULT_OUTPUT,
+    PromptBundle,
+    Source,
+    build_prompt_bundle,
+    evaluate_providers,
+    rank_retrieval_entries,
+    to_anthropic_payload,
+    to_nanochat_messages,
+    to_openai_messages,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +163,18 @@ def _load_config_yaml() -> Dict[str, Any]:
 _CONFIG_YAML = _load_config_yaml()
 
 
+def _effective_output_format(prefs: Dict[str, Any], yaml_chat: Dict[str, Any]) -> str:
+    """Resolve output format from prefs and config."""
+    chat_prefs = prefs.get("chat", {}) if isinstance(prefs.get("chat"), dict) else {}
+    if "output_format" in prefs:
+        return prefs.get("output_format") or ""
+    if "output_format" in chat_prefs:
+        return chat_prefs.get("output_format") or ""
+    if "output_format" in yaml_chat:
+        return yaml_chat.get("output_format") or ""
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Provider configuration
 # ---------------------------------------------------------------------------
@@ -217,7 +240,7 @@ def _load_state(cfg: Config, *, strict: bool = True) -> Dict[str, Any]:
 
 def _save_state(cfg: Config, state: Dict[str, Any]) -> None:
     normalized = ensure_minimal_state(state, strict=True)
-    normalized["date"] = utc_now_iso()
+    normalized["time"] = utc_now_iso()
     serialized = json.dumps(normalized, ensure_ascii=False)
     if len(serialized.encode("utf-8")) > cfg.max_state_bytes:
         raise StateValidationError("State exceeds MAX_STATE_BYTES")
@@ -230,72 +253,33 @@ def _save_state(cfg: Config, state: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Upstream providers (v2: conversation-aware context building)
 # ---------------------------------------------------------------------------
-def _build_messages_for_upstream(
+def _build_bundle(
     state: Dict[str, Any],
     user_message: str,
     prefs: Dict[str, Any],
     conversation_id: str | None = None,
-) -> List[Dict[str, str]]:
-    """Build OpenAI-compatible messages array from state + new message.
+    transient_snippets: List[Dict] | None = None,
+) -> PromptBundle:
+    """Build a PromptBundle from state + user message (convenience wrapper)."""
+    return build_prompt_bundle(
+        state, user_message, prefs,
+        conversation_id=conversation_id,
+        transient_snippets=transient_snippets,
+    )
 
-    Uses the conversation tree to build context from ancestor chain.
-    """
-    messages: List[Dict[str, str]] = []
 
-    # 1) Always inject context
-    context_text = strip_xhtml(state.get("context", ""))
-    if context_text:
-        messages.append({"role": "user", "content": f"[Context] {context_text}"})
-        messages.append({"role": "assistant", "content": "Understood. I have the project context."})
-
-    # 2) Inject relevant trust entries if RAG enabled
-    if prefs.get("tools", {}).get("rag", True):
-        trust_entries = state.get("truth", {}).get("trust", [])
-        retrieval_prefs = state.get("truth", {}).get("retrieval_prefs", {})
-        max_entries = retrieval_prefs.get("max_entries", 8)
-        min_certainty = retrieval_prefs.get("min_certainty", 0.0)
-
-        relevant = [t for t in trust_entries if t.get("certainty", 0) >= min_certainty]
-        relevant.sort(key=lambda t: t.get("certainty", 0), reverse=True)
-        relevant = relevant[:max_entries]
-
-        if relevant:
-            trust_text = "\n".join(
-                f"- [{t.get('title', 'untitled')}] (certainty: {t.get('certainty', 0):.2f}): "
-                f"{strip_xhtml(t.get('content', ''))}"
-                for t in relevant
-            )
-            messages.append({"role": "user", "content": f"[Reference Documents]\n{trust_text}"})
-            messages.append({"role": "assistant", "content": "I've noted the reference documents and their certainty levels."})
-
-    # 3) Sliding window of conversation context (ancestor chain)
-    conversations = state.get("conversations", [])
-    if conversation_id:
-        context_msgs = get_context_messages(conversations, conversation_id)
+def _bundle_to_messages(bundle: PromptBundle, provider: str) -> List[Dict[str, str]]:
+    """Convert a PromptBundle to provider-appropriate messages list."""
+    if provider == "wikioracle":
+        return to_nanochat_messages(bundle)
+    elif provider == "openai":
+        return to_openai_messages(bundle)
+    elif provider == "anthropic":
+        # For Anthropic we return OpenAI-format messages; the caller
+        # uses to_anthropic_payload() directly for the full payload.
+        return to_openai_messages(bundle)
     else:
-        context_msgs = []
-
-    window_size = prefs.get("message_window", 40)
-    recent = context_msgs[-window_size:]
-    for msg in recent:
-        role = msg.get("role", "user")
-        content = strip_xhtml(msg.get("content", ""))
-        messages.append({"role": role, "content": content})
-
-    # 4) Current user message
-    messages.append({"role": "user", "content": user_message})
-
-    # 5) Debug testpoint: ask LLM to identify itself
-    if DEBUG_MODE:
-        messages.append({
-            "role": "user",
-            "content": "[TESTPOINT] In your reply, start with a single line: "
-                       "'I am [YOUR_MODEL_NAME].' where YOUR_MODEL_NAME is your "
-                       "actual model identifier (e.g. GPT-4o, Claude, etc). "
-                       "Then continue with your normal answer."
-        })
-
-    return messages
+        return to_openai_messages(bundle)
 
 
 def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str:
@@ -345,43 +329,62 @@ def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -
     return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "[No content]")
 
 
-def _call_anthropic(messages: List[Dict], temperature: float, provider_cfg: Dict) -> str:
-    system_text = ""
-    api_messages = []
-    for msg in messages:
-        if msg["role"] == "user" and msg["content"].startswith("[Context]") and not api_messages:
-            system_text = msg["content"]
-            continue
-        if msg["role"] == "assistant" and not api_messages:
-            continue
-        api_messages.append(msg)
-
-    cleaned = []
-    last_role = None
-    for msg in api_messages:
-        if msg["role"] == last_role:
-            cleaned[-1]["content"] += "\n" + msg["content"]
-        else:
-            cleaned.append(dict(msg))
-            last_role = msg["role"]
-    if cleaned and cleaned[0]["role"] != "user":
-        cleaned.insert(0, {"role": "user", "content": "(continuing conversation)"})
-
-    payload: Dict[str, Any] = {
-        "model": provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
-        "max_tokens": 2048, "messages": cleaned,
-    }
-    if system_text:
-        payload["system"] = system_text
-    if temperature > 0:
-        payload["temperature"] = temperature
+def _call_anthropic(bundle: PromptBundle | None, temperature: float, provider_cfg: Dict,
+                     messages: List[Dict] | None = None) -> str:
+    """Call Anthropic API. Prefers bundle-based payload; falls back to legacy messages."""
     url = provider_cfg.get("url", "https://api.anthropic.com/v1/messages")
+
+    if bundle is not None:
+        # New path: build payload directly from bundle
+        payload = to_anthropic_payload(
+            bundle,
+            model=provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
+            max_tokens=2048,
+            temperature=temperature,
+        )
+    else:
+        # Legacy path: messages passed directly (used by dynamic providers)
+        system_text = ""
+        api_messages = []
+        for msg in (messages or []):
+            if msg["role"] == "user" and msg["content"].startswith("[Context]") and not api_messages:
+                system_text = msg["content"]
+                continue
+            if msg["role"] == "assistant" and not api_messages:
+                continue
+            api_messages.append(msg)
+
+        cleaned = []
+        last_role = None
+        for msg in api_messages:
+            if msg["role"] == last_role:
+                cleaned[-1]["content"] += "\n" + msg["content"]
+            else:
+                cleaned.append(dict(msg))
+                last_role = msg["role"]
+        if cleaned and cleaned[0]["role"] != "user":
+            cleaned.insert(0, {"role": "user", "content": "(continuing conversation)"})
+
+        payload: Dict[str, Any] = {
+            "model": provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
+            "max_tokens": 2048, "messages": cleaned,
+        }
+        if system_text:
+            payload["system"] = system_text
+        if temperature > 0:
+            payload["temperature"] = temperature
+
     if DEBUG_MODE:
         print(f"[DEBUG] Anthropic → {url}")
-        print(f"[DEBUG] Anthropic system: {system_text[:200] if system_text else '(none)'}")
-        print(f"[DEBUG] Anthropic messages ({len(cleaned)}):")
-        for i, m in enumerate(cleaned):
+        sys_preview = payload.get("system", "(none)")
+        if isinstance(sys_preview, str) and len(sys_preview) > 200:
+            sys_preview = sys_preview[:200] + "..."
+        print(f"[DEBUG] Anthropic system: {sys_preview}")
+        msgs = payload.get("messages", [])
+        print(f"[DEBUG] Anthropic messages ({len(msgs)}):")
+        for i, m in enumerate(msgs):
             print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
+
     headers = {
         "Content-Type": "application/json",
         "x-api-key": provider_cfg["api_key"],
@@ -394,13 +397,16 @@ def _call_anthropic(messages: List[Dict], temperature: float, provider_cfg: Dict
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or "[No content]"
 
 
-def _call_provider(cfg: Config, messages: List[Dict], temperature: float,
+def _call_provider(cfg: Config, bundle: PromptBundle | None, temperature: float,
                     provider: str, client_api_key: str = "",
-                    client_model: str = "") -> str:
+                    client_model: str = "",
+                    messages: List[Dict] | None = None) -> str:
+    """Call a provider using a PromptBundle (preferred) or legacy messages."""
     if provider == "wikioracle":
         if DEBUG_MODE:
             print(f"[DEBUG] → _call_nanochat (wikioracle.org)")
-        return _call_nanochat(cfg, messages, temperature)
+        nano_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
+        return _call_nanochat(cfg, nano_msgs, temperature)
     pcfg = PROVIDERS.get(provider)
     if not pcfg:
         return f"[Unknown provider: {provider}. Available: {', '.join(PROVIDERS.keys())}]"
@@ -424,11 +430,12 @@ def _call_provider(cfg: Config, messages: List[Dict], temperature: float,
     if provider == "openai":
         if DEBUG_MODE:
             print(f"[DEBUG] → _call_openai ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
-        return _call_openai(messages, temperature, effective_cfg)
+        oai_msgs = to_openai_messages(bundle) if bundle else (messages or [])
+        return _call_openai(oai_msgs, temperature, effective_cfg)
     if provider == "anthropic":
         if DEBUG_MODE:
             print(f"[DEBUG] → _call_anthropic ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
-        return _call_anthropic(messages, temperature, effective_cfg)
+        return _call_anthropic(bundle, temperature, effective_cfg, messages=messages)
     return f"[Provider '{provider}' not implemented]"
 
 
@@ -516,89 +523,6 @@ def _call_dynamic_anthropic(
 # ---------------------------------------------------------------------------
 # Fan-out orchestration
 # ---------------------------------------------------------------------------
-def _build_upstream_with_transient_rag(
-    state: Dict[str, Any],
-    user_message: str,
-    prefs: Dict[str, Any],
-    transient_snippets: List[Dict],
-    conversation_id: str | None = None,
-) -> List[Dict[str, str]]:
-    """Build upstream messages including transient RAG snippets from secondary providers."""
-    messages: List[Dict[str, str]] = []
-
-    # 1) Context
-    context_text = strip_xhtml(state.get("context", ""))
-    if context_text:
-        messages.append({"role": "user", "content": f"[Context] {context_text}"})
-        messages.append({"role": "assistant", "content": "Understood. I have the project context."})
-
-    # 2) Normal trust entries (non-provider, non-src)
-    if prefs.get("tools", {}).get("rag", True):
-        trust_entries = state.get("truth", {}).get("trust", [])
-        retrieval_prefs = state.get("truth", {}).get("retrieval_prefs", {})
-        max_entries = retrieval_prefs.get("max_entries", 8)
-        min_certainty = retrieval_prefs.get("min_certainty", 0.0)
-
-        normal = [t for t in trust_entries
-                  if t.get("certainty", 0) >= min_certainty
-                  and "<provider" not in t.get("content", "")
-                  and "<src" not in t.get("content", "")]
-        normal.sort(key=lambda t: t.get("certainty", 0), reverse=True)
-        normal = normal[:max_entries]
-
-        src_entries = get_src_entries(trust_entries)
-        for entry, src_config in src_entries:
-            if entry.get("certainty", 0) < min_certainty:
-                continue
-            try:
-                content = resolve_src_content(src_config)
-                if content:
-                    normal.append({
-                        "title": entry.get("title", src_config.get("name", "Source")),
-                        "certainty": entry.get("certainty", 0),
-                        "content": f"<p>{content[:4000]}</p>",
-                    })
-            except Exception:
-                pass
-
-        if normal:
-            trust_text = "\n".join(
-                f"- [{t.get('title', 'untitled')}] (certainty: {t.get('certainty', 0):.2f}): "
-                f"{strip_xhtml(t.get('content', ''))}"
-                for t in normal
-            )
-            messages.append({"role": "user", "content": f"[Reference Documents]\n{trust_text}"})
-            messages.append({"role": "assistant", "content": "I've noted the reference documents and their certainty levels."})
-
-    # 3) Transient RAG snippets from secondary providers
-    if transient_snippets:
-        snippet_text = "\n".join(
-            f"- [{s.get('source', '?')}] (certainty: {s.get('certainty', 0):.2f}): "
-            f"{s.get('content', '')[:2000]}"
-            for s in transient_snippets
-        )
-        messages.append({"role": "user", "content": f"[Provider Consultations]\n{snippet_text}"})
-        messages.append({"role": "assistant", "content": "I've reviewed the provider consultations."})
-
-    # 4) Conversation context from ancestor chain
-    conversations = state.get("conversations", [])
-    if conversation_id:
-        context_msgs = get_context_messages(conversations, conversation_id)
-    else:
-        context_msgs = []
-
-    window_size = prefs.get("message_window", 40)
-    recent = context_msgs[-window_size:]
-    for msg in recent:
-        role = msg.get("role", "user")
-        content = strip_xhtml(msg.get("content", ""))
-        messages.append({"role": role, "content": content})
-
-    # 5) Current user message
-    messages.append({"role": "user", "content": user_message})
-    return messages
-
-
 def _fan_out_and_aggregate(
     cfg: Config,
     state: Dict[str, Any],
@@ -607,6 +531,16 @@ def _fan_out_and_aggregate(
     conversation_id: str | None = None,
     temperature: float = 0.7,
 ) -> tuple:
+    """HME fan-out: evaluate secondary providers, feed results to primary.
+
+    1. Build a base bundle (with RAG, without provider sources).
+    2. Evaluate all secondary <provider> entries in parallel with a
+       RAG-free bundle — each gets system, history, query, output only.
+    3. Their responses become Source(kind="provider") entries wrapped
+       in <div class="provider-response">.
+    4. Rebuild the final bundle with those provider sources included.
+    5. Send to primary provider (mastermind).
+    """
     trust_entries = state.get("truth", {}).get("trust", [])
     provider_entries = get_provider_entries(trust_entries)
 
@@ -616,55 +550,69 @@ def _fan_out_and_aggregate(
     primary_entry, primary_config = provider_entries[0]
     secondaries = provider_entries[1:]
 
-    base_messages = _build_messages_for_upstream(state, user_message, prefs, conversation_id)
+    # Build a preliminary bundle to extract system/history/query/output
+    base_bundle = _build_bundle(state, user_message, prefs, conversation_id)
 
-    transient_snippets: List[Dict] = []
-
+    # Evaluate secondaries: each gets a RAG-free bundle
+    provider_sources: List[Source] = []
     if secondaries:
-        def _call_secondary(pair):
-            entry, pconfig = pair
-            try:
-                result = _call_dynamic_provider(pconfig, base_messages, temperature, cfg)
-                if result and not result.startswith("[Error"):
-                    return {
-                        "source": pconfig.get("name", "unknown"),
-                        "certainty": entry.get("certainty", 0),
-                        "content": result[:4000],
-                        "timestamp": utc_now_iso(),
-                    }
-            except Exception:
-                pass
-            return None
+        def _call_for_eval(pconfig, messages):
+            return _call_dynamic_provider(pconfig, messages, temperature, cfg)
 
-        max_workers = min(len(secondaries), 4)
-        overall_timeout = max(int(cfg.timeout_s), 60)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_call_secondary, s): s for s in secondaries}
-            done, _ = concurrent.futures.wait(futures, timeout=overall_timeout)
-            for fut in done:
-                try:
-                    result = fut.result(timeout=0)
-                    if result:
-                        transient_snippets.append(result)
-                except Exception:
-                    pass
+        provider_sources = evaluate_providers(
+            secondaries,
+            system=base_bundle.system,
+            history=base_bundle.history,
+            query=base_bundle.query,
+            output=base_bundle.output,
+            call_fn=_call_for_eval,
+            timeout_s=max(int(cfg.timeout_s), 60),
+        )
 
-    final_messages = _build_upstream_with_transient_rag(
-        state, user_message, prefs, transient_snippets, conversation_id
+    # Build the final bundle: RAG sources + provider HME sources
+    final_bundle = build_prompt_bundle(
+        state, user_message, prefs,
+        conversation_id=conversation_id,
+        provider_sources=provider_sources,
     )
 
-    response_text = _call_dynamic_provider(primary_config, final_messages, temperature, cfg)
+    # Route to primary provider using appropriate adapter
+    api_url = primary_config.get("api_url", "")
+    if "anthropic.com" in api_url:
+        model = primary_config.get("model", "claude-sonnet-4-20250514")
+        max_tokens = primary_config.get("max_tokens") or 2048
+        payload = to_anthropic_payload(final_bundle, model=model,
+                                       max_tokens=max_tokens, temperature=temperature)
+        raw_key = primary_config.get("api_key", "")
+        api_key = resolve_api_key(raw_key) if raw_key else ""
+        timeout = primary_config.get("timeout") or int(cfg.timeout_s)
+        headers = {"Content-Type": "application/json",
+                   "x-api-key": api_key,
+                   "anthropic-version": "2023-06-01"}
+        resp = requests.post(api_url or "https://api.anthropic.com/v1/messages",
+                        json=payload, headers=headers, timeout=timeout)
+        if resp.status_code >= 400:
+            response_text = f"[Error: HTTP {resp.status_code}] {resp.text[:300]}"
+        else:
+            blocks = resp.json().get("content", [])
+            response_text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or "[No content]"
+    else:
+        # OpenAI-compatible or NanoChat: use nanochat messages (works for both)
+        final_messages = to_nanochat_messages(final_bundle)
+        response_text = _call_dynamic_provider(primary_config, final_messages, temperature, cfg)
 
+    # Fallback to secondaries if primary fails
     if response_text.startswith("[Error"):
+        fallback_messages = to_nanochat_messages(final_bundle)
         for entry, pconfig in secondaries:
             try:
-                fallback_text = _call_dynamic_provider(pconfig, final_messages, temperature, cfg)
+                fallback_text = _call_dynamic_provider(pconfig, fallback_messages, temperature, cfg)
                 if not fallback_text.startswith("[Error"):
-                    return fallback_text, transient_snippets
+                    return fallback_text, provider_sources
             except Exception:
                 continue
 
-    return response_text, transient_snippets
+    return response_text, provider_sources
 
 
 # ---------------------------------------------------------------------------
@@ -709,9 +657,9 @@ def _scan_and_merge_imports(cfg: Config) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Flask app factory
 # ---------------------------------------------------------------------------
-def create_app(cfg: Config) -> Flask:
+def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     app = Flask(__name__, static_folder=None)
-    startup_merge_report = _scan_and_merge_imports(cfg)
+    startup_merge_report = _scan_and_merge_imports(cfg) if not STATELESS_MODE else {}
 
     # CORS
     @app.after_request
@@ -724,11 +672,18 @@ def create_app(cfg: Config) -> Flask:
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         return response
 
-    @app.route("/health", methods=["GET"])
+    @app.route(url_prefix + "/health", methods=["GET"])
     def health():
         return jsonify({"ok": True})
 
-    @app.route("/info", methods=["GET"])
+    @app.route(url_prefix + "/server_info", methods=["GET"])
+    def server_info():
+        return jsonify({
+            "stateless": STATELESS_MODE,
+            "url_prefix": url_prefix,
+        })
+
+    @app.route(url_prefix + "/info", methods=["GET"])
     def info():
 
         try:
@@ -738,14 +693,14 @@ def create_app(cfg: Config) -> Flask:
                 "state_file_name": cfg.state_file.name,
                 "schema": state.get("schema", SCHEMA_URL),
                 "version": state.get("version", STATE_VERSION),
-                "date": state.get("date"),
+                "time": state.get("time"),
                 "providers": list(PROVIDERS.keys()),
                 "startup_merge": startup_merge_report,
             })
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
-    @app.route("/state", methods=["GET", "POST"])
+    @app.route(url_prefix + "/state", methods=["GET", "POST"])
     def state_endpoint():
 
         if flask_request.method == "GET":
@@ -755,6 +710,8 @@ def create_app(cfg: Config) -> Flask:
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
         else:
+            if STATELESS_MODE:
+                return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
             data = flask_request.get_json(force=True, silent=True)
             if not isinstance(data, dict):
                 return jsonify({"ok": False, "error": "invalid_state"}), 400
@@ -767,7 +724,7 @@ def create_app(cfg: Config) -> Flask:
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
 
-    @app.route("/chat", methods=["POST", "OPTIONS"])
+    @app.route(url_prefix + "/chat", methods=["POST", "OPTIONS"])
     def chat():
         if flask_request.method == "OPTIONS":
             return ("", 204)
@@ -779,27 +736,26 @@ def create_app(cfg: Config) -> Flask:
             return jsonify({"ok": False, "error": "missing_message"}), 400
 
         prefs = body.get("prefs", {}) if isinstance(body.get("prefs"), dict) else {}
+        global _CONFIG_YAML
+        fresh = _load_config_yaml()
+        if fresh:
+            _CONFIG_YAML = fresh
         yaml_chat = _CONFIG_YAML.get("chat", {})
         provider = prefs.get("provider", "wikioracle")
         client_model = (prefs.get("model") or "").strip()
         print(f"[WikiOracle] Chat request: provider='{provider}' (from client prefs)")
 
-        # Load ui_prefs.chat overrides (Settings dialog → state file)
-        try:
-            _state_for_prefs = _load_state(cfg)
-            ui_chat = _state_for_prefs.get("ui_prefs", {}).get("chat", {})
-        except Exception:
-            ui_chat = {}
-
-        # Priority: per-request prefs > ui_prefs.chat > config.yaml defaults
+        # Priority: per-request prefs > config.yaml defaults
         temperature = max(0.0, min(2.0, float(
-            prefs.get("temp", ui_chat.get("temperature", yaml_chat.get("temperature", 0.7)))
+            prefs.get("temp", yaml_chat.get("temperature", 0.7))
         )))
         if "tools" not in prefs:
             prefs["tools"] = {}
-        prefs["tools"].setdefault("rag", ui_chat.get("rag", yaml_chat.get("rag", True)))
-        prefs["tools"].setdefault("url_fetch", ui_chat.get("url_fetch", yaml_chat.get("url_fetch", False)))
-        prefs.setdefault("message_window", ui_chat.get("message_window", yaml_chat.get("message_window", 40)))
+        prefs["tools"].setdefault("rag", yaml_chat.get("rag", True))
+        prefs["tools"].setdefault("url_fetch", yaml_chat.get("url_fetch", False))
+        prefs.setdefault("message_window", yaml_chat.get("message_window", 40))
+        prefs["output_format"] = _effective_output_format(prefs, yaml_chat)
+        prefs.setdefault("retrieval", yaml_chat.get("retrieval", {}))
 
         # v2 conversation routing
         conversation_id = body.get("conversation_id")  # append to this conversation
@@ -807,6 +763,7 @@ def create_app(cfg: Config) -> Flask:
 
         try:
             state = _load_state(cfg)
+            user_timestamp = utc_now_iso()
 
             # Determine which conversation to use for upstream context
             context_conv_id = conversation_id or branch_from
@@ -830,14 +787,19 @@ def create_app(cfg: Config) -> Flask:
                 print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
                       f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
                       f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
-                messages = _build_messages_for_upstream(state, user_msg, prefs, context_conv_id)
+                bundle = _build_bundle(state, user_msg, prefs, context_conv_id)
                 if DEBUG_MODE:
-                    print(f"[DEBUG] Upstream messages ({len(messages)} total):")
-                    for i, m in enumerate(messages):
+                    # Show what the bundle contains
+                    print(f"[DEBUG] PromptBundle: system={len(bundle.system)} chars, "
+                          f"history={len(bundle.history)} msgs, "
+                          f"sources={len(bundle.sources)}, query={len(bundle.query)} chars")
+                    msgs = _bundle_to_messages(bundle, provider)
+                    print(f"[DEBUG] Upstream messages ({len(msgs)} total):")
+                    for i, m in enumerate(msgs):
                         role = m.get("role", "?")
                         content = m.get("content", "")
                         print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
-                response_text = _call_provider(cfg, messages, temperature, provider, "", client_model)
+                response_text = _call_provider(cfg, bundle, temperature, provider, "", client_model)
                 if DEBUG_MODE:
                     print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
                 llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
@@ -846,14 +808,14 @@ def create_app(cfg: Config) -> Flask:
             # Build message records
             user_content = ensure_xhtml(user_msg)
             assistant_content = ensure_xhtml(response_text)
-            now = utc_now_iso()
+            assistant_timestamp = utc_now_iso()
             user_display = _CONFIG_YAML.get("user", {}).get("name", "User")
             llm_display = llm_provider_name  # provider.name from YAML
 
             user_entry = {
                 "role": "user",
                 "username": user_display,
-                "timestamp": now,
+                "time": user_timestamp,
                 "content": user_content,
             }
             ensure_message_id(user_entry)
@@ -861,7 +823,7 @@ def create_app(cfg: Config) -> Flask:
             assistant_entry = {
                 "role": "assistant",
                 "username": llm_display,
-                "timestamp": now,
+                "time": assistant_timestamp,
                 "content": assistant_content,
             }
             ensure_message_id(assistant_entry)
@@ -898,20 +860,22 @@ def create_app(cfg: Config) -> Flask:
                 state["selected_conversation"] = new_conv["id"]
 
             state["conversations"] = conversations
-            _save_state(cfg, state)
 
-            # Reload after save to get normalized state
-            state = _load_state(cfg)
+            if not STATELESS_MODE:
+                _save_state(cfg, state)
+                # Reload after save to get normalized state
+                state = _load_state(cfg)
 
             return jsonify({"ok": True, "text": response_text, "state": state})
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 502
 
-    @app.route("/merge", methods=["POST", "OPTIONS"])
+    @app.route(url_prefix + "/merge", methods=["POST", "OPTIONS"])
     def merge_endpoint():
         if flask_request.method == "OPTIONS":
             return ("", 204)
-
+        if STATELESS_MODE:
+            return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
 
         body = flask_request.get_json(force=True, silent=True) or {}
 
@@ -960,7 +924,64 @@ def create_app(cfg: Config) -> Flask:
             _save_state(cfg, base)
         return jsonify({"ok": True, "merged": merged_count, "files": merged_names})
 
-    @app.route("/providers", methods=["GET"])
+    @app.route(url_prefix + "/config", methods=["GET", "POST"])
+    def config_endpoint():
+        """GET: serve raw config.yaml text.  POST: overwrite config.yaml."""
+        global _CONFIG_YAML
+        try:
+            import yaml
+        except ImportError:
+            return jsonify({"ok": False, "error": "pyyaml not installed"}), 500
+        cfg_path = Path(__file__).resolve().parent / "config.yaml"
+
+        if flask_request.method == "GET":
+            if not cfg_path.exists():
+                return jsonify({"ok": True, "yaml": ""})
+            try:
+                raw_text = cfg_path.read_text(encoding="utf-8")
+                return jsonify({"ok": True, "yaml": raw_text})
+            except Exception as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 500
+        else:
+            if STATELESS_MODE:
+                return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
+            # POST: save new YAML content
+            body = flask_request.get_json(force=True, silent=True) or {}
+            new_yaml = body.get("yaml", "")
+            if not isinstance(new_yaml, str):
+                return jsonify({"ok": False, "error": "yaml must be a string"}), 400
+            # Validate it parses
+            try:
+                parsed = yaml.safe_load(new_yaml)
+                if parsed is not None and not isinstance(parsed, dict):
+                    return jsonify({"ok": False, "error": "config.yaml must be a YAML mapping"}), 400
+            except yaml.YAMLError as exc:
+                return jsonify({"ok": False, "error": f"YAML parse error: {exc}"}), 400
+            try:
+                cfg_path.write_text(new_yaml, encoding="utf-8")
+                # Hot-reload the in-memory config
+                _CONFIG_YAML = _load_config_yaml()
+                return jsonify({"ok": True})
+            except Exception as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.route(url_prefix + "/spec_defaults", methods=["GET"])
+    def spec_defaults_endpoint():
+        """Serve spec defaults for reset buttons (context, output, config.yaml)."""
+        result: Dict[str, str] = {
+            "context": "<div/>",
+            "output": DEFAULT_OUTPUT,
+            "config_yaml": "",
+        }
+        spec_cfg = Path(__file__).resolve().parent / "spec" / "config.yaml"
+        if spec_cfg.exists():
+            try:
+                result["config_yaml"] = spec_cfg.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        return jsonify(result)
+
+    @app.route(url_prefix + "/providers", methods=["GET"])
     def providers():
 
         result = {}
@@ -972,52 +993,61 @@ def create_app(cfg: Config) -> Flask:
             }
         return jsonify({"providers": result})
 
-    @app.route("/prefs", methods=["GET", "POST"])
+    @app.route(url_prefix + "/prefs", methods=["GET", "POST"])
     def prefs_endpoint():
-        """Serve and persist UI preferences (config.yaml defaults + state overrides)."""
+        """Serve UI preferences from config.yaml (all prefs live in YAML now)."""
+        global _CONFIG_YAML
 
+        # Re-read config.yaml to pick up hot-reloads
+        fresh = _load_config_yaml()
+        if fresh:
+            _CONFIG_YAML = fresh
 
         yaml_ui = _CONFIG_YAML.get("ui", {})
         yaml_chat = _CONFIG_YAML.get("chat", {})
 
         if flask_request.method == "GET":
-            try:
-                state = _load_state(cfg)
-            except Exception:
-                state = {}
-            overrides = state.get("ui_prefs", {})
-            chat_overrides = overrides.get("chat", {})
-            provider = overrides.get("provider", yaml_ui.get("default_provider", "wikioracle"))
             prefs = {
-                "provider": provider,
-                "layout": overrides.get("layout", yaml_ui.get("layout", "flat")),
-                "username": overrides.get("username", _CONFIG_YAML.get("user", {}).get("name", "User")),
+                "provider": yaml_ui.get("default_provider", "wikioracle"),
+                "layout": yaml_ui.get("layout", "flat"),
+                "username": _CONFIG_YAML.get("user", {}).get("name", "User"),
                 "chat": {
-                    "temperature": chat_overrides.get("temperature", yaml_chat.get("temperature", 0.7)),
-                    "message_window": chat_overrides.get("message_window", yaml_chat.get("message_window", 40)),
-                    "rag": chat_overrides.get("rag", yaml_chat.get("rag", True)),
-                    "url_fetch": chat_overrides.get("url_fetch", yaml_chat.get("url_fetch", False)),
-                    "confirm_actions": chat_overrides.get("confirm_actions", yaml_chat.get("confirm_actions", False)),
+                    "temperature": yaml_chat.get("temperature", 0.7),
+                    "message_window": yaml_chat.get("message_window", 40),
+                    "output_format": yaml_chat.get("output_format", ""),
+                    "rag": yaml_chat.get("rag", True),
+                    "url_fetch": yaml_chat.get("url_fetch", False),
+                    "confirm_actions": yaml_chat.get("confirm_actions", False),
                 },
             }
             return jsonify({"prefs": prefs})
         else:
-            # POST: save overrides to state.ui_prefs
+            if STATELESS_MODE:
+                return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
+            # POST: update config.yaml with new pref values
             body = flask_request.get_json(force=True, silent=True) or {}
             try:
-                state = _load_state(cfg)
-                ui_prefs = state.get("ui_prefs", {})
-                for key in ("provider", "layout", "username"):
-                    if key in body:
-                        ui_prefs[key] = body[key]
+                import yaml
+                cfg_path = Path(__file__).resolve().parent / "config.yaml"
+                raw = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
+                data = yaml.safe_load(raw) or {}
+
+                if "username" in body:
+                    data.setdefault("user", {})["name"] = body["username"]
+                if "provider" in body:
+                    data.setdefault("ui", {})["default_provider"] = body["provider"]
+                if "layout" in body:
+                    data.setdefault("ui", {})["layout"] = body["layout"]
                 if "chat" in body and isinstance(body["chat"], dict):
-                    chat_prefs = ui_prefs.get("chat", {})
+                    chat_sec = data.setdefault("chat", {})
                     for key in ("temperature", "message_window", "rag", "url_fetch", "confirm_actions"):
                         if key in body["chat"]:
-                            chat_prefs[key] = body["chat"][key]
-                    ui_prefs["chat"] = chat_prefs
-                state["ui_prefs"] = ui_prefs
-                _save_state(cfg, state)
+                            chat_sec[key] = body["chat"][key]
+                    if "output_format" in body["chat"]:
+                        chat_sec["output_format"] = body["chat"].get("output_format") or ""
+
+                cfg_path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+                _CONFIG_YAML = _load_config_yaml()
                 return jsonify({"ok": True})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
@@ -1028,14 +1058,14 @@ def create_app(cfg: Config) -> Flask:
     except NameError:
         ui_dir = Path.cwd() / "html"
 
-    @app.route("/", methods=["GET"])
+    @app.route(url_prefix + "/", methods=["GET"])
     def ui_index():
         ui_path = ui_dir / "index.html"
         if ui_path.exists():
             return send_from_directory(str(ui_dir), "index.html")
         return "<h3>WikiOracle Local Shim</h3><p>index.html not found.</p>", 404
 
-    @app.route("/<path:filename>", methods=["GET"])
+    @app.route(url_prefix + "/<path:filename>", methods=["GET"])
     def static_files(filename):
         safe_ext = {".html", ".css", ".js", ".svg", ".png", ".ico", ".json", ".jsonl"}
         if Path(filename).suffix.lower() in safe_ext:
@@ -1076,10 +1106,15 @@ def run_cli_merge(cfg: Config, incoming_files: List[Path]) -> int:
 # Entry point
 # ---------------------------------------------------------------------------
 DEBUG_MODE = False
+STATELESS_MODE = False
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WikiOracle local shim")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument("--stateless", action="store_true",
+                        help="Run in stateless mode (no writes to disk; editors disabled)")
+    parser.add_argument("--url-prefix", default="",
+                        help="URL path prefix (e.g. /chat) for reverse-proxy deployments")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("serve", help="Run Flask shim server (default)")
     merge_parser = sub.add_parser("merge", help="Merge llm_*.jsonl files into state")
@@ -1088,9 +1123,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    global DEBUG_MODE
+    global DEBUG_MODE, STATELESS_MODE
     args = parse_args()
     DEBUG_MODE = args.debug
+    STATELESS_MODE = args.stateless or _env_bool("WIKIORACLE_STATELESS", False)
     cfg = load_config()
 
     if args.cmd == "merge":
@@ -1098,16 +1134,21 @@ def main() -> int:
         return run_cli_merge(cfg, incoming_files)
 
     # Default: serve
-    cfg.state_file.parent.mkdir(parents=True, exist_ok=True)
-    if not cfg.state_file.exists():
-        initial = ensure_minimal_state({}, strict=False)
-        atomic_write_jsonl(cfg.state_file, initial, reject_symlinks=cfg.reject_symlinks)
+    url_prefix = (args.url_prefix or os.environ.get("WIKIORACLE_URL_PREFIX", "")).strip().rstrip("/")
+
+    if not STATELESS_MODE:
+        cfg.state_file.parent.mkdir(parents=True, exist_ok=True)
+        if not cfg.state_file.exists():
+            initial = ensure_minimal_state({}, strict=False)
+            atomic_write_jsonl(cfg.state_file, initial, reject_symlinks=cfg.reject_symlinks)
 
     print(f"\n{'='*60}")
     print(f"  WikiOracle Local Shim")
     print(f"{'='*60}")
-    print(f"  State file : {cfg.state_file}")
+    print(f"  State file : {cfg.state_file}{' (STATELESS — no writes)' if STATELESS_MODE else ''}")
     print(f"  Bind       : {cfg.bind_host}:{cfg.bind_port}")
+    if url_prefix:
+        print(f"  URL prefix : {url_prefix}")
     prov_info = []
     for k, p in PROVIDERS.items():
         has_key = bool(p.get("api_key"))
@@ -1124,11 +1165,12 @@ def main() -> int:
     for pi in prov_info:
         print(f"    {pi}")
     print(f"  Config YAML: {_CONFIG_YAML_STATUS}")
+    print(f"  Stateless  : {'ON' if STATELESS_MODE else 'off'}")
     print(f"  Debug      : {'ON' if DEBUG_MODE else 'off'}")
-    print(f"  UI         : http://{cfg.bind_host}:{cfg.bind_port}/")
+    print(f"  UI         : http://{cfg.bind_host}:{cfg.bind_port}{url_prefix}/")
     print(f"{'='*60}\n")
 
-    app = create_app(cfg)
+    app = create_app(cfg, url_prefix=url_prefix)
     app.run(host=cfg.bind_host, port=cfg.bind_port, debug=False)
     return 0
 

@@ -1,0 +1,68 @@
+/* reading.css — WikiOracle readable view styles */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.8;
+  color: #1a1a1a;
+  background: #fafaf8;
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+h1 {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #111;
+}
+
+.meta {
+  font-size: 0.85rem;
+  color: #888;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.conversation {
+  margin-bottom: 1.5rem;
+  padding-left: 1.2rem;
+  border-left: 2px solid #d0d0d0;
+}
+
+.conversation > .conv-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 0.6rem;
+  letter-spacing: 0.02em;
+}
+
+p.message {
+  margin-bottom: 0.6rem;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+}
+
+p.message strong {
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+p.message.user strong { color: #2563eb; }
+p.message.assistant strong { color: #059669; }
+
+/* Nested branches indent further */
+.conversation .conversation {
+  margin-top: 1rem;
+  border-left-color: #c0c0c0;
+}
+
+.conversation .conversation .conversation {
+  border-left-color: #b0b0b0;
+}

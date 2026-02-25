@@ -121,8 +121,8 @@ def ensure_xhtml(fragment: Any) -> str:
 
 
 def strip_xhtml(content: str) -> str:
-    """Remove tags from XHTML content for title/snippet extraction."""
-    return re.sub(r"<[^>]+>", "", content).strip()
+    """Remove tags and decode entities from XHTML content."""
+    return html.unescape(re.sub(r"<[^>]+>", "", content)).strip()
 
 
 # ---------------------------------------------------------------------------

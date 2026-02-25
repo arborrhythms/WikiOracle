@@ -15,8 +15,6 @@ from wikioracle_state import (
     ALLOWED_DATA_DIR,
     DEFAULT_OUTPUT,
     SCHEMA_URL,
-    SCHEMA_URL_V1,
-    SCHEMA_URL_V2,
     STATE_VERSION,
     StateValidationError,
     add_child_conversation,
@@ -36,7 +34,6 @@ from wikioracle_state import (
     jsonl_to_state,
     load_state_file,
     merge_llm_states,
-    migrate_v1_to_v2,
     parse_provider_block,
     parse_src_block,
     remove_conversation,
@@ -94,11 +91,6 @@ class TestEnsureMinimalState(unittest.TestCase):
         self.assertIn("truth", state)
         self.assertIsNone(state["selected_conversation"])
 
-    def test_strict_rejects_bad_version(self):
-        with self.assertRaises(StateValidationError):
-            ensure_minimal_state({"version": 99, "schema": SCHEMA_URL, "time": "2026-01-01T00:00:00Z",
-                                  "context": "<div/>", "conversations": [], "truth": {"trust": []}}, strict=True)
-
     def test_strict_rejects_bad_schema(self):
         with self.assertRaises(StateValidationError):
             ensure_minimal_state({"version": 2, "schema": "bad", "time": "2026-01-01T00:00:00Z",
@@ -125,31 +117,6 @@ class TestEnsureMinimalState(unittest.TestCase):
                     }), strict=True)
         self.assertEqual(state["truth"]["trust"][0]["certainty"], 1.0)
 
-    def test_auto_migrates_v1(self):
-        """V1 state with messages and parent_id is auto-migrated to v2."""
-        v1 = {
-            "version": 1,
-            "schema": SCHEMA_URL_V1,
-            "time": "2026-02-23T00:00:00Z",
-            "context": "<div>V1</div>",
-            "messages": [
-                {"id": "m_1", "parent_id": None, "username": "Alec",
-                 "time": "2026-02-23T00:00:01Z", "content": "<p>hello</p>"},
-                {"id": "m_2", "parent_id": "m_1", "username": "WikiOracle NanoChat",
-                 "time": "2026-02-23T00:00:02Z", "content": "<p>hi</p>"},
-            ],
-            "truth": {"trust": []},
-        }
-        state = ensure_minimal_state(v1, strict=False)
-        self.assertEqual(state["version"], 2)
-        self.assertNotIn("messages", state)
-        self.assertGreaterEqual(len(state["conversations"]), 1)
-        # Check first conversation has 2 messages
-        conv = state["conversations"][0]
-        self.assertEqual(len(conv["messages"]), 2)
-        self.assertEqual(conv["messages"][0]["role"], "user")
-        self.assertEqual(conv["messages"][1]["role"], "assistant")
-
     def test_removes_legacy_fields(self):
         state = ensure_minimal_state({
             "version": 2, "schema": SCHEMA_URL, "time": "2026-02-23T00:00:00Z",
@@ -160,61 +127,6 @@ class TestEnsureMinimalState(unittest.TestCase):
         }, strict=False)
         self.assertNotIn("messages", state)
         self.assertNotIn("active_path", state)
-
-
-class TestV1MigrationDetailed(unittest.TestCase):
-
-    def test_empty_messages(self):
-        v2 = migrate_v1_to_v2({"version": 1, "messages": [], "truth": {"trust": []}})
-        self.assertEqual(v2["version"], 2)
-        self.assertEqual(v2["conversations"], [])
-
-    def test_linear_chain(self):
-        v1 = {
-            "version": 1,
-            "messages": [
-                {"id": "m_1", "parent_id": None, "username": "Alec",
-                 "time": "2026-02-23T00:00:01Z", "content": "<p>Q1</p>"},
-                {"id": "m_2", "parent_id": "m_1", "username": "Bot",
-                 "time": "2026-02-23T00:00:02Z", "content": "<p>A1</p>"},
-                {"id": "m_3", "parent_id": "m_2", "username": "Alec",
-                 "time": "2026-02-23T00:00:03Z", "content": "<p>Q2</p>"},
-                {"id": "m_4", "parent_id": "m_3", "username": "Bot",
-                 "time": "2026-02-23T00:00:04Z", "content": "<p>A2</p>"},
-            ],
-            "truth": {"trust": []},
-        }
-        v2 = migrate_v1_to_v2(v1)
-        # Linear chain = one conversation with 4 messages
-        self.assertEqual(len(v2["conversations"]), 1)
-        conv = v2["conversations"][0]
-        self.assertEqual(len(conv["messages"]), 4)
-        self.assertEqual(conv["children"], [])
-
-    def test_branching(self):
-        v1 = {
-            "version": 1,
-            "messages": [
-                {"id": "m_1", "parent_id": None, "username": "Alec",
-                 "time": "2026-02-23T00:00:01Z", "content": "<p>Root</p>"},
-                {"id": "m_2", "parent_id": "m_1", "username": "Bot",
-                 "time": "2026-02-23T00:00:02Z", "content": "<p>Reply</p>"},
-                {"id": "m_3", "parent_id": "m_2", "username": "Alec",
-                 "time": "2026-02-23T00:00:03Z", "content": "<p>Branch A</p>"},
-                {"id": "m_4", "parent_id": "m_2", "username": "Alec",
-                 "time": "2026-02-23T00:00:04Z", "content": "<p>Branch B</p>"},
-            ],
-            "truth": {"trust": []},
-        }
-        v2 = migrate_v1_to_v2(v1)
-        # Root conversation has m_1, m_2 (chain stops at m_2 because 2 children)
-        # Two child conversations: m_3 and m_4
-        self.assertEqual(len(v2["conversations"]), 1)
-        root_conv = v2["conversations"][0]
-        self.assertEqual(len(root_conv["messages"]), 2)
-        self.assertEqual(len(root_conv["children"]), 2)
-        child_msgs = {len(c["messages"]) for c in root_conv["children"]}
-        self.assertEqual(child_msgs, {1})  # each branch has 1 message
 
 
 class TestJSONLRoundTrip(unittest.TestCase):
@@ -325,16 +237,13 @@ class TestJSONLRoundTrip(unittest.TestCase):
             self.assertEqual(ids_orig, ids_disk, "Trust entries must survive disk round-trip")
 
     def test_legacy_json_detection(self):
-        """load_state_file should handle legacy monolithic JSON (v1 format)."""
+        """load_state_file should handle legacy monolithic JSON gracefully."""
         state = {
             "version": 1,
-            "schema": SCHEMA_URL_V1,
+            "schema": SCHEMA_URL,
             "time": "2026-02-23T00:00:00Z",
             "context": "<div/>",
-            "messages": [
-                {"id": "m_1", "username": "Alec", "parent_id": None,
-                 "time": "2026-02-23T00:00:01Z", "content": "<p>Hi</p>"}
-            ],
+            "conversations": [],
             "truth": {"trust": []},
         }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -344,7 +253,6 @@ class TestJSONLRoundTrip(unittest.TestCase):
         try:
             loaded = load_state_file(path, strict=False)
             self.assertEqual(loaded["version"], 2)
-            self.assertGreaterEqual(len(loaded["conversations"]), 1)
         finally:
             path.unlink()
 

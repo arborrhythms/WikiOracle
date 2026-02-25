@@ -14,8 +14,14 @@ function escapeHtml(text) {
   return (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function decodeEntities(text) {
+  var el = document.createElement("textarea");
+  el.innerHTML = text || "";
+  return el.value;
+}
+
 function stripTags(html) {
-  return (html || "").replace(/<[^>]+>/g, "");
+  return decodeEntities((html || "").replace(/<[^>]+>/g, ""));
 }
 
 // ─── Text truncation ───

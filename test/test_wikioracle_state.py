@@ -277,6 +277,53 @@ class TestJSONLRoundTrip(unittest.TestCase):
         self.assertEqual(root["children"][0]["id"], "c_2")
         self.assertEqual(restored["selected_conversation"], "c_2")
 
+    def test_hme_jsonl_roundtrip(self):
+        """spec/hme.jsonl survives load → serialize → reload with all trust entries intact."""
+        spec_path = Path(__file__).resolve().parent.parent / "spec" / "hme.jsonl"
+        if not spec_path.exists():
+            self.skipTest("spec/hme.jsonl not found")
+
+        original = load_state_file(spec_path, strict=True)
+
+        # Verify initial parse has expected trust entries
+        trust = original.get("truth", {}).get("trust", [])
+        self.assertGreaterEqual(len(trust), 10, "hme.jsonl should have ≥10 trust entries")
+        ids_orig = {e["id"] for e in trust if "id" in e}
+        self.assertIn("t_axiom_01", ids_orig)
+        self.assertIn("t_false_01", ids_orig)
+        self.assertIn("t_provider_claude", ids_orig)
+
+        # Context should describe Kleene ternary logic
+        self.assertIn("Kleene", original.get("context", ""))
+
+        # Round-trip: serialize → parse → normalize
+        jsonl_text = state_to_jsonl(original)
+        restored = jsonl_to_state(jsonl_text)
+        restored = ensure_minimal_state(restored, strict=True)
+
+        # Trust entries preserved
+        trust_rt = restored.get("truth", {}).get("trust", [])
+        ids_rt = {e["id"] for e in trust_rt if "id" in e}
+        self.assertEqual(ids_orig, ids_rt, "Trust entry IDs must survive round-trip")
+
+        # Certainty values preserved (including negative)
+        by_id = {e["id"]: e for e in trust_rt}
+        self.assertEqual(by_id["t_axiom_01"]["certainty"], 1.0)
+        self.assertEqual(by_id["t_false_01"]["certainty"], -0.9)
+        self.assertEqual(by_id["t_soft_01"]["certainty"], 0.8)
+
+        # Context preserved
+        self.assertIn("Kleene", restored.get("context", ""))
+
+        # Write to disk and reload (full disk round-trip)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "hme_roundtrip.jsonl"
+            atomic_write_jsonl(path, original)
+            reloaded = load_state_file(path, strict=True)
+            trust_disk = reloaded.get("truth", {}).get("trust", [])
+            ids_disk = {e["id"] for e in trust_disk if "id" in e}
+            self.assertEqual(ids_orig, ids_disk, "Trust entries must survive disk round-trip")
+
     def test_legacy_json_detection(self):
         """load_state_file should handle legacy monolithic JSON (v1 format)."""
         state = {

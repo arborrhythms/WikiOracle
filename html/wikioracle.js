@@ -1,5 +1,5 @@
 // wikioracle.js — WikiOracle v2 client (conversation-based hierarchy)
-// Preferences: served by config.yaml when writable; localStorage when stateless.
+// Preferences: served by config.yaml when writable; sessionStorage when stateless.
 
 // ─── XHTML validation and repair ───
 function validateXhtml(content) {
@@ -38,40 +38,166 @@ function ensureXhtml(content) {
 // ─── Server info (loaded on init) ───
 let _serverInfo = { stateless: false, url_prefix: "" };
 
-// ─── Preferences (loaded from server on init, localStorage overlay in stateless) ───
+// ─── Preferences (derived in memory from config bundle) ───
 let prefs = { provider: "wikioracle", layout: "flat", username: "User" };
-const _PREFS_KEY = "wikioracle_prefs";
-
-function _loadLocalPrefs() {
-  try {
-    const raw = localStorage.getItem(_PREFS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-function _saveLocalPrefs() {
-  try { localStorage.setItem(_PREFS_KEY, JSON.stringify(prefs)); } catch {}
-}
 
 const _STATE_KEY = "wikioracle_state";
 const _CONFIG_KEY = "wikioracle_config";
 
+// Config bundle in sessionStorage: { yaml: "<raw text>", parsed: {...}, prefs: {...} }
+function _loadLocalConfig() {
+  try {
+    const raw = sessionStorage.getItem(_CONFIG_KEY);
+    if (!raw) return null;
+    const bundle = JSON.parse(raw);
+    // Handle legacy format (raw YAML string, not a bundle)
+    if (typeof bundle === "string") return null;
+    return bundle;
+  } catch { return null; }
+}
+
+function _saveLocalConfig(bundle) {
+  try { sessionStorage.setItem(_CONFIG_KEY, JSON.stringify(bundle)); } catch {}
+}
+
+// Derive prefs from a parsed config dict — mirrors server's _derive_prefs()
+function _derivePrefs(cfg) {
+  const ui = (cfg && cfg.ui) || {};
+  const chat = (cfg && cfg.chat) || {};
+  const user = (cfg && cfg.user) || {};
+  return {
+    provider: ui.default_provider || "wikioracle",
+    layout: ui.layout || "flat",
+    username: user.name || "User",
+    chat: {
+      temperature: chat.temperature !== undefined ? chat.temperature : 0.7,
+      message_window: chat.message_window !== undefined ? chat.message_window : 40,
+      rag: chat.rag !== false,
+      url_fetch: !!chat.url_fetch,
+      confirm_actions: !!chat.confirm_actions,
+    },
+    css: ui.css || "",
+  };
+}
+
+// One-time migration: wikioracle_prefs → config bundle
+async function _migratePrefsToConfig() {
+  const _OLD_PREFS_KEY = "wikioracle_prefs";
+  let oldPrefs;
+  try {
+    const raw = sessionStorage.getItem(_OLD_PREFS_KEY);
+    if (!raw) return; // nothing to migrate
+    oldPrefs = JSON.parse(raw);
+  } catch { return; }
+
+  const existing = _loadLocalConfig();
+  if (existing && existing.prefs) {
+    // Config bundle already exists — just clean up
+    sessionStorage.removeItem(_OLD_PREFS_KEY);
+    return;
+  }
+
+  // Build parsed config from old prefs
+  const parsed = {
+    user: { name: oldPrefs.username || "User" },
+    ui: {
+      default_provider: oldPrefs.provider || "wikioracle",
+      layout: oldPrefs.layout || "flat",
+    },
+    chat: { ...(oldPrefs.chat || {}) },
+  };
+  if (oldPrefs.css) parsed.ui.css = oldPrefs.css;
+
+  // Fetch YAML text from server as seed (best-effort)
+  let yamlText = "";
+  // Check if legacy wikioracle_config had raw YAML text
+  try {
+    const raw = sessionStorage.getItem(_CONFIG_KEY);
+    if (raw && typeof raw === "string") {
+      const test = JSON.parse(raw);
+      // If it parsed as a string (not object), it was raw YAML stored directly
+      if (typeof test === "string") yamlText = test;
+    }
+  } catch {
+    // Not JSON — might be raw YAML text stored directly
+    try {
+      const raw = sessionStorage.getItem(_CONFIG_KEY);
+      if (raw) yamlText = raw;
+    } catch {}
+  }
+  if (!yamlText) {
+    try {
+      const data = await api("GET", "/config");
+      yamlText = data.yaml || "";
+    } catch {}
+  }
+
+  _saveLocalConfig({ yaml: yamlText, parsed: parsed, prefs: _derivePrefs(parsed) });
+  sessionStorage.removeItem(_OLD_PREFS_KEY);
+}
+
 function _loadLocalState() {
   try {
-    const raw = localStorage.getItem(_STATE_KEY);
+    const raw = sessionStorage.getItem(_STATE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
 function _saveLocalState() {
-  try { localStorage.setItem(_STATE_KEY, JSON.stringify(state)); } catch {}
+  try { sessionStorage.setItem(_STATE_KEY, JSON.stringify(state)); } catch {}
 }
 
-// Persist state: always POST to server (keeps _MEMORY_STATE in sync);
-// also save to localStorage in stateless mode as client-side backup.
+// Client-side merge: fold importState data into the live `state` object.
+// Merges trust entries (by id, import wins), conversations (appended),
+// and context (kept from current state — import context is not overwritten).
+function _clientMerge(importState) {
+  // Trust entries: merge by id (import overwrites duplicates)
+  if (!state.truth) state.truth = {};
+  if (!Array.isArray(state.truth.trust)) state.truth.trust = [];
+  const incoming = (importState.truth && importState.truth.trust) || [];
+  const byId = {};
+  for (const e of state.truth.trust) { if (e.id) byId[e.id] = e; }
+  for (const e of incoming) {
+    if (e.id && byId[e.id]) {
+      // Replace existing entry
+      const idx = state.truth.trust.indexOf(byId[e.id]);
+      if (idx >= 0) state.truth.trust[idx] = e;
+    } else {
+      state.truth.trust.push(e);
+    }
+  }
+
+  // Conversations: append any new roots
+  const importConvs = importState.conversations || [];
+  if (importConvs.length > 0) {
+    if (!Array.isArray(state.conversations)) state.conversations = [];
+    const existingIds = new Set();
+    (function walk(nodes) { for (const n of nodes) { existingIds.add(n.id); if (n.children) walk(n.children); } })(state.conversations);
+    for (const conv of importConvs) {
+      if (!existingIds.has(conv.id)) state.conversations.push(conv);
+    }
+  }
+
+  // Context: keep current state context (don't overwrite)
+  // Output: keep current state output (don't overwrite)
+}
+
+// Persist state: sessionStorage is authoritative in stateless mode;
+// disk-backed POST /state is used in stateful mode.
 function _persistState() {
-  if (_serverInfo.stateless) _saveLocalState();
-  api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  if (_serverInfo.stateless) {
+    _saveLocalState();
+  } else {
+    api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
+  }
+}
+
+// Build the runtime_config dict from the current config bundle (stateless).
+// This is the parsed config.yaml content that the server needs for
+// provider resolution, chat settings, and user display name.
+function _buildRuntimeConfig() {
+  const bundle = _loadLocalConfig();
+  return (bundle && bundle.parsed) ? bundle.parsed : {};
 }
 
 function applyLayout(layout) {
@@ -472,7 +598,7 @@ function renderMessages() {
   if (!state) state = {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
 
-  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor, onDeleteAll: _deleteAllConversations };
+  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations };
 
   // Validate selectedConvId: if it points to a missing conversation, reset to root
   if (selectedConvId !== null && !findConversation(state.conversations, selectedConvId)) {
@@ -671,7 +797,7 @@ async function sendMessage() {
   renderMessages();
 
   try {
-    const data = await api("POST", "/chat", {
+    const chatBody = {
       message: text,
       conversation_id: conversationId || undefined,
       branch_from: branchFrom || undefined,
@@ -681,7 +807,13 @@ async function sendMessage() {
         username: prefs.username,
         chat: prefs.chat || {},
       },
-    });
+    };
+    // Stateless: include authoritative state + runtime_config
+    if (_serverInfo.stateless) {
+      chatBody.state = state;
+      chatBody.runtime_config = _buildRuntimeConfig();
+    }
+    const data = await api("POST", "/chat", chatBody);
     state = data.state || state;
     if (!Array.isArray(state.conversations)) state.conversations = [];
 
@@ -694,10 +826,15 @@ async function sendMessage() {
     renderMessages();
     setStatus("Ready");
   } catch (e) {
-    // Rollback: reload state from server
+    // Rollback: reload state from sessionStorage (stateless) or server (stateful)
     try {
-      const data = await api("GET", "/state");
-      state = data.state || state;
+      if (_serverInfo.stateless) {
+        const localState = _loadLocalState();
+        if (localState) state = localState;
+      } else {
+        const data = await api("GET", "/state");
+        state = data.state || state;
+      }
     } catch {}
     if (isNewRoot || branchFrom) selectedConvId = null;
     renderMessages();
@@ -750,9 +887,26 @@ async function saveSettings() {
   _updatePlaceholder();
   closeSettings();
 
-  // Persist prefs: localStorage in stateless mode, server otherwise
+  // Persist: patch config bundle in stateless mode, server otherwise
   if (_serverInfo.stateless) {
-    _saveLocalPrefs();
+    const bundle = _loadLocalConfig() || { yaml: "", parsed: {}, prefs: {} };
+    // Patch parsed config to reflect the settings changes
+    bundle.parsed = bundle.parsed || {};
+    bundle.parsed.user = bundle.parsed.user || {};
+    bundle.parsed.user.name = prefs.username;
+    bundle.parsed.ui = bundle.parsed.ui || {};
+    bundle.parsed.ui.default_provider = prefs.provider;
+    bundle.parsed.ui.layout = prefs.layout;
+    bundle.parsed.chat = bundle.parsed.chat || {};
+    Object.assign(bundle.parsed.chat, {
+      temperature: prefs.chat.temperature,
+      message_window: prefs.chat.message_window,
+      rag: prefs.chat.rag,
+      url_fetch: prefs.chat.url_fetch,
+      confirm_actions: prefs.chat.confirm_actions,
+    });
+    bundle.prefs = { ...prefs };
+    _saveLocalConfig(bundle);
     setStatus("Settings saved (local)");
   } else {
     try {
@@ -780,11 +934,11 @@ async function _openConfigEditor() {
     overlay.id = "configOverlay";
     overlay.className = "context-overlay"; // reuse context overlay style
     overlay.innerHTML = `
-      <div class="context-panel" style="max-width:560px;">
+      <div class="context-panel config-panel">
         <h2>config.yaml</h2>
-        <textarea id="configEditorTextarea" style="width:100%; min-height:300px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.82rem; line-height:1.5; tab-size:2; resize:vertical; padding:0.6rem; border:1px solid var(--border); border-radius:6px;"></textarea>
-        <div id="configEditorError" style="display:none; color:#dc2626; font-size:0.8rem; margin-top:0.4rem;"></div>
-        <div class="settings-actions" style="margin-top:0.8rem;">
+        <textarea id="configEditorTextarea" class="config-textarea"></textarea>
+        <div id="configEditorError" class="config-error"></div>
+        <div class="settings-actions settings-actions-md">
           <button class="btn" id="cfgReset">Reset</button>
           <button class="btn" id="cfgCancel">Cancel</button>
           <button class="btn btn-primary" id="cfgOk">OK</button>
@@ -811,33 +965,44 @@ async function _openConfigEditor() {
       const errEl = document.getElementById("configEditorError");
       errEl.style.display = "none";
 
-      // Always persist to localStorage first (shared path)
-      try { localStorage.setItem(_CONFIG_KEY, textarea.value); } catch {}
-
-      // Then attempt disk write if server is writable
-      if (!_serverInfo.stateless) {
-        try {
-          const resp = await api("POST", "/config", { yaml: textarea.value });
-          if (resp.ok) {
-            overlay.classList.remove("active");
-            setStatus("config.yaml saved");
-            return;
-          }
+      // Parse YAML via server → get parsed dict + derived prefs
+      let parsed, derivedPrefs;
+      try {
+        const resp = await api("POST", "/parse_config", { yaml: textarea.value });
+        if (!resp.ok) {
           errEl.textContent = resp.error || "Unknown error";
           errEl.style.display = "block";
           return;
+        }
+        parsed = resp.parsed;
+        derivedPrefs = resp.prefs;
+      } catch (e) {
+        errEl.textContent = "Parse error: " + e.message;
+        errEl.style.display = "block";
+        return;
+      }
+
+      // Save config bundle to sessionStorage (single source of truth)
+      _saveLocalConfig({ yaml: textarea.value, parsed: parsed, prefs: derivedPrefs });
+
+      // Update in-memory prefs and apply UI changes
+      prefs = derivedPrefs;
+      applyLayout(prefs.layout);
+      _updatePlaceholder();
+
+      // Disk write in non-stateless mode
+      if (!_serverInfo.stateless) {
+        try {
+          await api("POST", "/config", { yaml: textarea.value });
         } catch (e) {
-          // Disk write failed — localStorage already has the data
-          if (!e.message || !e.message.includes("403")) {
-            errEl.textContent = "Disk write failed: " + e.message + " (saved to localStorage)";
-            errEl.style.display = "block";
-            return;
-          }
-          // 403 = stateless, fall through to success
+          errEl.textContent = "Disk write failed: " + e.message + " (saved to sessionStorage)";
+          errEl.style.display = "block";
+          return;
         }
       }
+
       overlay.classList.remove("active");
-      setStatus("config.yaml saved (localStorage)");
+      setStatus("config.yaml saved");
     });
   }
 
@@ -848,19 +1013,10 @@ async function _openConfigEditor() {
   textarea.value = "Loading...";
   overlay.classList.add("active");
 
-  if (_serverInfo.stateless) {
-    const saved = localStorage.getItem(_CONFIG_KEY);
-    if (saved !== null) {
-      textarea.value = saved;
-    } else {
-      // First open: seed from server's spec defaults
-      try {
-        const data = await api("GET", "/config");
-        textarea.value = data.yaml || "";
-      } catch (e) {
-        textarea.value = "# Error loading config: " + e.message;
-      }
-    }
+  // Load YAML text: config bundle (stateless) or server
+  const bundle = _serverInfo.stateless ? _loadLocalConfig() : null;
+  if (bundle && bundle.yaml) {
+    textarea.value = bundle.yaml;
   } else {
     try {
       const data = await api("GET", "/config");
@@ -870,6 +1026,172 @@ async function _openConfigEditor() {
     }
   }
   textarea.focus();
+}
+
+// ─── Truth editor ───
+
+let _truthEditing = null; // index into state.truth.trust being edited, or "new"
+
+function _openTruthEditor() {
+  closeSettings();
+
+  if (!state.truth) state.truth = {};
+  if (!Array.isArray(state.truth.trust)) state.truth.trust = [];
+
+  let overlay = document.getElementById("truthOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "truthOverlay";
+    overlay.className = "context-overlay";
+    overlay.innerHTML = `
+      <div class="context-panel trust-panel">
+        <h2>Trust</h2>
+        <div id="truthListView">
+          <div id="truthEntries" class="trust-entries-scroll"></div>
+          <div class="settings-actions settings-actions-xs">
+            <button class="btn" id="truthAdd">Add Entry</button>
+            <button class="btn" id="truthClose">Close</button>
+          </div>
+        </div>
+        <div id="truthEditView" class="hidden">
+          <label class="trust-label">Title</label>
+          <input id="truthTitle" type="text" class="trust-input">
+          <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = false, 0 = unknown, +1 = true)</span></label>
+          <input id="truthCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
+          <label class="trust-label">Content <span class="trust-label-hint">(XHTML: &lt;p&gt; facts, &lt;a href&gt; sources, &lt;provider&gt; LLMs)</span></label>
+          <textarea id="truthContent" class="trust-textarea"></textarea>
+          <div class="settings-actions settings-actions-sm">
+            <button class="btn" id="truthEditCancel">Cancel</button>
+            <button class="btn btn-primary" id="truthEditSave">Save</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) { overlay.classList.remove("active"); _truthEditing = null; }
+    });
+
+    document.getElementById("truthClose").addEventListener("click", function() {
+      overlay.classList.remove("active");
+      _truthEditing = null;
+    });
+
+    document.getElementById("truthAdd").addEventListener("click", function() {
+      _truthEditing = "new";
+      document.getElementById("truthTitle").value = "";
+      document.getElementById("truthCertainty").value = "0.5";
+      document.getElementById("truthContent").value = "<p></p>";
+      _truthShowEditView();
+    });
+
+    document.getElementById("truthEditCancel").addEventListener("click", function() {
+      _truthEditing = null;
+      _truthShowListView();
+    });
+
+    document.getElementById("truthEditSave").addEventListener("click", function() {
+      const title = document.getElementById("truthTitle").value.trim() || "Untitled";
+      const certainty = Math.min(1, Math.max(-1, parseFloat(document.getElementById("truthCertainty").value) || 0));
+      const content = document.getElementById("truthContent").value.trim() || "<p/>";
+      const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+
+      if (_truthEditing === "new") {
+        const entry = { id: tempId("t_"), title: title, certainty: certainty, content: content, time: now };
+        state.truth.trust.push(entry);
+      } else if (typeof _truthEditing === "number") {
+        const entry = state.truth.trust[_truthEditing];
+        if (entry) {
+          entry.title = title;
+          entry.certainty = certainty;
+          entry.content = content;
+          entry.time = now;
+        }
+      }
+      _truthEditing = null;
+      _persistState();
+      _truthRenderList();
+      _truthShowListView();
+    });
+  }
+
+  _truthEditing = null;
+  _truthRenderList();
+  _truthShowListView();
+  overlay.classList.add("active");
+}
+
+function _truthShowListView() {
+  document.getElementById("truthListView").style.display = "";
+  document.getElementById("truthEditView").style.display = "none";
+}
+
+function _truthShowEditView() {
+  document.getElementById("truthListView").style.display = "none";
+  document.getElementById("truthEditView").style.display = "";
+  document.getElementById("truthTitle").focus();
+}
+
+function _truthRenderList() {
+  const container = document.getElementById("truthEntries");
+  container.innerHTML = "";
+  const entries = (state.truth && state.truth.trust) || [];
+
+  if (entries.length === 0) {
+    container.innerHTML = '<div class="trust-empty">No trust entries. Use <b>Add Entry</b> or <b>Open</b> a .jsonl file.</div>';
+    return;
+  }
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0; border-bottom:1px solid var(--border); font-size:0.82rem;";
+
+    const cert = document.createElement("span");
+    const c = entry.certainty || 0;
+    cert.textContent = (c >= 0 ? "+" : "") + c.toFixed(2);
+    cert.style.cssText = "min-width:3.2em; text-align:right; font-family:ui-monospace,monospace; font-size:0.78rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
+    row.appendChild(cert);
+
+    const title = document.createElement("span");
+    title.textContent = truncate(entry.title || "(untitled)", 36);
+    title.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+    row.appendChild(title);
+
+    const editBtn = document.createElement("button");
+    editBtn.textContent = "Edit";
+    editBtn.className = "btn";
+    editBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem;";
+    editBtn.addEventListener("click", (function(idx) {
+      return function() {
+        _truthEditing = idx;
+        const e = state.truth.trust[idx];
+        document.getElementById("truthTitle").value = e.title || "";
+        document.getElementById("truthCertainty").value = e.certainty || 0;
+        document.getElementById("truthContent").value = stripTags(e.content || "").trim() ? (e.content || "") : "<p></p>";
+        _truthShowEditView();
+      };
+    })(i));
+    row.appendChild(editBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Del";
+    delBtn.className = "btn";
+    delBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem; color:#dc2626;";
+    delBtn.addEventListener("click", (function(idx) {
+      return function() {
+        const e = state.truth.trust[idx];
+        if (confirmAction("Delete truth entry \"" + (e.title || "untitled") + "\"?")) {
+          state.truth.trust.splice(idx, 1);
+          _persistState();
+          _truthRenderList();
+        }
+      };
+    })(i));
+    row.appendChild(delBtn);
+
+    container.appendChild(row);
+  }
 }
 
 // ─── Read view (XHTML export to new window) ───
@@ -994,6 +1316,7 @@ function bindEvents() {
       schema: state.schema || "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json",
       date: new Date().toISOString(),
       context: state.context || "<div/>",
+      output: state.output || "<div/>",
       retrieval_prefs: (state.truth || {}).retrieval_prefs || {},
     };
     if (state.selected_conversation) header.selected_conversation = state.selected_conversation;
@@ -1056,8 +1379,9 @@ function bindEvents() {
         importState = {
           version: first.version || 2,
           schema: first.schema || "",
-          date: first.date || "",
+          time: first.time || first.date || "",
           context: first.context || "<div/>",
+          output: first.output || "",
           conversations: [],
           messages: [],
           selected_conversation: first.selected_conversation || null,
@@ -1103,21 +1427,47 @@ function bindEvents() {
 
       if (!importState.schema || !importState.schema.includes("llm_state")) throw new Error("Not a WikiOracle state file");
 
-      // Merge into current state via server
-      const result = await api("POST", "/merge", { state: importState });
-      state = result.state || state;
+      // Merge: client-side in stateless mode, server-side otherwise
+      if (_serverInfo.stateless) {
+        _clientMerge(importState);
+      } else {
+        const result = await api("POST", "/merge", { state: importState });
+        state = result.state || state;
+      }
+
+      // Persist merged state and redraw all components
+      _persistState();
       selectedConvId = null;
       renderMessages();
+
+      // User-visible feedback
+      const trustCount = (state.truth && state.truth.trust || []).length;
       const convCount = (state.conversations || []).length;
-      setStatus(`Imported: ${file.name} (${convCount} conversations)`);
+      const importTrust = (importState.truth && importState.truth.trust || []).length;
+      const importConvs = (importState.conversations || []).length;
+      const msg = `Imported ${file.name}: ${importTrust} trust entries, ${importConvs} conversations`;
+      setStatus(msg);
+
+      // Flash confirmation in message input placeholder
+      const input = document.getElementById("msgInput");
+      const savedPH = input.placeholder;
+      input.placeholder = msg;
+      setTimeout(() => { input.placeholder = savedPH; }, 4000);
     } catch (err) {
       setStatus("Import error: " + err.message);
+      const input = document.getElementById("msgInput");
+      const savedPH = input.placeholder;
+      input.placeholder = "Import error: " + err.message;
+      setTimeout(() => { input.placeholder = savedPH; }, 5000);
     }
     e.target.value = "";
   });
 
   // Settings
   document.getElementById("btnSettings").addEventListener("click", openSettings);
+  document.getElementById("btnSettingsCancel").addEventListener("click", closeSettings);
+  document.getElementById("btnSettingsSave").addEventListener("click", function() { saveSettings(); });
+  document.getElementById("btnSend").addEventListener("click", sendMessage);
   document.getElementById("setTemp").addEventListener("input", function() {
     document.getElementById("setTempVal").textContent = this.value;
   });
@@ -1170,44 +1520,15 @@ async function init() {
       console.warn("[WikiOracle] Failed to load server_info:", e);
     }
 
-    // (stateless mode: config editor uses localStorage — button stays enabled)
-
-    // 1) Load prefs: server defaults first, then localStorage overlay in stateless mode
-    try {
-      const prefData = await api("GET", "/prefs");
-      prefs = prefData.prefs || prefs;
-    } catch (e) {
-      console.warn("[WikiOracle] Failed to load prefs:", e);
-    }
     if (_serverInfo.stateless) {
-      const local = _loadLocalPrefs();
-      if (local) {
-        // Merge: local overrides server defaults, preserving nested chat keys
-        const serverChat = prefs.chat || {};
-        Object.assign(prefs, local);
-        prefs.chat = { ...serverChat, ...(local.chat || {}) };
-      }
+      await _initStateless();
+    } else {
+      await _initStateful();
     }
 
-    // 2) Load provider metadata and populate dropdown
-    try {
-      const provData = await api("GET", "/providers");
-      _providerMeta = provData.providers || {};
-      const sel = document.getElementById("setProvider");
-      sel.innerHTML = "";
-      for (const [key, info] of Object.entries(_providerMeta)) {
-        const opt = document.createElement("option");
-        opt.value = key;
-        opt.textContent = info.name + (info.model ? ` (${info.model})` : "");
-        sel.appendChild(opt);
-      }
-    } catch {}
-
-    // 3) Apply layout, CSS overrides, and update placeholder from prefs
+    // Apply layout, CSS overrides, and update placeholder from prefs
     applyLayout(prefs.layout);
     _updatePlaceholder();
-
-    // Inject CSS overrides from config (ui.css section)
     if (prefs.css) {
       let styleEl = document.getElementById("wikioracle-css-override");
       if (!styleEl) {
@@ -1218,26 +1539,7 @@ async function init() {
       styleEl.textContent = prefs.css;
     }
 
-    // 4) Load state: server provides seed defaults; localStorage is the full
-    //    persistent copy in stateless mode (conversations, context, output, etc.)
-    const data = await api("GET", "/state");
-    state = data.state || {};
-    if (!Array.isArray(state.conversations)) state.conversations = [];
-    if (_serverInfo.stateless) {
-      const localState = _loadLocalState();
-      if (localState) {
-        // Full override: localStorage IS the state in stateless mode.
-        // Preserve server-provided schema/version, but take everything else from local.
-        const serverVersion = state.version;
-        const serverSchema = state.schema;
-        Object.assign(state, localState);
-        if (serverVersion) state.version = serverVersion;
-        if (serverSchema) state.schema = serverSchema;
-        if (!Array.isArray(state.conversations)) state.conversations = [];
-      }
-    }
-
-    // Restore selected conversation from server state
+    // Restore selected conversation from state
     if (state.selected_conversation && findConversation(state.conversations, state.selected_conversation)) {
       selectedConvId = state.selected_conversation;
     } else {
@@ -1254,6 +1556,186 @@ async function init() {
   }
 }
 
+// Stateless init: sessionStorage is authoritative.
+// If sessionStorage has data, use it directly — no server calls needed for
+// state or config.  If sessionStorage is empty, call /bootstrap once to seed.
+async function _initStateless() {
+  // Migrate legacy prefs → config bundle (one-time)
+  await _migratePrefsToConfig();
+
+  const localConfig = _loadLocalConfig();
+  const localState = _loadLocalState();
+  const needsBootstrap = !localConfig || !localState;
+
+  if (needsBootstrap) {
+    console.log("[WikiOracle] stateless: bootstrapping from server");
+    try {
+      const boot = await api("GET", "/bootstrap");
+
+      // Seed config bundle
+      if (!localConfig) {
+        const seedPrefs = boot.prefs || _derivePrefs(boot.parsed || {});
+        _saveLocalConfig({
+          yaml: boot.config_yaml || "",
+          parsed: boot.parsed || {},
+          prefs: seedPrefs,
+        });
+        prefs = seedPrefs;
+      } else {
+        prefs = localConfig.prefs;
+      }
+
+      // Seed state
+      if (!localState) {
+        state = boot.state || {};
+        if (!Array.isArray(state.conversations)) state.conversations = [];
+        _saveLocalState();
+      } else {
+        state = localState;
+        if (!Array.isArray(state.conversations)) state.conversations = [];
+      }
+
+      // Provider metadata
+      if (boot.providers) {
+        _providerMeta = boot.providers;
+        _populateProviderDropdown();
+      }
+    } catch (e) {
+      console.warn("[WikiOracle] bootstrap failed:", e);
+      // Fall back to defaults
+      if (localConfig && localConfig.prefs) prefs = localConfig.prefs;
+      state = localState || {};
+      if (!Array.isArray(state.conversations)) state.conversations = [];
+    }
+  } else {
+    // Both sessionStorage keys present — use them directly, no server calls
+    console.log("[WikiOracle] stateless: using sessionStorage (no server calls)");
+    prefs = localConfig.prefs;
+    state = localState;
+    if (!Array.isArray(state.conversations)) state.conversations = [];
+
+    // Provider metadata: try server, but don't block
+    try {
+      const provData = await api("GET", "/providers");
+      _providerMeta = provData.providers || {};
+    } catch {}
+    _populateProviderDropdown();
+  }
+}
+
+// Stateful init: server disk is authoritative.
+async function _initStateful() {
+  // Load prefs from server
+  try {
+    const prefData = await api("GET", "/prefs");
+    prefs = prefData.prefs || prefs;
+  } catch (e) {
+    console.warn("[WikiOracle] Failed to load prefs:", e);
+  }
+
+  // Load provider metadata
+  try {
+    const provData = await api("GET", "/providers");
+    _providerMeta = provData.providers || {};
+    _populateProviderDropdown();
+  } catch {}
+
+  // Load state from server (disk)
+  const data = await api("GET", "/state");
+  state = data.state || {};
+  if (!Array.isArray(state.conversations)) state.conversations = [];
+}
+
+// Populate the provider <select> dropdown from _providerMeta
+function _populateProviderDropdown() {
+  const sel = document.getElementById("setProvider");
+  sel.innerHTML = "";
+  for (const [key, info] of Object.entries(_providerMeta)) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = info.name + (info.model ? ` (${info.model})` : "");
+    sel.appendChild(opt);
+  }
+}
+
 // ─── Boot ───
 bindEvents();
 init();
+
+// ─── Draggable divider between tree and chat (mouse + touch, horizontal + vertical) ───
+(function() {
+  const divider = document.getElementById("resizeDivider");
+  const tree = document.getElementById("treeContainer");
+  let dragging = false, startPos = 0, startSize = 0;
+
+  function isVertical() {
+    return document.body.classList.contains("layout-vertical");
+  }
+
+  function startDrag(clientX, clientY) {
+    dragging = true;
+    if (isVertical()) { startPos = clientX; startSize = tree.offsetWidth; }
+    else              { startPos = clientY; startSize = tree.offsetHeight; }
+    divider.classList.add("active");
+    document.body.style.cursor = isVertical() ? "col-resize" : "row-resize";
+    document.body.style.userSelect = "none";
+  }
+
+  function moveDrag(clientX, clientY) {
+    if (!dragging) return;
+    if (isVertical()) {
+      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
+      const newW = Math.max(0, Math.min(window.innerWidth * 0.8, startSize + (clientX - startPos)));
+      tree.style.width = newW + "px";
+    } else {
+      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
+      const newH = Math.max(0, Math.min(window.innerHeight * 0.8, startSize + (clientY - startPos)));
+      tree.style.height = newH + "px";
+    }
+  }
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove("active");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    if (typeof renderMessages === "function") renderMessages();
+  }
+
+  // Mouse events
+  divider.addEventListener("mousedown", function(e) { e.preventDefault(); startDrag(e.clientX, e.clientY); });
+  document.addEventListener("mousemove", function(e) { moveDrag(e.clientX, e.clientY); });
+  document.addEventListener("mouseup", endDrag);
+
+  // Touch events
+  divider.addEventListener("touchstart", function(e) {
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener("touchmove", function(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener("touchend", endDrag);
+  document.addEventListener("touchcancel", endDrag);
+})();
+
+// ─── Pinch-zoom on chat panel (shared setupZoom from util.js) ───
+(function() {
+  const chatContainer = document.getElementById("chatContainer");
+  const chatWrapper = document.getElementById("chatWrapper");
+  if (!chatContainer || !chatWrapper || typeof setupZoom === "undefined") return;
+  setupZoom({
+    container: d3.select(chatContainer),
+    target: chatWrapper,
+    mode: "css",
+    scaleExtent: [0.5, 3],
+    filter: "pinch",
+    resetOnDblclick: true
+  });
+})();

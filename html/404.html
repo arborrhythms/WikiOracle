@@ -4,40 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WikiOracle Chat — Offline</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #1a1a2e; color: #e0e0e0;
-    display: flex; align-items: center; justify-content: center;
-    min-height: 100vh; padding: 2rem;
-  }
-  .card {
-    text-align: center; max-width: 480px;
-    background: #16213e; border-radius: 16px;
-    padding: 3rem 2.5rem; box-shadow: 0 8px 32px rgba(0,0,0,.4);
-  }
-  .icon { font-size: 4rem; margin-bottom: 1.5rem; }
-  h1 { font-size: 1.5rem; margin-bottom: 0.75rem; color: #fff; }
-  p { line-height: 1.6; color: #a0aec0; margin-bottom: 1rem; }
-  .retry {
-    display: inline-block; margin-top: 1rem;
-    padding: 0.6rem 1.5rem; border-radius: 8px;
-    background: #0f3460; color: #e0e0e0;
-    text-decoration: none; font-weight: 500;
-    transition: background .2s;
-  }
-  .retry:hover { background: #1a4a7a; }
-</style>
+<link rel="stylesheet" href="wikioracle.css">
 </head>
-<body>
+<body class="offline-page">
 <div class="card">
   <div class="icon">&#129302;</div>
   <h1>WikiOracle Chat is offline</h1>
   <p>The model server is not currently running. It may be restarting
   after a new deployment or undergoing maintenance.</p>
   <p>Check back in a minute or two.</p>
-  <a class="retry" href="javascript:location.reload()">Try again</a>
+  <a class="retry" href="/">Try again</a>
 </div>
 </body>
 </html>

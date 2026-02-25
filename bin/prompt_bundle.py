@@ -66,20 +66,20 @@ def rank_retrieval_entries(
     exclude_providers: bool = True,
     exclude_srcs: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Rank and filter trust entries using retrieval_prefs weights.
+    """Rank and filter trust entries by |certainty| (Kleene ternary logic).
 
-    Uses certainty_weight and recency_weight for scoring.
-    Returns entries sorted by composite score, bounded to max_entries.
+    Certainty range is [-1, 1]:  +1 = true, 0 = ignorance (inert), -1 = false.
+    Entries with |certainty| below min_certainty are dropped (ignorance zone).
+    Remaining entries are ranked by |certainty| descending, then timestamp, then id.
+    Returns at most max_entries.
     """
     max_entries = retrieval_prefs.get("max_entries", 8)
     min_certainty = retrieval_prefs.get("min_certainty", 0.0)
-    certainty_weight = retrieval_prefs.get("certainty_weight", 1.0)
-    recency_weight = retrieval_prefs.get("recency_weight", 0.0)
 
     candidates = []
     for entry in trust_entries:
         certainty = entry.get("certainty", 0)
-        if certainty < min_certainty:
+        if abs(certainty) < min_certainty:
             continue
         content = entry.get("content", "")
         if exclude_providers and "<provider" in content:
@@ -87,37 +87,16 @@ def rank_retrieval_entries(
         if exclude_srcs and "<src" in content:
             continue
 
-        # Composite score: weighted certainty + weighted recency
-        # Recency: newer timestamps sort higher. We use the raw ISO string
-        # for deterministic ordering (lexicographic sort works for ISO 8601).
+        # Rank by |certainty| (both strong belief and strong disbelief are relevant)
+        score = abs(certainty)
         ts = entry.get("time", "")
-        recency_score = 0.0
-        if recency_weight > 0 and ts:
-            # Normalize: timestamps are ISO 8601, so lexicographic comparison
-            # gives correct ordering. Map to a 0..1 range is hard without
-            # knowing the full range, so we use the raw string as a tiebreaker.
-            recency_score = 1.0  # placeholder; tiebroken by timestamp sort
-
-        score = certainty_weight * certainty + recency_weight * recency_score
         candidates.append((score, ts, entry.get("id", ""), entry))
 
-    # Sort: highest score first, then newest timestamp, then id for determinism
-    candidates.sort(key=lambda t: (-t[0], t[1] if t[1] else "", t[2]), reverse=False)
-    # Actually: -score ascending = highest first. But timestamp: we want newest first
-    # so we negate or reverse. Let's do it cleanly:
-    candidates.sort(key=lambda t: (-t[0], _neg_ts(t[1]), t[2]))
+    # Sort: highest |certainty| first, then by timestamp and id for determinism
+    candidates.sort(key=lambda t: (-t[0], t[1] if t[1] else "", t[2]))
 
     return [c[3] for c in candidates[:max_entries]]
 
-
-def _neg_ts(ts: str) -> str:
-    """Negate an ISO timestamp string for reverse sorting."""
-    # For reverse sort: we want newest first, so we reverse the string comparison
-    # by complementing each character. A simpler approach: just negate.
-    if not ts:
-        return "\xff"  # empty timestamps sort last
-    # Reverse lexicographic: subtract each char from 'z' equivalent
-    return "".join(chr(255 - ord(c)) for c in ts)
 
 
 # ---------------------------------------------------------------------------

@@ -1,42 +1,46 @@
 # TODO
 
-## Allow a wider divider to sit next to the edges of screen (but dont let it move out of navigable reach). Then we dont need a "flat" option.
-**DONE** (2026-02-24) — Divider widened to 8px (14px on touch), added invisible hit-area expander (::before pseudo-element with ±6px inset). Tree can now collapse to 0 height/width (min-height/min-width set to 0) but divider stays on-screen (max 80% viewport). "Flat" layout option removed from the Settings dropdown. The flat CSS class is kept for backwards compat but now just collapses the tree to zero height instead of hiding the divider. Files: `html/index.html`.
+## Logical Inference
+Test hme.jsonl
 
-## Double clicks and drags on queries and responses are not working
-**DONE** (2026-02-24) — Added `dblclick` handler on message bubbles that opens the context menu (Move up/down, Split, Delete). Added double-tap detection for mobile via `touchend` with 350ms window. Drag-to-reorder is now gated behind `pointer: fine` media query so it only activates on desktop (prevents drag from interfering with touch gestures on mobile). Files: `html/wikioracle.js`.
-FEEDBACK: remove the move up/down command, can probably reuse menu from tree node
-**ADDRESSED** (2026-02-24) — Removed Move up/Move down from message context menu. Menu now mirrors tree node pattern: "Split..." + separator + "Delete". File: `html/wikioracle.js`.
+## Code Review Feedback (Uncommitted Changes)
 
-## File_type formatting is not being respected (xhtml).
-**DONE** (2026-02-24) — Four sub-items completed:
-  0. Removed `output_format` from `config.yaml` and from the prefs GET/POST endpoints in `WikiOracle.py`. Removed the `_effective_output_format()` helper and the `output_format` plumbing in `prompt_bundle.py`.
-  1. Added hardcoded XHTML system instruction to every prompt bundle: `"Return strictly valid XHTML: no Markdown, close all tags, escape entities, one root element."` — appended to the system context in `build_prompt_bundle()`.
-  2. Added client-side XHTML validation in `wikioracle.js` using DOMParser with `application/xhtml+xml` to detect parse errors.
-  3. Added deterministic repair pass (`repairXhtml()`) that uses the browser's HTML parser to fix broken markup and self-close void elements. Falls back to escaping and wrapping in `<p>` if repair also fails. `ensureXhtml()` is called on every message bubble during rendering.
-  Files: `html/wikioracle.js`, `bin/prompt_bundle.py`, `WikiOracle.py`, `config.yaml`.
+### P0 (must fix before release)
+1. Stateless chat sends optimistic UI mutations back to server, causing duplicated user turns and orphan optimistic conversations.
+   - Client mutates `state` before request and then includes it in `chatBody.state`: `html/wikioracle.js:759`, `html/wikioracle.js:813`.
+   - Server then appends another user+assistant turn to that already-mutated state: `WikiOracle.py:948`, `WikiOracle.py:949`, `WikiOracle.py:972`.
+   - New-root path is worst: temporary optimistic root is preserved and a second real root is created.
 
-## Allow interface pinch-zoom via d3 in both panels
-**DONE** (2026-02-24) — Added d3.zoom() to the tree SVG (scaleExtent 0.3–4x, wraps all tree content in a zoomG group; double-click zoom disabled to preserve context menu). Added d3.zoom() to the chat panel with CSS transform on the chat wrapper (scaleExtent 0.5–3x). Both zoom behaviors filter to only respond to pinch gestures (2+ touch fingers) or ctrl+wheel (trackpad pinch), so normal scrolling is unaffected. Files: `html/d3tree.js`, `html/index.html`.
+### P1 (high priority)
+1. Stateless provider contract is incomplete: runtime config/provider keys are not used for OpenAI/Anthropic calls.
+   - Chat captures `runtime_config` but does not pass provider API keys into `_call_provider`: `WikiOracle.py:826`, `WikiOracle.py:915`.
+   - `_call_provider` still depends on global `PROVIDERS` and returns no-key errors in stateless mode: `WikiOracle.py:407`, `WikiOracle.py:417`, `WikiOracle.py:427`.
+   - Result: stateless clients cannot reliably use client-owned provider credentials.
 
-## "Edit config.yaml" is not working for stateless operation
-**DONE** (2026-02-24) — Added fallback in the config editor's OK handler: if the POST to `/config` returns a 403 (stateless mode), it now saves to localStorage instead of showing an error. This covers the case where `_serverInfo.stateless` isn't set correctly (e.g. `/server_info` failed). File: `html/wikioracle.js`.
-FEEDBACK: always modify localStorage, then write to disk if available. so code path is shared.
-**ADDRESSED** (2026-02-24) — Refactored config editor OK handler: always writes to localStorage first (shared path), then attempts POST to /config for disk persistence. If disk write fails with 403 or other error, localStorage already has the data. Single code path for both modes. File: `html/wikioracle.js`.
+2. localStorage -> sessionStorage migration drops existing client data.
+   - Reads are now sessionStorage-only for state/config: `html/wikioracle.js:50`, `html/wikioracle.js:141`.
+   - Migration helper checks old prefs in sessionStorage, not localStorage: `html/wikioracle.js:88`.
+   - Existing users with data only in localStorage will appear to lose state/config on upgrade.
 
-## Import/export state buttons are unclear. So buttons should be labelled "Open, Read, Save, Settings" (oepn and save replace import/export)
-**DONE** (2026-02-24) — Relabeled header buttons: "Import State" → "Open", "Export State" → "Save". Reordered to: Open, Read, Save, Settings. Tooltips updated accordingly. File: `html/index.html`.
+### P2 (should fix)
+1. Stateless import merge semantics diverge from server merge and can silently skip imported updates.
+   - Stateless import uses `_clientMerge`: `html/wikioracle.js:1431`.
+   - `_clientMerge` only appends missing root conversations and does not perform collision-safe/tree-aware merging: `html/wikioracle.js:170`, `html/wikioracle.js:177`.
 
-## "Read" should allow popups as separate pages that allow reading mode (in iOS). It is a nice to have for that to be zoomable also, so maybe it can use d3 and the same CSS?
-**DONE** (2026-02-24) — Read view now opens in a new tab as a proper `<article>` element (helps iOS Safari Reader Mode detect article content). Added `user-scalable=yes` to viewport meta. Injected d3.js and a pinch-zoom script (same pattern as main UI: ctrl+wheel or 2-finger pinch, scaleExtent 0.5–4x). Uses the same `reading.css` styles. File: `html/wikioracle.js`.
+2. `/bootstrap` increases key-exposure surface by returning parsed/raw config content.
+   - Endpoint returns `config_yaml` and `parsed` directly: `WikiOracle.py:730`, `WikiOracle.py:738`.
+   - If disk config contains provider secrets, bootstrap leaks them to any same-origin script context.
 
-## Hover on tree nodes should show metadata, not text
-**DONE** (2026-02-24) — Tooltip now shows: id, message count (with Q count), branch count, and time range (first/last message timestamps). No longer shows title or message content previews. File: `html/d3tree.js`.
-FEEDBACK: show title, short date, number of contained nodes (Q+R)
-**ADDRESSED** (2026-02-24) — Tooltip now shows: title, short date (e.g. "Feb 24" from first message), and Q+R count (e.g. "3Q + 3R"). Removed raw id, branch count, and full ISO timestamps. File: `html/d3tree.js`.
+3. New `spec/hme.jsonl` provider example does not match current parser shape.
+   - Spec uses attribute-style `<provider ... />`: `spec/hme.jsonl:13`.
+   - Parser expects child tags (`<name>`, `<api_url>`, etc.): `bin/wikioracle_state.py:1009`, `bin/wikioracle_state.py:1020`.
+   - This sample likely resolves to `"unknown"` provider with empty URL/model.
 
-## Editing "system/context" and "output" on "/" node is redundant: we only need to "Edit context" on / (and add a delete there two that removes all child nodes and renders an empty tree).
-**DONE** (2026-02-24) — Removed "Edit Output" from root context menu. Added "Delete All" option (with separator) that removes all conversations after a confirmation dialog showing root count and total message count. Added `_deleteAllConversations()` function. Files: `html/d3tree.js`, `html/wikioracle.js`.
+4. Consolidated simulator script appears v1-only and may not reflect v2 conversation records.
+   - Parser only ingests `type === "message"` records: `html/test.js:33`.
+   - Current exported files are conversation-based (`type: "conversation"`), so tooling can report empty/incorrect views.
 
-## Add a CSS section to the config that allows overrides of the default .css file. For example specify light/dark mode in the css as inherited from the system, and allow the override there.
-**DONE** (2026-02-24) — Added `ui.css` field in `config.yaml` (multiline string with pipe syntax). Default includes a `@media (prefers-color-scheme: dark)` block that overrides all CSS custom properties for dark mode. Server exposes the CSS string in the `/prefs` GET response. Client injects it as a `<style id="wikioracle-css-override">` element in `<head>` on init. Users can edit the CSS via the config.yaml editor to customize colors, fonts, etc. Files: `config.yaml`, `WikiOracle.py`, `html/wikioracle.js`.
+### P3 (cleanup/docs)
+1. `html/README.md` is stale after script consolidation.
+   - References deleted scripts (`simulate_rendering.js`, `show_conversations.js`, etc.): `html/README.md:34`, `html/README.md:39`.
+   - Should document `html/test.js` command usage instead.

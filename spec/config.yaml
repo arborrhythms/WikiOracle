@@ -42,10 +42,7 @@ chat:
   confirm_actions: true                  # prompt before deletes, merges, etc.
   retrieval:
     max_entries: 8
-    min_certainty: 0.0
-    prefer_higher_certainty: true
-    certainty_weight: 0.7
-    recency_weight: 0.3
+    min_certainty: 0.0                    # |certainty| threshold (Kleene: 0=ignorance)
 
 # --- UI defaults -------------------------------------------------------------
 

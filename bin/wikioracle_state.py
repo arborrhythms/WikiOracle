@@ -240,7 +240,7 @@ def _normalize_conversation(raw: Any) -> dict:
 
 
 def _normalize_trust_entry(raw: Any) -> dict:
-    """Normalize a trust record and clamp certainty into [0.0, 1.0]."""
+    """Normalize a trust record and clamp certainty into [-1.0, 1.0] (Kleene ternary)."""
     item = dict(raw) if isinstance(raw, dict) else {}
     item["type"] = "trust"
     item["title"] = str(item.get("title", "Trust entry"))
@@ -250,7 +250,7 @@ def _normalize_trust_entry(raw: Any) -> dict:
         certainty = float(certainty)
     except (TypeError, ValueError):
         certainty = 0.0
-    item["certainty"] = min(1.0, max(0.0, certainty))
+    item["certainty"] = min(1.0, max(-1.0, certainty))
     item["content"] = ensure_xhtml(item.get("content", ""))
     ensure_trust_id(item)
     return item

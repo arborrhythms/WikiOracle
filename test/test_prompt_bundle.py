@@ -62,7 +62,9 @@ class TestBuildPromptBundle(unittest.TestCase):
         bundle = build_prompt_bundle(state, "Hello!", {})
         self.assertIsInstance(bundle, PromptBundle)
         self.assertEqual(bundle.query, "Hello!")
-        self.assertEqual(bundle.system, "You are a helpful assistant.")
+        # System now includes mandatory XHTML instruction
+        self.assertIn("You are a helpful assistant.", bundle.system)
+        self.assertIn("XHTML", bundle.system)
         self.assertEqual(bundle.history, [])
         self.assertEqual(bundle.sources, [])
         self.assertEqual(bundle.output, "")
@@ -70,7 +72,8 @@ class TestBuildPromptBundle(unittest.TestCase):
     def test_empty_context(self):
         state = _make_state(context="")
         bundle = build_prompt_bundle(state, "Hi", {})
-        self.assertEqual(bundle.system, "")
+        # Even with empty context, XHTML instruction is present
+        self.assertIn("XHTML", bundle.system)
 
     def test_rag_sources_populated(self):
         trust = [
@@ -144,13 +147,13 @@ class TestBuildPromptBundle(unittest.TestCase):
 class TestRankRetrievalEntries(unittest.TestCase):
     """Test rank_retrieval_entries with different weights."""
 
-    def test_certainty_only(self):
+    def test_ranked_by_certainty(self):
         entries = [
             _make_trust_entry("Low", 0.3, entry_id="e1"),
             _make_trust_entry("High", 0.9, entry_id="e2"),
             _make_trust_entry("Mid", 0.6, entry_id="e3"),
         ]
-        ranked = rank_retrieval_entries(entries, {"certainty_weight": 1.0, "recency_weight": 0.0})
+        ranked = rank_retrieval_entries(entries, {})
         self.assertEqual(ranked[0]["title"], "High")
         self.assertEqual(ranked[1]["title"], "Mid")
         self.assertEqual(ranked[2]["title"], "Low")
@@ -194,9 +197,31 @@ class TestRankRetrievalEntries(unittest.TestCase):
             _make_trust_entry("A", 0.8, entry_id="e_a", time="2026-01-02T00:00:00Z"),
             _make_trust_entry("B", 0.8, entry_id="e_b", time="2026-01-01T00:00:00Z"),
         ]
-        ranked1 = rank_retrieval_entries(entries, {"certainty_weight": 1.0, "recency_weight": 0.0})
-        ranked2 = rank_retrieval_entries(entries, {"certainty_weight": 1.0, "recency_weight": 0.0})
+        ranked1 = rank_retrieval_entries(entries, {})
+        ranked2 = rank_retrieval_entries(entries, {})
         self.assertEqual([r["title"] for r in ranked1], [r["title"] for r in ranked2])
+
+    def test_negative_certainty_ranked_by_abs(self):
+        """Negative certainty (disbelief) should rank by |certainty|."""
+        entries = [
+            _make_trust_entry("Weak belief", 0.3, entry_id="e1"),
+            _make_trust_entry("Strong disbelief", -0.9, entry_id="e2"),
+            _make_trust_entry("Moderate belief", 0.6, entry_id="e3"),
+        ]
+        ranked = rank_retrieval_entries(entries, {})
+        self.assertEqual(ranked[0]["title"], "Strong disbelief")
+        self.assertEqual(ranked[1]["title"], "Moderate belief")
+        self.assertEqual(ranked[2]["title"], "Weak belief")
+
+    def test_zero_certainty_filtered(self):
+        """Certainty=0 (ignorance) should be filtered by any positive min_certainty."""
+        entries = [
+            _make_trust_entry("Known", 0.8, entry_id="e1"),
+            _make_trust_entry("Unknown", 0.0, entry_id="e2"),
+        ]
+        ranked = rank_retrieval_entries(entries, {"min_certainty": 0.1})
+        self.assertEqual(len(ranked), 1)
+        self.assertEqual(ranked[0]["title"], "Known")
 
 
 # ---------------------------------------------------------------------------
@@ -649,29 +674,30 @@ class TestOutputResolution(unittest.TestCase):
         bundle = build_prompt_bundle(state, "q", {})
         self.assertEqual(bundle.output, "Return JSON only.")
 
-    def test_output_format_appended(self):
-        """output_format from prefs is appended as a line."""
+    def test_output_format_ignored_in_prefs(self):
+        """output_format in prefs is no longer used; XHTML is enforced in system context."""
         state = _make_state()
         state["output"] = "Be concise."
         prefs = {"output_format": "XHTML"}
         bundle = build_prompt_bundle(state, "q", prefs)
-        self.assertEqual(bundle.output, "Be concise.\noutput_format: XHTML")
+        # output_format is NOT appended — XHTML is enforced via system prompt
+        self.assertEqual(bundle.output, "Be concise.")
 
-    def test_output_format_nested_chat_appended(self):
-        """Nested prefs.chat.output_format is accepted."""
+    def test_output_format_nested_chat_ignored(self):
+        """Nested prefs.chat.output_format is no longer used."""
         state = _make_state()
         state["output"] = "Be concise."
         prefs = {"chat": {"output_format": "JSON"}}
         bundle = build_prompt_bundle(state, "q", prefs)
-        self.assertEqual(bundle.output, "Be concise.\noutput_format: JSON")
+        self.assertEqual(bundle.output, "Be concise.")
 
-    def test_output_format_alone(self):
-        """output_format works even when state output is empty."""
+    def test_empty_state_output_stays_empty(self):
+        """Empty state output remains empty regardless of prefs."""
         state = _make_state()
         state["output"] = ""
         prefs = {"output_format": "XHTML"}
         bundle = build_prompt_bundle(state, "q", prefs)
-        self.assertEqual(bundle.output, "output_format: XHTML")
+        self.assertEqual(bundle.output, "")
 
     def test_empty_output_format_no_effect(self):
         """Empty output_format doesn't alter output."""

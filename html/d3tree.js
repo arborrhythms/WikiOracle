@@ -455,13 +455,23 @@ function _showRootContextMenu(event, callbacks) {
 
   const ctxItem = document.createElement("div");
   ctxItem.className = "ctx-item";
-  ctxItem.textContent = "Edit Context";
+  ctxItem.textContent = "Context\u2026";
   ctxItem.addEventListener("click", function(e) {
     e.stopPropagation();
     _hideContextMenu();
     if (callbacks.onEditContext) callbacks.onEditContext();
   });
   menu.appendChild(ctxItem);
+
+  const truthItem = document.createElement("div");
+  truthItem.className = "ctx-item";
+  truthItem.textContent = "Trust\u2026";
+  truthItem.addEventListener("click", function(e) {
+    e.stopPropagation();
+    _hideContextMenu();
+    if (callbacks.onEditTruth) callbacks.onEditTruth();
+  });
+  menu.appendChild(truthItem);
 
   const sep = document.createElement("div");
   sep.className = "ctx-sep";

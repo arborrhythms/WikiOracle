@@ -106,7 +106,7 @@
         "id": { "type": "string" },
         "title": { "type": "string" },
         "time": { "type": "string", "format": "date-time" },
-        "certainty": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "certainty": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
         "content": { "type": "string" }
       }
     }

@@ -414,15 +414,16 @@ def _call_provider(cfg: Config, bundle: PromptBundle | None, temperature: float,
     if client_model:
         effective_cfg["default_model"] = client_model
     if not effective_cfg.get("api_key"):
-        # Hot-reload config.yaml in case keys were added after server start
-        fresh = _load_config_yaml()
-        fresh_key = (fresh.get("providers", {}).get(provider) or {}).get("api_key", "")
-        if fresh_key:
-            effective_cfg["api_key"] = fresh_key
-            # Update cached PROVIDERS so subsequent calls don't need to reload
-            if provider in PROVIDERS:
-                PROVIDERS[provider]["api_key"] = fresh_key
-        else:
+        if not STATELESS_MODE:
+            # Hot-reload config.yaml in case keys were added after server start
+            fresh = _load_config_yaml()
+            fresh_key = (fresh.get("providers", {}).get(provider) or {}).get("api_key", "")
+            if fresh_key:
+                effective_cfg["api_key"] = fresh_key
+                # Update cached PROVIDERS so subsequent calls don't need to reload
+                if provider in PROVIDERS:
+                    PROVIDERS[provider]["api_key"] = fresh_key
+        if not effective_cfg.get("api_key"):
             return f"[No API key for {provider}. Add it to config.yaml.]"
     if provider == "openai":
         if DEBUG_MODE:
@@ -664,16 +665,28 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     app = Flask(__name__, static_folder=None)
     startup_merge_report = _scan_and_merge_imports(cfg) if not STATELESS_MODE else {}
 
-    # CORS
+    # Security headers (CORS + CSP)
     @app.after_request
-    def add_cors_headers(response):
-        """Apply restrictive CORS headers for approved local origins."""
+    def add_security_headers(response):
+        """Apply CORS and Content-Security-Policy headers."""
         origin = flask_request.headers.get("Origin", "")
         if origin and origin in cfg.allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        # Content Security Policy (enforcing)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' https://d3js.org; "
+            "style-src 'self'; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "form-action 'self'"
+        )
         return response
 
     @app.route(url_prefix + "/health", methods=["GET"])
@@ -688,6 +701,54 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             "stateless": STATELESS_MODE,
             "url_prefix": url_prefix,
         })
+
+    @app.route(url_prefix + "/bootstrap", methods=["GET"])
+    def bootstrap():
+        """One-shot seed for stateless clients: state + config from disk.
+
+        Intended to be called once per session when the client has no
+        sessionStorage copy.  Returns everything the client needs to
+        operate independently of the server's disk files.
+        """
+        result: Dict[str, Any] = {}
+
+        # Seed state from disk (or empty minimal state)
+        try:
+            seed_state = _load_state(cfg)
+        except Exception:
+            seed_state = ensure_minimal_state({}, strict=False)
+        result["state"] = seed_state
+
+        # Config YAML text + parsed + prefs
+        cfg_path = Path(__file__).resolve().parent / "config.yaml"
+        config_yaml = ""
+        if cfg_path.exists():
+            try:
+                config_yaml = cfg_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        result["config_yaml"] = config_yaml
+
+        parsed: Dict[str, Any] = {}
+        try:
+            import yaml
+            parsed = yaml.safe_load(config_yaml) or {}
+        except Exception:
+            pass
+        result["parsed"] = parsed
+        result["prefs"] = _derive_prefs(parsed)
+
+        # Provider metadata (non-secret)
+        prov_meta = {}
+        for key, pcfg in PROVIDERS.items():
+            prov_meta[key] = {
+                "name": pcfg["name"],
+                "streaming": pcfg.get("streaming", False),
+                "model": pcfg.get("default_model", ""),
+            }
+        result["providers"] = prov_meta
+
+        return jsonify(result)
 
     @app.route(url_prefix + "/info", methods=["GET"])
     def info():
@@ -751,12 +812,27 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if not user_msg:
             return jsonify({"ok": False, "error": "missing_message"}), 400
 
+        # ── Stateless mode: client must supply state + runtime_config ──
+        if STATELESS_MODE:
+            if not isinstance(body.get("state"), dict):
+                return jsonify({"ok": False, "error": "stateless_missing_state"}), 400
+            if not isinstance(body.get("runtime_config"), dict):
+                return jsonify({"ok": False, "error": "stateless_missing_runtime_config"}), 400
+
         prefs = body.get("prefs", {}) if isinstance(body.get("prefs"), dict) else {}
-        global _CONFIG_YAML
-        fresh = _load_config_yaml()
-        if fresh:
-            _CONFIG_YAML = fresh
-        yaml_chat = _CONFIG_YAML.get("chat", {})
+
+        # Config source: request payload (stateless) or disk (stateful)
+        if STATELESS_MODE:
+            runtime_cfg = body["runtime_config"]
+            yaml_chat = runtime_cfg.get("chat", {})
+        else:
+            global _CONFIG_YAML
+            fresh = _load_config_yaml()
+            if fresh:
+                _CONFIG_YAML = fresh
+            runtime_cfg = _CONFIG_YAML
+            yaml_chat = _CONFIG_YAML.get("chat", {})
+
         provider = prefs.get("provider", "wikioracle")
         client_model = (prefs.get("model") or "").strip()
         print(f"[WikiOracle] Chat request: provider='{provider}' (from client prefs)")
@@ -777,14 +853,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         branch_from = body.get("branch_from")           # create child of this conversation
 
         try:
-            global _MEMORY_STATE
-            if STATELESS_MODE and _MEMORY_STATE is not None:
+            if STATELESS_MODE:
+                # Client-supplied state is authoritative — no disk/memory reads.
                 import copy
-                state = copy.deepcopy(_MEMORY_STATE)
+                state = copy.deepcopy(body["state"])
+                state = ensure_minimal_state(state, strict=False)
             else:
                 state = _load_state(cfg)
-                if STATELESS_MODE:
-                    _MEMORY_STATE = state
             user_timestamp = utc_now_iso()
 
             # Determine which conversation to use for upstream context
@@ -802,6 +877,22 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     cfg, state, user_msg, prefs, context_conv_id,
                     temperature=temperature,
                 )
+                # Store secondary provider responses as persistent trust entries
+                if _transient:
+                    trust_list = state.get("truth", {}).get("trust", [])
+                    for src in _transient:
+                        trust_list.append({
+                            "type": "trust",
+                            "id": src.source_id + "_resp_" + utc_now_iso().replace(":", "").replace("-", "")[:15],
+                            "title": f"{src.title} response",
+                            "certainty": src.certainty,
+                            "content": ensure_xhtml(src.content),
+                            "time": utc_now_iso(),
+                        })
+                    if "truth" not in state:
+                        state["truth"] = {"trust": trust_list}
+                    else:
+                        state["truth"]["trust"] = trust_list
                 llm_provider_name = primary_config.get("name", "unknown")
                 llm_model = primary_config.get("model", "")
             else:
@@ -831,7 +922,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             user_content = ensure_xhtml(user_msg)
             assistant_content = ensure_xhtml(response_text)
             assistant_timestamp = utc_now_iso()
-            user_display = _CONFIG_YAML.get("user", {}).get("name", "User")
+            user_display = runtime_cfg.get("user", {}).get("name", "User")
             llm_display = llm_provider_name  # provider.name from YAML
 
             user_entry = {
@@ -883,12 +974,12 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
             state["conversations"] = conversations
 
-            if STATELESS_MODE:
-                _MEMORY_STATE = state
-            else:
+            if not STATELESS_MODE:
                 _save_state(cfg, state)
                 # Reload after save to get normalized state
                 state = _load_state(cfg)
+            # In stateless mode, return the updated state directly to the
+            # client without any server-side persistence (client owns state).
 
             return jsonify({"ok": True, "text": response_text, "state": state})
         except Exception as exc:
@@ -949,9 +1040,50 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             _save_state(cfg, base)
         return jsonify({"ok": True, "merged": merged_count, "files": merged_names})
 
+    def _derive_prefs(cfg: dict) -> dict:
+        """Derive the flat UI prefs dict from a parsed config.yaml dict."""
+        ui = cfg.get("ui", {}) if isinstance(cfg, dict) else {}
+        chat = cfg.get("chat", {}) if isinstance(cfg, dict) else {}
+        user = cfg.get("user", {}) if isinstance(cfg, dict) else {}
+        return {
+            "provider": ui.get("default_provider", "wikioracle"),
+            "layout": ui.get("layout", "flat"),
+            "username": user.get("name", "User"),
+            "chat": {
+                "temperature": chat.get("temperature", 0.7),
+                "message_window": chat.get("message_window", 40),
+                "rag": chat.get("rag", True),
+                "url_fetch": chat.get("url_fetch", False),
+                "confirm_actions": chat.get("confirm_actions", False),
+            },
+            "css": ui.get("css", ""),
+        }
+
+    @app.route(url_prefix + "/parse_config", methods=["POST", "OPTIONS"])
+    def parse_config_endpoint():
+        """Parse raw YAML text and return parsed dict + derived prefs.  No disk writes."""
+        if flask_request.method == "OPTIONS":
+            return ("", 204)
+        try:
+            import yaml
+        except ImportError:
+            return jsonify({"ok": False, "error": "pyyaml not installed"}), 500
+        body = flask_request.get_json(force=True, silent=True) or {}
+        raw = body.get("yaml", "")
+        if not isinstance(raw, str):
+            return jsonify({"ok": False, "error": "yaml must be a string"}), 400
+        try:
+            parsed = yaml.safe_load(raw)
+            if parsed is not None and not isinstance(parsed, dict):
+                return jsonify({"ok": False, "error": "config.yaml must be a YAML mapping"}), 400
+            parsed = parsed or {}
+        except yaml.YAMLError as exc:
+            return jsonify({"ok": False, "error": f"YAML parse error: {exc}"}), 400
+        return jsonify({"ok": True, "parsed": parsed, "prefs": _derive_prefs(parsed)})
+
     @app.route(url_prefix + "/config", methods=["GET", "POST"])
     def config_endpoint():
-        """GET: serve raw config.yaml text.  POST: overwrite config.yaml."""
+        """GET: serve raw config.yaml text + parsed + prefs.  POST: overwrite config.yaml."""
         global _CONFIG_YAML
         try:
             import yaml
@@ -961,10 +1093,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
         if flask_request.method == "GET":
             if not cfg_path.exists():
-                return jsonify({"ok": True, "yaml": ""})
+                return jsonify({"ok": True, "yaml": "", "parsed": {}, "prefs": _derive_prefs({})})
             try:
                 raw_text = cfg_path.read_text(encoding="utf-8")
-                return jsonify({"ok": True, "yaml": raw_text})
+                parsed = yaml.safe_load(raw_text) or {}
+                return jsonify({"ok": True, "yaml": raw_text, "parsed": parsed, "prefs": _derive_prefs(parsed)})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 500
         else:
@@ -980,13 +1113,14 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 parsed = yaml.safe_load(new_yaml)
                 if parsed is not None and not isinstance(parsed, dict):
                     return jsonify({"ok": False, "error": "config.yaml must be a YAML mapping"}), 400
+                parsed = parsed or {}
             except yaml.YAMLError as exc:
                 return jsonify({"ok": False, "error": f"YAML parse error: {exc}"}), 400
             try:
                 cfg_path.write_text(new_yaml, encoding="utf-8")
                 # Hot-reload the in-memory config
                 _CONFIG_YAML = _load_config_yaml()
-                return jsonify({"ok": True})
+                return jsonify({"ok": True, "parsed": parsed, "prefs": _derive_prefs(parsed)})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 500
 
@@ -1029,24 +1163,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if fresh:
             _CONFIG_YAML = fresh
 
-        yaml_ui = _CONFIG_YAML.get("ui", {})
-        yaml_chat = _CONFIG_YAML.get("chat", {})
-
         if flask_request.method == "GET":
-            prefs = {
-                "provider": yaml_ui.get("default_provider", "wikioracle"),
-                "layout": yaml_ui.get("layout", "flat"),
-                "username": _CONFIG_YAML.get("user", {}).get("name", "User"),
-                "chat": {
-                    "temperature": yaml_chat.get("temperature", 0.7),
-                    "message_window": yaml_chat.get("message_window", 40),
-                    "rag": yaml_chat.get("rag", True),
-                    "url_fetch": yaml_chat.get("url_fetch", False),
-                    "confirm_actions": yaml_chat.get("confirm_actions", False),
-                },
-                "css": yaml_ui.get("css", ""),
-            }
-            return jsonify({"prefs": prefs})
+            return jsonify({"prefs": _derive_prefs(_CONFIG_YAML)})
         else:
             if STATELESS_MODE:
                 return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
@@ -1084,10 +1202,12 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/", methods=["GET"])
     def ui_index():
-        """Serve the UI entrypoint page."""
+        """Serve the UI entrypoint page (never cached so script version bumps take effect)."""
         ui_path = ui_dir / "index.html"
         if ui_path.exists():
-            return send_from_directory(str(ui_dir), "index.html")
+            resp = send_from_directory(str(ui_dir), "index.html")
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            return resp
         return "<h3>WikiOracle Local Shim</h3><p>index.html not found.</p>", 404
 
     @app.route(url_prefix + "/<path:filename>", methods=["GET"])

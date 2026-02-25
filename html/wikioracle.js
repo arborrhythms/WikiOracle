@@ -1,5 +1,27 @@
-// wikioracle.js — WikiOracle v2 client (conversation-based hierarchy)
+// wikioracle.js — WikiOracle client (conversation-based hierarchy)
 // Preferences: served by config.yaml when writable; sessionStorage when stateless.
+//
+// Rendering pipeline:
+//   llm.jsonl on disk
+//     -> [jsonl_to_state] (bin/wikioracle_state.py)
+//     -> GET /state -> client receives state JSON
+//     -> [renderMessages] renders chat panel (selected conversation's messages)
+//     -> [conversationsToHierarchy + renderTree] (d3tree.js) renders SVG tree
+//
+// State shape: { version, schema, time, context, conversations: [...tree...],
+//                selected_conversation, truth: { trust: [...] } }
+//
+// Optimistic UI (sendMessage):
+//   1. Client adds query entry with _pending:true (rendered at 0.6 opacity)
+//   2. For new conversations, creates a temp conversation with tempId("c_")
+//   3. Re-renders immediately via renderMessages()
+//   4. Sends state to server; server adds only the response entry
+//   5. On success: replaces state with server's authoritative response, re-renders
+//   6. On error: reloads state from sessionStorage (stateless) or GET /state (stateful)
+//
+// State persistence:
+//   Stateful:  POST /state after every mutation -> llm.jsonl on disk
+//   Stateless: sessionStorage is authoritative; state sent with each /chat request
 
 // ─── XHTML validation and repair ───
 function validateXhtml(content) {
@@ -76,7 +98,7 @@ function _derivePrefs(cfg) {
       url_fetch: !!chat.url_fetch,
       confirm_actions: !!chat.confirm_actions,
     },
-    css: ui.css || "",
+    theme: ui.theme || "system",
   };
 }
 
@@ -106,7 +128,7 @@ async function _migratePrefsToConfig() {
     },
     chat: { ...(oldPrefs.chat || {}) },
   };
-  if (oldPrefs.css) parsed.ui.css = oldPrefs.css;
+  if (oldPrefs.theme) parsed.ui.theme = oldPrefs.theme;
 
   // Fetch YAML text from server as seed (best-effort)
   let yamlText = "";
@@ -167,19 +189,42 @@ function _clientMerge(importState) {
     }
   }
 
-  // Conversations: append any new roots
+  // Conversations: merge by ID at every level of the tree.
+  // Import wins for message content; children are recursively merged.
+  if (!Array.isArray(state.conversations)) state.conversations = [];
   const importConvs = importState.conversations || [];
-  if (importConvs.length > 0) {
-    if (!Array.isArray(state.conversations)) state.conversations = [];
-    const existingIds = new Set();
-    (function walk(nodes) { for (const n of nodes) { existingIds.add(n.id); if (n.children) walk(n.children); } })(state.conversations);
-    for (const conv of importConvs) {
-      if (!existingIds.has(conv.id)) state.conversations.push(conv);
+
+  function mergeConvLists(base, incoming) {
+    const baseById = {};
+    for (const c of base) { if (c.id) baseById[c.id] = c; }
+    for (const inc of incoming) {
+      const existing = inc.id ? baseById[inc.id] : null;
+      if (existing) {
+        // Merge messages by id: import wins for duplicates, appends new
+        const msgById = {};
+        for (const m of (existing.messages || [])) { if (m.id) msgById[m.id] = m; }
+        for (const m of (inc.messages || [])) {
+          if (m.id && msgById[m.id]) {
+            const idx = existing.messages.indexOf(msgById[m.id]);
+            if (idx >= 0) existing.messages[idx] = m;
+          } else {
+            existing.messages.push(m);
+          }
+        }
+        // Update title if import has one
+        if (inc.title) existing.title = inc.title;
+        // Recursively merge children
+        if (!existing.children) existing.children = [];
+        mergeConvLists(existing.children, inc.children || []);
+      } else {
+        base.push(inc);
+        if (inc.id) baseById[inc.id] = inc;
+      }
     }
   }
+  mergeConvLists(state.conversations, importConvs);
 
   // Context: keep current state context (don't overwrite)
-  // Output: keep current state output (don't overwrite)
 }
 
 // Persist state: sessionStorage is authoritative in stateless mode;
@@ -217,11 +262,17 @@ function applyLayout(layout) {
   if (typeof renderMessages === "function") renderMessages();
 }
 
+function applyTheme(theme) {
+  // Set data-theme on <html> so CSS selectors activate the right variables
+  var t = theme || "system";
+  document.documentElement.setAttribute("data-theme", t);
+}
+
 // ─── Provider metadata (populated from /providers on init) ───
 let _providerMeta = {};  // { "openai": { model: "gpt-4o", ... }, ... }
 
 // ─── State (in-memory, synced from server) ───
-// v2 shape: { version, schema, date, context, conversations: [...tree...],
+// Shape: { version, schema, date, context, conversations: [...tree...],
 //             selected_conversation, truth: { trust, retrieval_prefs } }
 let state = null;
 
@@ -390,6 +441,9 @@ function _hideMsgContextMenu() {
   if (_msgCtxMenu) { _msgCtxMenu.remove(); _msgCtxMenu = null; }
 }
 
+// Context menu for chat messages. Uses position:fixed to avoid clipping by
+// the chat container's overflow. The _justOpened flag + 300ms grace period
+// prevents the document-level click handler from immediately closing the menu.
 function _showMsgContextMenu(event, msgIdx, totalMsgs) {
   _hideMsgContextMenu();
 
@@ -591,6 +645,11 @@ function _toggleOutputEditor() {
 
 
 // ─── UI rendering ───
+// renderMessages: finds the selected conversation via findConversation(),
+// iterates conv.messages to build .message divs (role-based alignment),
+// attaches context-menu listeners (right-click -> Split/Delete), then
+// calls conversationsToHierarchy() + renderTree() to sync the tree panel.
+// Auto-scrolls chat container to bottom after render.
 function renderMessages() {
   const wrapper = document.getElementById("chatWrapper");
   wrapper.innerHTML = "";
@@ -731,6 +790,14 @@ async function sendMessage() {
   const input = document.getElementById("msgInput");
   const text = input.value.trim();
   if (!text) return;
+
+  // Check provider readiness before sending
+  if (!_providerReady()) {
+    const meta = _providerMeta[prefs.provider] || {};
+    setStatus(`${meta.name || prefs.provider} requires an API key. Add it in Settings \u2192 config.yaml.`);
+    return;
+  }
+
   input.value = "";
   input.style.height = "auto";
   document.getElementById("btnSend").disabled = true;
@@ -850,6 +917,7 @@ function openSettings() {
   document.getElementById("setUsername").value = prefs.username || "User";
   document.getElementById("setProvider").value = prefs.provider || "wikioracle";
   document.getElementById("setLayout").value = prefs.layout || "flat";
+  document.getElementById("setTheme").value = prefs.theme || "system";
 
   // Chat settings
   const chat = prefs.chat || {};
@@ -869,9 +937,17 @@ function closeSettings() {
   document.getElementById("settingsOverlay").classList.remove("active");
 }
 async function saveSettings() {
-  prefs.provider = document.getElementById("setProvider").value;
+  const newProvider = document.getElementById("setProvider").value;
+  const meta = _providerMeta[newProvider];
+  if (meta && meta.needs_key && !meta.has_key) {
+    setStatus(`${meta.name} requires an API key. Add it to config.yaml (Settings \u2192 Edit Config).`);
+    // Still save — user might add the key later — but warn them
+  }
+
+  prefs.provider = newProvider;
   prefs.username = document.getElementById("setUsername").value.trim() || "User";
   prefs.layout = document.getElementById("setLayout").value;
+  prefs.theme = document.getElementById("setTheme").value || "system";
 
   // Chat settings
   prefs.chat = {
@@ -884,6 +960,7 @@ async function saveSettings() {
   };
 
   applyLayout(prefs.layout);
+  applyTheme(prefs.theme);
   _updatePlaceholder();
   closeSettings();
 
@@ -897,6 +974,7 @@ async function saveSettings() {
     bundle.parsed.ui = bundle.parsed.ui || {};
     bundle.parsed.ui.default_provider = prefs.provider;
     bundle.parsed.ui.layout = prefs.layout;
+    bundle.parsed.ui.theme = prefs.theme;
     bundle.parsed.chat = bundle.parsed.chat || {};
     Object.assign(bundle.parsed.chat, {
       temperature: prefs.chat.temperature,
@@ -914,8 +992,11 @@ async function saveSettings() {
         provider: prefs.provider,
         username: prefs.username,
         layout: prefs.layout,
+        theme: prefs.theme,
         chat: prefs.chat,
       });
+      // Refresh provider metadata (has_key may have changed via config.yaml)
+      await _refreshProviderMeta();
       setStatus("Settings saved");
     } catch (e) {
       setStatus("Error saving settings: " + e.message);
@@ -1002,6 +1083,13 @@ async function _openConfigEditor() {
       }
 
       overlay.classList.remove("active");
+      // Refresh prefs + provider metadata (keys may have changed)
+      try {
+        var prefsData = await api("GET", "/prefs");
+        if (prefsData.prefs) Object.assign(prefs, prefsData.prefs);
+        applyTheme(prefs.theme);
+      } catch (e) { /* best effort */ }
+      await _refreshProviderMeta();
       setStatus("config.yaml saved");
     });
   }
@@ -1050,6 +1138,7 @@ function _openTruthEditor() {
           <div id="truthEntries" class="trust-entries-scroll"></div>
           <div class="settings-actions settings-actions-xs">
             <button class="btn" id="truthAdd">Add Entry</button>
+            <button class="btn" id="truthAddImpl">Add Implication</button>
             <button class="btn" id="truthClose">Close</button>
           </div>
         </div>
@@ -1058,11 +1147,29 @@ function _openTruthEditor() {
           <input id="truthTitle" type="text" class="trust-input">
           <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = false, 0 = unknown, +1 = true)</span></label>
           <input id="truthCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
-          <label class="trust-label">Content <span class="trust-label-hint">(XHTML: &lt;p&gt; facts, &lt;a href&gt; sources, &lt;provider&gt; LLMs)</span></label>
+          <label class="trust-label">Content <span class="trust-label-hint">(XHTML: &lt;p&gt; facts, &lt;a href&gt; sources, &lt;provider&gt; LLMs, &lt;implication&gt; rules)</span></label>
           <textarea id="truthContent" class="trust-textarea"></textarea>
           <div class="settings-actions settings-actions-sm">
             <button class="btn" id="truthEditCancel">Cancel</button>
             <button class="btn btn-primary" id="truthEditSave">Save</button>
+          </div>
+        </div>
+        <div id="truthImplView" class="hidden">
+          <label class="trust-label">Title</label>
+          <input id="implTitle" type="text" class="trust-input" placeholder="A \u2192 B (derived)">
+          <label class="trust-label">Antecedent <span class="trust-label-hint">(if this entry is believed\u2026)</span></label>
+          <select id="implAntecedent" class="trust-input"></select>
+          <label class="trust-label">Consequent <span class="trust-label-hint">(\u2026then raise certainty of this entry)</span></label>
+          <select id="implConsequent" class="trust-input"></select>
+          <label class="trust-label">Type</label>
+          <select id="implType" class="trust-input">
+            <option value="material">Material (Strong Kleene)</option>
+            <option value="strict">Strict (modal)</option>
+            <option value="relevant">Relevant (anti-paradox)</option>
+          </select>
+          <div class="settings-actions settings-actions-sm">
+            <button class="btn" id="implEditCancel">Cancel</button>
+            <button class="btn btn-primary" id="implEditSave">Save</button>
           </div>
         </div>
       </div>`;
@@ -1113,6 +1220,48 @@ function _openTruthEditor() {
       _truthRenderList();
       _truthShowListView();
     });
+
+    // ─── Implication editor handlers ───
+    document.getElementById("truthAddImpl").addEventListener("click", function() {
+      _truthEditing = "new_impl";
+      document.getElementById("implTitle").value = "";
+      document.getElementById("implType").value = "material";
+      _populateImplDropdowns();
+      _truthShowImplView();
+    });
+
+    document.getElementById("implEditCancel").addEventListener("click", function() {
+      _truthEditing = null;
+      _truthShowListView();
+    });
+
+    document.getElementById("implEditSave").addEventListener("click", function() {
+      const title = document.getElementById("implTitle").value.trim() || "Untitled implication";
+      const ant = document.getElementById("implAntecedent").value;
+      const con = document.getElementById("implConsequent").value;
+      const implType = document.getElementById("implType").value;
+      const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+
+      if (!ant || !con) return;
+
+      const content = "<implication><antecedent>" + ant + "</antecedent><consequent>" + con + "</consequent><type>" + implType + "</type></implication>";
+
+      if (_truthEditing === "new_impl") {
+        const entry = { id: tempId("i_"), title: title, certainty: 0, content: content, time: now };
+        state.truth.trust.push(entry);
+      } else if (typeof _truthEditing === "number") {
+        const entry = state.truth.trust[_truthEditing];
+        if (entry) {
+          entry.title = title;
+          entry.content = content;
+          entry.time = now;
+        }
+      }
+      _truthEditing = null;
+      _persistState();
+      _truthRenderList();
+      _truthShowListView();
+    });
   }
 
   _truthEditing = null;
@@ -1124,12 +1273,64 @@ function _openTruthEditor() {
 function _truthShowListView() {
   document.getElementById("truthListView").style.display = "";
   document.getElementById("truthEditView").style.display = "none";
+  document.getElementById("truthImplView").style.display = "none";
 }
 
 function _truthShowEditView() {
   document.getElementById("truthListView").style.display = "none";
   document.getElementById("truthEditView").style.display = "";
+  document.getElementById("truthImplView").style.display = "none";
   document.getElementById("truthTitle").focus();
+}
+
+function _truthShowImplView() {
+  document.getElementById("truthListView").style.display = "none";
+  document.getElementById("truthEditView").style.display = "none";
+  document.getElementById("truthImplView").style.display = "";
+  document.getElementById("implTitle").focus();
+}
+
+function _isImplication(entry) {
+  return entry && typeof entry.content === "string" && entry.content.indexOf("<implication") !== -1;
+}
+
+function _parseImplContent(content) {
+  try {
+    var parser = new DOMParser();
+    var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
+    var impl = doc.querySelector("implication");
+    if (!impl) return null;
+    var ant = impl.querySelector("antecedent");
+    var con = impl.querySelector("consequent");
+    var typ = impl.querySelector("type");
+    return {
+      antecedent: ant ? ant.textContent.trim() : "",
+      consequent: con ? con.textContent.trim() : "",
+      type: typ ? typ.textContent.trim() : "material"
+    };
+  } catch (e) { return null; }
+}
+
+function _populateImplDropdowns(selectedAnt, selectedCon) {
+  var entries = (state.truth && state.truth.trust) || [];
+  var antSel = document.getElementById("implAntecedent");
+  var conSel = document.getElementById("implConsequent");
+  antSel.innerHTML = "";
+  conSel.innerHTML = "";
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i];
+    if (_isImplication(e)) continue; // skip implication entries themselves
+    var opt1 = document.createElement("option");
+    opt1.value = e.id;
+    opt1.textContent = e.id + " — " + truncate(e.title || "(untitled)", 30);
+    if (e.id === selectedAnt) opt1.selected = true;
+    antSel.appendChild(opt1);
+    var opt2 = document.createElement("option");
+    opt2.value = e.id;
+    opt2.textContent = e.id + " — " + truncate(e.title || "(untitled)", 30);
+    if (e.id === selectedCon) opt2.selected = true;
+    conSel.appendChild(opt2);
+  }
 }
 
 function _truthRenderList() {
@@ -1144,34 +1345,82 @@ function _truthRenderList() {
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
+    const isImpl = _isImplication(entry);
     const row = document.createElement("div");
     row.style.cssText = "display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0; border-bottom:1px solid var(--border); font-size:0.82rem;";
 
-    const cert = document.createElement("span");
-    const c = entry.certainty || 0;
-    cert.textContent = (c >= 0 ? "+" : "") + c.toFixed(2);
-    cert.style.cssText = "min-width:3.2em; text-align:right; font-family:ui-monospace,monospace; font-size:0.78rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
-    row.appendChild(cert);
+    if (isImpl) {
+      // Implication entry: show → icon and antecedent/consequent
+      const implData = _parseImplContent(entry.content);
+      const badge = document.createElement("span");
+      badge.textContent = "\u2192";
+      badge.title = "Implication (" + (implData ? implData.type : "material") + ")";
+      badge.style.cssText = "min-width:3.2em; text-align:center; font-size:1rem; color:var(--accent);";
+      row.appendChild(badge);
 
-    const title = document.createElement("span");
-    title.textContent = truncate(entry.title || "(untitled)", 36);
-    title.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-    row.appendChild(title);
+      const label = document.createElement("span");
+      label.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+      if (implData) {
+        label.textContent = implData.antecedent + " \u2192 " + implData.consequent;
+        label.title = entry.title || "";
+      } else {
+        label.textContent = truncate(entry.title || "(implication)", 36);
+      }
+      row.appendChild(label);
+
+      // Show derived certainty of consequent if available
+      if (implData) {
+        const derivedSpan = document.createElement("span");
+        var conEntry = entries.find(function(e) { return e.id === implData.consequent; });
+        if (conEntry) {
+          var dc = conEntry._derived_certainty != null ? conEntry._derived_certainty : conEntry.certainty;
+          derivedSpan.textContent = "c=" + (dc >= 0 ? "+" : "") + dc.toFixed(2);
+          derivedSpan.style.cssText = "font-family:ui-monospace,monospace; font-size:0.72rem; color:var(--fg-muted);";
+        }
+        row.appendChild(derivedSpan);
+      }
+    } else {
+      // Regular trust entry
+      const cert = document.createElement("span");
+      const c = entry.certainty || 0;
+      const dc = entry._derived_certainty;
+      var certText = (c >= 0 ? "+" : "") + c.toFixed(2);
+      if (dc != null && Math.abs(dc - c) > 1e-9) {
+        certText += "\u2192" + (dc >= 0 ? "+" : "") + dc.toFixed(2);
+      }
+      cert.textContent = certText;
+      cert.style.cssText = "min-width:3.2em; text-align:right; font-family:ui-monospace,monospace; font-size:0.78rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
+      if (dc != null && Math.abs(dc - c) > 1e-9) cert.title = "Stored: " + c.toFixed(2) + ", Derived: " + dc.toFixed(2);
+      row.appendChild(cert);
+
+      const title = document.createElement("span");
+      title.textContent = truncate(entry.title || "(untitled)", 36);
+      title.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+      row.appendChild(title);
+    }
 
     const editBtn = document.createElement("button");
     editBtn.textContent = "Edit";
     editBtn.className = "btn";
     editBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem;";
-    editBtn.addEventListener("click", (function(idx) {
+    editBtn.addEventListener("click", (function(idx, isImplication) {
       return function() {
         _truthEditing = idx;
         const e = state.truth.trust[idx];
-        document.getElementById("truthTitle").value = e.title || "";
-        document.getElementById("truthCertainty").value = e.certainty || 0;
-        document.getElementById("truthContent").value = stripTags(e.content || "").trim() ? (e.content || "") : "<p></p>";
-        _truthShowEditView();
+        if (isImplication) {
+          const implData = _parseImplContent(e.content);
+          document.getElementById("implTitle").value = e.title || "";
+          document.getElementById("implType").value = (implData && implData.type) || "material";
+          _populateImplDropdowns(implData && implData.antecedent, implData && implData.consequent);
+          _truthShowImplView();
+        } else {
+          document.getElementById("truthTitle").value = e.title || "";
+          document.getElementById("truthCertainty").value = e.certainty || 0;
+          document.getElementById("truthContent").value = stripTags(e.content || "").trim() ? (e.content || "") : "<p></p>";
+          _truthShowEditView();
+        }
       };
-    })(i));
+    })(i, isImpl));
     row.appendChild(editBtn);
 
     const delBtn = document.createElement("button");
@@ -1181,7 +1430,7 @@ function _truthRenderList() {
     delBtn.addEventListener("click", (function(idx) {
       return function() {
         const e = state.truth.trust[idx];
-        if (confirmAction("Delete truth entry \"" + (e.title || "untitled") + "\"?")) {
+        if (confirmAction("Delete " + (_isImplication(e) ? "implication" : "trust entry") + " \"" + (e.title || "untitled") + "\"?")) {
           state.truth.trust.splice(idx, 1);
           _persistState();
           _truthRenderList();
@@ -1302,18 +1551,17 @@ ${body}
 
 // ─── Bind UI events ───
 function bindEvents() {
-  // Export (v2 JSONL)
+  // Export JSONL
   document.getElementById("btnExport").addEventListener("click", function() {
     if (!state) { setStatus("No state to export"); return; }
     const now = new Date();
     const pad2 = n => String(n).padStart(2, "0");
     const fn = `llm_${now.getFullYear()}.${pad2(now.getMonth()+1)}.${pad2(now.getDate())}.${pad2(now.getHours())}${pad2(now.getMinutes())}.jsonl`;
 
-    // Build v2 JSONL
     const lines = [];
     const header = {
       type: "header", version: 2,
-      schema: state.schema || "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json",
+      schema: state.schema || "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state.json",
       date: new Date().toISOString(),
       context: state.context || "<div/>",
       output: state.output || "<div/>",
@@ -1367,7 +1615,6 @@ function bindEvents() {
     if (!file) return;
     try {
       const text = await file.text();
-      // Parse: send to server which handles both v1 and v2
       const lines = text.trim().split("\n").filter(l => l.trim());
       if (lines.length === 0) throw new Error("Empty file");
       const first = JSON.parse(lines[0]);
@@ -1383,26 +1630,20 @@ function bindEvents() {
           context: first.context || "<div/>",
           output: first.output || "",
           conversations: [],
-          messages: [],
           selected_conversation: first.selected_conversation || null,
           truth: { trust: [], retrieval_prefs: first.retrieval_prefs || {} },
         };
-        if (first.active_path) importState.active_path = first.active_path;
         const convRecords = [];
         for (let i = 1; i < lines.length; i++) {
           const rec = JSON.parse(lines[i]);
           if (rec.type === "conversation") {
             const { type, ...rest } = rec;
             convRecords.push(rest);
-          } else if (rec.type === "message") {
-            const { type, ...rest } = rec;
-            importState.messages.push(rest);
           } else if (rec.type === "trust") {
             const { type, ...rest } = rec;
             importState.truth.trust.push(rest);
           }
         }
-        // If v2 conversations found, nest them
         if (convRecords.length > 0) {
           const byId = {};
           const roots = [];
@@ -1419,7 +1660,6 @@ function bindEvents() {
             delete node.parent;
           }
           importState.conversations = roots;
-          delete importState.messages;
         }
       } else {
         importState = JSON.parse(text);
@@ -1526,18 +1766,10 @@ async function init() {
       await _initStateful();
     }
 
-    // Apply layout, CSS overrides, and update placeholder from prefs
+    // Apply layout, theme, and update placeholder from prefs
     applyLayout(prefs.layout);
+    applyTheme(prefs.theme);
     _updatePlaceholder();
-    if (prefs.css) {
-      let styleEl = document.getElementById("wikioracle-css-override");
-      if (!styleEl) {
-        styleEl = document.createElement("style");
-        styleEl.id = "wikioracle-css-override";
-        document.head.appendChild(styleEl);
-      }
-      styleEl.textContent = prefs.css;
-    }
 
     // Restore selected conversation from state
     if (state.selected_conversation && findConversation(state.conversations, state.selected_conversation)) {
@@ -1646,6 +1878,17 @@ async function _initStateful() {
   if (!Array.isArray(state.conversations)) state.conversations = [];
 }
 
+// Refresh provider metadata from server (updates has_key flags)
+async function _refreshProviderMeta() {
+  try {
+    var provData = await api("GET", "/providers");
+    _providerMeta = provData.providers || {};
+    _populateProviderDropdown();
+  } catch (e) {
+    console.warn("[WikiOracle] Failed to refresh provider metadata:", e);
+  }
+}
+
 // Populate the provider <select> dropdown from _providerMeta
 function _populateProviderDropdown() {
   const sel = document.getElementById("setProvider");
@@ -1653,9 +1896,26 @@ function _populateProviderDropdown() {
   for (const [key, info] of Object.entries(_providerMeta)) {
     const opt = document.createElement("option");
     opt.value = key;
-    opt.textContent = info.name + (info.model ? ` (${info.model})` : "");
+    const keyWarning = (info.needs_key && !info.has_key) ? " \u26a0 no key" : "";
+    opt.textContent = info.name + (info.model ? ` (${info.model})` : "") + keyWarning;
     sel.appendChild(opt);
   }
+}
+
+// Check if the currently selected provider can accept messages
+function _providerReady() {
+  var meta = _providerMeta[prefs.provider];
+  if (!meta) return true;  // unknown provider — let server decide
+  if (!meta.needs_key) return true;
+  if (meta.has_key) return true;
+  // In stateless mode, check local config for client-supplied key
+  if (_serverInfo.stateless) {
+    var bundle = _loadLocalConfig();
+    var rc = (bundle && bundle.parsed) || {};
+    var rcKey = ((rc.providers || {})[prefs.provider] || {}).api_key;
+    if (rcKey) return true;
+  }
+  return false;
 }
 
 // ─── Boot ───

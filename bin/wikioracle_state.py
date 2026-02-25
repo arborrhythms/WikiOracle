@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """State and merge utilities for WikiOracle local state files (JSONL format).
 
-v2 grammar:  Dialogue → Conversation*,  Conversation → (Query|Response)* + Conversation*
+Grammar:  Dialogue → Conversation*,  Conversation → (Query|Response)* + Conversation*
 
 llm.jsonl is a line-delimited JSON file where:
-  Line 1: header  {"type":"header","version":2,...}
+  Line 1: header  {"type":"header","version":2,"schema":"...","time":"..."}
   Line N: record  {"type":"conversation"|"trust", ...}
 
 Conversations form a tree via parent references in JSONL; in memory they are nested.
@@ -25,11 +25,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-SCHEMA_URL_V2 = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json"
-SCHEMA_URL_V1 = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v1.json"
-SCHEMA_URL = SCHEMA_URL_V2  # Canonical schema URL for newly written states.
-SCHEMA_BASENAME = "llm_state_v2.json"  # Basename accepted when URL host/path vary.
-STATE_VERSION = 2  # Current supported state grammar version.
+SCHEMA_URL = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state.json"
+SCHEMA_BASENAME = "llm_state.json"  # Basename accepted when URL host/path vary.
+STATE_VERSION = 2  # Current state grammar version.
 STATE_SCHEMA_ID = "wikioracle.llm_state"  # Stable schema family identifier.
 
 DEFAULT_OUTPUT = ""  # Default output-format instruction when none is configured.
@@ -78,13 +76,17 @@ def _timestamp_sort_key(timestamp: str) -> tuple:
 # Schema helpers
 # ---------------------------------------------------------------------------
 def schema_url_matches(value: Any) -> bool:
-    """Accept v1/v2 schema URLs even if query/hash differs."""
+    """Accept schema URLs even if query/hash or version suffix differs."""
     if not isinstance(value, str) or not value:
         return False
-    if value in (SCHEMA_URL_V2, SCHEMA_URL_V1):
+    if value == SCHEMA_URL:
         return True
     basename = value.split("?")[0].split("#")[0].rsplit("/", 1)[-1]
-    return basename in ("llm_state_v1.json", "llm_state_v2.json")
+    if basename == SCHEMA_BASENAME:
+        return True
+    # Accept versioned variants like llm_state_v2.json
+    stem = SCHEMA_BASENAME.rsplit(".", 1)[0]  # "llm_state"
+    return basename.startswith(stem) and basename.endswith(".json")
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +186,22 @@ def ensure_trust_id(entry: dict) -> str:
     return trust_id
 
 
+def _implication_fingerprint(entry: dict) -> str:
+    """Build a stable hash input for implication identity derivation."""
+    content = canonicalize_xhtml(entry.get("content", ""))
+    return _stable_sha256(f"implication|{content}")
+
+
+def ensure_implication_id(entry: dict) -> str:
+    """Ensure an implication entry has an ID, deriving one deterministically if missing."""
+    iid = str(entry.get("id", "")).strip()
+    if iid:
+        return iid
+    iid = "i_" + _implication_fingerprint(entry)[:16]
+    entry["id"] = iid
+    return iid
+
+
 # ---------------------------------------------------------------------------
 # Normalization
 # ---------------------------------------------------------------------------
@@ -219,7 +237,7 @@ def _derive_conversation_title(messages: list) -> str:
     return "(untitled)"
 
 
-def _normalize_conversation(raw: Any) -> dict:
+def normalize_conversation(raw: Any) -> dict:
     """Normalize a conversation node."""
     item = dict(raw) if isinstance(raw, dict) else {}
     ensure_conversation_id(item)
@@ -232,7 +250,7 @@ def _normalize_conversation(raw: Any) -> dict:
     children = item.get("children", [])
     if not isinstance(children, list):
         children = []
-    item["children"] = [_normalize_conversation(c) for c in children]
+    item["children"] = [normalize_conversation(c) for c in children]
     # Strip JSONL-only fields
     item.pop("parent", None)
     item.pop("type", None)
@@ -252,145 +270,27 @@ def _normalize_trust_entry(raw: Any) -> dict:
         certainty = 0.0
     item["certainty"] = min(1.0, max(-1.0, certainty))
     item["content"] = ensure_xhtml(item.get("content", ""))
-    ensure_trust_id(item)
+    # Use i_ prefix for implication entries, t_ for all others
+    if "<implication" in item.get("content", ""):
+        ensure_implication_id(item)
+    else:
+        ensure_trust_id(item)
     return item
 
 
-# ---------------------------------------------------------------------------
-# V1 → V2 migration
-# ---------------------------------------------------------------------------
-def migrate_v1_to_v2(v1_state: dict) -> dict:
-    """Convert a v1 state (flat messages with parent_id) to v2 (conversation tree).
-
-    Uses the same grouping algorithm as the client's groupConversations().
-    """
-    messages = v1_state.get("messages", [])
-    if not messages:
-        v2 = copy.deepcopy(v1_state)
-        v2["version"] = STATE_VERSION
-        v2["schema"] = SCHEMA_URL
-        v2["conversations"] = []
-        v2.pop("messages", None)
-        v2.pop("active_path", None)
-        v2["selected_conversation"] = None
-        return v2
-
-    # Build graph from parent_id
-    by_id: dict = {}
-    children: dict = {}
-    root_ids: list = []
-    ordered = sorted(messages, key=lambda m: (
-        _timestamp_sort_key(m.get("time", "")), m.get("id", "")
-    ))
-    prev_id = None
-    for msg in ordered:
-        mid = msg.get("id", "")
-        by_id[mid] = msg
-        pid = msg.get("parent_id", "__MISSING__")
-        if pid == "__MISSING__":
-            pid = prev_id
-        if pid is None:
-            root_ids.append(mid)
-        else:
-            children.setdefault(pid, []).append(mid)
-        prev_id = mid
-
-    # Walk chains to group into conversations
-    def walk_chain(start_id):
-        """Follow single-child links starting at start_id to collect one chain."""
-        msgs = []
-        cur = start_id
-        while cur:
-            msg = by_id.get(cur)
-            if not msg:
-                break
-            msgs.append(msg)
-            kids = children.get(cur, [])
-            if len(kids) == 1:
-                cur = kids[0]
-            else:
-                break
-        return msgs
-
-    def build_conv(start_id):
-        """Build one conversation node (plus child branches) from a chain root."""
-        chain = walk_chain(start_id)
-        if not chain:
-            return None
-        last_msg = chain[-1]
-        last_id = last_msg.get("id", "")
-        kids = children.get(last_id, [])
-
-        # Determine role for each message
-        conv_messages = []
-        for m in chain:
-            username = m.get("username", "")
-            is_assistant = any(kw in username.lower() for kw in
-                             ["llm", "oracle", "nanochat", "claude", "gpt", "anthropic"])
-            conv_messages.append({
-                "id": m["id"],
-                "role": "assistant" if is_assistant else "user",
-                "username": username,
-                "time": m.get("time", ""),
-                "content": m.get("content", ""),
-            })
-
-        # Title from first user message
-        first_user = next((m for m in conv_messages if m["role"] == "user"), None)
-        title = ""
-        if first_user:
-            title = strip_xhtml(first_user["content"])[:50]
-        if not title:
-            title = strip_xhtml(conv_messages[0]["content"])[:50] if conv_messages else "(untitled)"
-
-        child_convs = [build_conv(kid) for kid in kids]
-        child_convs = [c for c in child_convs if c is not None]
-
-        return {
-            "id": "c_" + _stable_sha256(chain[0]["id"])[:16],
-            "title": title,
-            "messages": conv_messages,
-            "children": child_convs,
-        }
-
-    conversations = [build_conv(rid) for rid in root_ids]
-    conversations = [c for c in conversations if c is not None]
-
-    v2 = copy.deepcopy(v1_state)
-    v2["version"] = STATE_VERSION
-    v2["schema"] = SCHEMA_URL
-    v2["conversations"] = conversations
-    v2.pop("messages", None)
-    v2.pop("active_path", None)
-    v2["selected_conversation"] = None
-    return v2
 
 
 # ---------------------------------------------------------------------------
 # State as dict (internal canonical form)
 # ---------------------------------------------------------------------------
 def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
-    """Normalize state to v2 shape. Auto-migrates v1."""
+    """Normalize state to canonical shape (conversation-based hierarchy)."""
     if not isinstance(raw, dict):
         if strict:
             raise StateValidationError("State must be a JSON object")
         raw = {}
 
     state = copy.deepcopy(raw)
-
-    version = state.get("version", STATE_VERSION)
-    try:
-        version = int(version)
-    except (TypeError, ValueError):
-        version = STATE_VERSION
-
-    # Auto-migrate v1 → v2
-    if version == 1 or (version != 2 and "messages" in state and "conversations" not in state):
-        state = migrate_v1_to_v2(state)
-        version = 2
-
-    if strict and version != STATE_VERSION:
-        raise StateValidationError(f"Unsupported version: {version}")
     state["version"] = STATE_VERSION
 
     schema = state.get("schema", SCHEMA_URL)
@@ -415,7 +315,7 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raise StateValidationError("State.conversations must be an array")
     if not isinstance(convs, list):
         convs = []
-    state["conversations"] = [_normalize_conversation(c) for c in convs]
+    state["conversations"] = [normalize_conversation(c) for c in convs]
 
     state["selected_conversation"] = state.get("selected_conversation", None)
 
@@ -447,7 +347,7 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# JSONL I/O (v2)
+# JSONL I/O
 # ---------------------------------------------------------------------------
 def _flatten_conversations(convs: list, parent_id: str | None = None) -> list:
     """Flatten nested conversations into JSONL records with 'parent' references."""
@@ -496,7 +396,7 @@ def _nest_conversations(flat_records: list) -> list:
 
 
 def state_to_jsonl(state: dict) -> str:
-    """Convert a v2 state dict to JSONL string."""
+    """Convert a state dict to JSONL string."""
     lines = []
 
     header = {
@@ -527,7 +427,7 @@ def state_to_jsonl(state: dict) -> str:
 
 
 def jsonl_to_state(text: str) -> dict:
-    """Parse a JSONL string into a state dict (auto-detects v1 vs v2)."""
+    """Parse a JSONL string into a state dict (conversation-based)."""
     state = {
         "version": STATE_VERSION,
         "schema": SCHEMA_URL,
@@ -539,8 +439,6 @@ def jsonl_to_state(text: str) -> dict:
     }
 
     conv_records = []
-    v1_messages = []
-    detected_version = None
 
     for line in text.strip().split("\n"):
         line = line.strip()
@@ -554,25 +452,16 @@ def jsonl_to_state(text: str) -> dict:
         record_type = obj.get("type", "")
 
         if record_type == "header":
-            detected_version = obj.get("version", 1)
-            state["version"] = detected_version
+            state["version"] = obj.get("version", STATE_VERSION)
             state["schema"] = obj.get("schema", SCHEMA_URL)
             state["time"] = obj.get("time") or obj.get("date") or state["time"]
             state["context"] = obj.get("context", state["context"])
-            # retrieval_prefs now lives in config.yaml; ignored from old files
             if "selected_conversation" in obj:
                 state["selected_conversation"] = obj["selected_conversation"]
-            # ui_prefs removed — all preferences live in config.yaml
             if "output" in obj and isinstance(obj["output"], str) and obj["output"].strip():
                 state["output"] = obj["output"].strip()
-            # v1 compat
-            if "active_path" in obj:
-                state["_v1_active_path"] = obj["active_path"]
         elif record_type == "conversation":
             conv_records.append({k: v for k, v in obj.items() if k != "type"})
-        elif record_type == "message":
-            # v1 message record
-            v1_messages.append({k: v for k, v in obj.items() if k != "type"})
         elif record_type == "trust":
             entry = {k: v for k, v in obj.items() if k != "type"}
             state["truth"]["trust"].append(entry)
@@ -580,19 +469,14 @@ def jsonl_to_state(text: str) -> dict:
             return ensure_minimal_state(obj, strict=False)
 
     if conv_records:
-        # v2: reconstruct tree from flat records
         state["conversations"] = _nest_conversations(conv_records)
-    elif v1_messages:
-        # v1: store temporarily for migration
-        state["messages"] = v1_messages
-        state["version"] = 1
 
     return state
 
 
 def load_state_file(path: Path, *, strict: bool = True, max_bytes: int | None = None,
                     reject_symlinks: bool = False) -> dict:
-    """Load state from a .jsonl (or legacy .json) file. Auto-migrates v1→v2."""
+    """Load state from a .jsonl (or legacy .json) file."""
     if reject_symlinks and path.is_symlink():
         raise StateValidationError("State file cannot be a symlink")
 
@@ -715,7 +599,7 @@ def add_child_conversation(conversations: list, parent_conv_id: str, new_conv: d
     parent = find_conversation(conversations, parent_conv_id)
     if parent is None:
         return False
-    parent.setdefault("children", []).append(_normalize_conversation(new_conv))
+    parent.setdefault("children", []).append(normalize_conversation(new_conv))
     return True
 
 
@@ -875,7 +759,7 @@ def merge_llm_states(
             if parent_id and find_conversation(base["conversations"], parent_id):
                 add_child_conversation(base["conversations"], parent_id, flat_conv)
             else:
-                base["conversations"].append(_normalize_conversation(flat_conv))
+                base["conversations"].append(normalize_conversation(flat_conv))
 
     out = copy.deepcopy(base)
     out["truth"]["trust"] = _sort_by_timestamp(list(existing_trust.values()))
@@ -923,93 +807,23 @@ def merge_many_states(
     return current, history
 
 
-# ---------------------------------------------------------------------------
-# Compat shims for server code that still uses v1 names
-# ---------------------------------------------------------------------------
-def build_message_graph(messages: list) -> dict:
-    """DEPRECATED: v1 compat. Build graph from flat messages with parent_id."""
-    by_id: dict = {}
-    children: dict = {}
-    root_ids: list = []
-    ordered = sorted(messages, key=lambda m: (
-        _timestamp_sort_key(m.get("time", "")), m.get("id", "")
-    ))
-    prev_id = None
-    for msg in ordered:
-        mid = msg.get("id", "")
-        by_id[mid] = msg
-        pid = msg.get("parent_id", "__MISSING__")
-        if pid == "__MISSING__":
-            pid = prev_id
-        if pid is None:
-            root_ids.append(mid)
-        else:
-            children.setdefault(pid, []).append(mid)
-        prev_id = mid
-    return {"by_id": by_id, "children": children, "root_ids": root_ids, "all_ids": set(by_id.keys())}
-
-
-def resolve_cwd(messages: list, active_path: list | None = None) -> list:
-    """DEPRECATED: v1 compat."""
-    if not messages:
-        return []
-    graph = build_message_graph(messages)
-    if active_path and all(mid in graph["all_ids"] for mid in active_path):
-        return list(active_path)
-    def _dfs(nid):
-        """Return the longest descendant path that starts at nid."""
-        kids = graph["children"].get(nid, [])
-        if not kids:
-            return [nid]
-        longest = []
-        for kid in kids:
-            p = _dfs(kid)
-            if len(p) > len(longest):
-                longest = p
-        return [nid] + longest
-    best = []
-    for rid in graph["root_ids"]:
-        c = _dfs(rid)
-        if len(c) > len(best):
-            best = c
-    return best
-
-
-def get_messages_on_path(messages: list, cwd: list) -> list:
-    """DEPRECATED: v1 compat."""
-    if not cwd:
-        return list(messages)
-    by_id = {m.get("id"): m for m in messages}
-    return [by_id[mid] for mid in cwd if mid in by_id]
-
-
-def get_branch_points(messages: list, cwd: list) -> dict:
-    """DEPRECATED: v1 compat."""
-    graph = build_message_graph(messages)
-    result = {}
-    for mid in cwd:
-        kids = graph["children"].get(mid, [])
-        if len(kids) > 1:
-            result[mid] = kids
-    return result
-
-
-def get_children(messages: list, parent_id: str | None = None) -> list:
-    """DEPRECATED: v1 compat."""
-    graph = build_message_graph(messages)
-    if parent_id is None:
-        return list(graph["root_ids"])
-    return graph["children"].get(parent_id, [])
 
 
 # ---------------------------------------------------------------------------
-# Provider / Src parsing (unchanged from v1)
+# Provider / Src parsing
 # ---------------------------------------------------------------------------
-ALLOWED_KEY_DIR = Path.home() / ".wikioracle" / "keys"
+ALLOWED_DATA_DIR = Path.home() / ".wikioracle" / "keys"
 
 
 def parse_provider_block(content: str) -> dict | None:
-    """Parse the first <provider> XML block from trust-entry content."""
+    """Parse the first <provider> XML block from trust-entry content.
+
+    Supports both child-element style and attribute style:
+      Child:  <provider><name>claude</name><api_url>...</api_url></provider>
+      Attr:   <provider name="claude" api_url="..." model="..." />
+    Attributes take precedence only when the corresponding child element is
+    absent or empty, so either style (or a mix) works.
+    """
     if not isinstance(content, str) or "<provider" not in content:
         return None
     try:
@@ -1019,24 +833,28 @@ def parse_provider_block(content: str) -> dict | None:
     prov = root.find(".//provider")
     if prov is None:
         return None
-    def _text(tag, default=""):
-        """Read and strip child text from provider XML nodes."""
+    def _val(tag, default=""):
+        """Read from child element first, fall back to XML attribute."""
         el = prov.find(tag)
-        return (el.text or "").strip() if el is not None else default
+        text = (el.text or "").strip() if el is not None else ""
+        if text:
+            return text
+        # Fall back to attribute on the <provider> element itself
+        return prov.get(tag, default)
     result = {
-        "name": _text("name", "unknown"),
-        "api_url": _text("api_url"),
-        "api_key": _text("api_key"),
-        "model": _text("model"),
+        "name": _val("name", "unknown"),
+        "api_url": _val("api_url"),
+        "api_key": _val("api_key"),
+        "model": _val("model"),
         "timeout": 0,
         "max_tokens": 0,
     }
     try:
-        result["timeout"] = int(_text("timeout", "0"))
+        result["timeout"] = int(_val("timeout", "0"))
     except ValueError:
         result["timeout"] = 0
     try:
-        result["max_tokens"] = int(_text("max_tokens", "0"))
+        result["max_tokens"] = int(_val("max_tokens", "0"))
     except ValueError:
         result["max_tokens"] = 0
     return result
@@ -1064,13 +882,127 @@ def parse_src_block(content: str) -> dict | None:
     }
 
 
+def parse_implication_block(content: str) -> dict | None:
+    """Parse the first <implication> XML block from trust-entry content.
+
+    Returns { antecedent, consequent, type } where antecedent and consequent
+    are trust entry IDs and type is one of: material, strict, relevant.
+    """
+    if not isinstance(content, str) or "<implication" not in content:
+        return None
+    try:
+        root = ET.fromstring(f"<root>{content}</root>")
+    except ET.ParseError:
+        return None
+    impl = root.find(".//implication")
+    if impl is None:
+        return None
+    def _text(tag, default=""):
+        el = impl.find(tag)
+        return (el.text or "").strip() if el is not None else default
+    antecedent = _text("antecedent")
+    consequent = _text("consequent")
+    if not antecedent or not consequent:
+        return None
+    impl_type = _text("type", "material")
+    if impl_type not in ("material", "strict", "relevant"):
+        impl_type = "material"
+    return {
+        "antecedent": antecedent,
+        "consequent": consequent,
+        "type": impl_type,
+    }
+
+
+def get_implication_entries(trust_entries: list) -> list:
+    """Extract trust entries that contain valid <implication> blocks."""
+    result = []
+    for entry in trust_entries:
+        impl = parse_implication_block(entry.get("content", ""))
+        if impl is not None:
+            result.append((entry, impl))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Derived truth: Kleene implication engine
+# ---------------------------------------------------------------------------
+def compute_derived_truth(trust_entries: list) -> dict:
+    """Evaluate all implication entries and return a derived truth table.
+
+    Returns: { entry_id: derived_certainty } for ALL entries (including those
+    unchanged), suitable for overlaying onto the trust table during RAG ranking.
+
+    Uses Strong Kleene material implication on the [-1,+1] certainty scale:
+      negation:    not(A) = -A
+      disjunction: A or B = max(A, B)
+      implication: A -> B = max(-A, B)   (i.e. not-A or B)
+
+    Iterates to fixed point (implications can chain). Max 100 iterations.
+    """
+    # Build certainty lookup from static values
+    certainty = {}
+    for entry in trust_entries:
+        eid = entry.get("id", "")
+        if eid:
+            certainty[eid] = entry.get("certainty", 0.0)
+
+    # Extract implications
+    implications = []
+    for entry in trust_entries:
+        impl = parse_implication_block(entry.get("content", ""))
+        if impl is not None:
+            implications.append(impl)
+
+    if not implications:
+        return certainty
+
+    # Fixed-point iteration
+    for _ in range(100):
+        changed = False
+        for impl in implications:
+            ant_id = impl["antecedent"]
+            con_id = impl["consequent"]
+            ant_c = certainty.get(ant_id, 0.0)
+            con_c = certainty.get(con_id, 0.0)
+
+            # Strong Kleene material implication: max(-ant, con)
+            # This gives the "truth value" of the implication itself.
+            # If the implication is true (>0), it supports the consequent.
+            # We propagate: new_con = max(con, min(ant, implication_value))
+            # This means: the consequent gets at least as certain as
+            # the weakest link in the chain (antecedent certainty).
+            impl_value = max(-ant_c, con_c)
+
+            # The consequent's derived certainty is strengthened by
+            # the antecedent's certainty, but only if the antecedent
+            # is positive (believing A supports believing B).
+            if ant_c > 0 and con_id in certainty:
+                # Modus ponens: if A is believed, B should be at least
+                # as certain as the antecedent (capped at antecedent certainty)
+                new_con = max(con_c, ant_c)
+                if abs(new_con - con_c) > 1e-9:
+                    certainty[con_id] = new_con
+                    changed = True
+            elif ant_c < 0:
+                # Antecedent is disbelieved — implication is vacuously true,
+                # does not modify consequent (Kleene: max(-(-1), B) = max(1,B) = 1)
+                pass
+            # ant_c == 0: unknown antecedent — no propagation (conservative)
+
+        if not changed:
+            break
+
+    return certainty
+
+
 def resolve_api_key(raw_key: str) -> str:
     """Resolve file:// API keys from allowlisted paths; otherwise return raw value."""
     if not raw_key or not raw_key.startswith("file://"):
         return raw_key
     rel_path = raw_key[len("file://"):]
     key_path = Path(rel_path).expanduser().resolve()
-    allowed = ALLOWED_KEY_DIR.resolve()
+    allowed = ALLOWED_DATA_DIR.resolve()
     try:
         key_path.relative_to(allowed)
     except ValueError:
@@ -1093,7 +1025,7 @@ def resolve_src_content(src_config: dict) -> str:
     if path.startswith("file://"):
         rel_path = path[len("file://"):]
         src_path = Path(rel_path).expanduser().resolve()
-        allowed = ALLOWED_KEY_DIR.resolve()
+        allowed = ALLOWED_DATA_DIR.resolve()
         try:
             src_path.relative_to(allowed)
         except ValueError:

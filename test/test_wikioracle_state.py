@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 from wikioracle_state import (
-    ALLOWED_KEY_DIR,
+    ALLOWED_DATA_DIR,
     DEFAULT_OUTPUT,
     SCHEMA_URL,
     SCHEMA_URL_V1,

@@ -54,6 +54,8 @@ from wikioracle_state import (
     get_src_entries,
     load_state_file,
     merge_llm_states,
+    normalize_conversation,
+    compute_derived_truth,
     parse_provider_block,
     resolve_api_key,
     resolve_src_content,
@@ -247,7 +249,7 @@ def _save_state(cfg: Config, state: Dict[str, Any]) -> None:
 # Auth helper
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# Upstream providers (v2: conversation-aware context building)
+# Upstream providers
 # ---------------------------------------------------------------------------
 def _build_bundle(
     state: Dict[str, Any],
@@ -326,13 +328,51 @@ def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -
     return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "[No content]")
 
 
+def _build_anthropic_payload_from_messages(
+    messages: List[Dict], model: str, max_tokens: int, temperature: float,
+) -> Dict[str, Any]:
+    """Build an Anthropic API payload from raw messages (shared by legacy callers).
+
+    Extracts [Context]-prefixed first user message as system text, merges
+    consecutive same-role messages, and ensures the first message is 'user'.
+    """
+    system_text = ""
+    api_messages = []
+    for msg in messages:
+        if msg["role"] == "user" and msg["content"].startswith("[Context]") and not api_messages:
+            system_text = msg["content"]
+            continue
+        if msg["role"] == "assistant" and not api_messages:
+            continue
+        api_messages.append(msg)
+
+    cleaned = []
+    last_role = None
+    for msg in api_messages:
+        if msg["role"] == last_role:
+            cleaned[-1]["content"] += "\n" + msg["content"]
+        else:
+            cleaned.append(dict(msg))
+            last_role = msg["role"]
+    if cleaned and cleaned[0]["role"] != "user":
+        cleaned.insert(0, {"role": "user", "content": "(continuing conversation)"})
+
+    payload: Dict[str, Any] = {
+        "model": model, "max_tokens": max_tokens, "messages": cleaned,
+    }
+    if system_text:
+        payload["system"] = system_text
+    if temperature > 0:
+        payload["temperature"] = temperature
+    return payload
+
+
 def _call_anthropic(bundle: PromptBundle | None, temperature: float, provider_cfg: Dict,
                      messages: List[Dict] | None = None) -> str:
     """Call Anthropic API. Prefers bundle-based payload; falls back to legacy messages."""
     url = provider_cfg.get("url", "https://api.anthropic.com/v1/messages")
 
     if bundle is not None:
-        # New path: build payload directly from bundle
         payload = to_anthropic_payload(
             bundle,
             model=provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
@@ -340,36 +380,12 @@ def _call_anthropic(bundle: PromptBundle | None, temperature: float, provider_cf
             temperature=temperature,
         )
     else:
-        # Legacy path: messages passed directly (used by dynamic providers)
-        system_text = ""
-        api_messages = []
-        for msg in (messages or []):
-            if msg["role"] == "user" and msg["content"].startswith("[Context]") and not api_messages:
-                system_text = msg["content"]
-                continue
-            if msg["role"] == "assistant" and not api_messages:
-                continue
-            api_messages.append(msg)
-
-        cleaned = []
-        last_role = None
-        for msg in api_messages:
-            if msg["role"] == last_role:
-                cleaned[-1]["content"] += "\n" + msg["content"]
-            else:
-                cleaned.append(dict(msg))
-                last_role = msg["role"]
-        if cleaned and cleaned[0]["role"] != "user":
-            cleaned.insert(0, {"role": "user", "content": "(continuing conversation)"})
-
-        payload: Dict[str, Any] = {
-            "model": provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
-            "max_tokens": 2048, "messages": cleaned,
-        }
-        if system_text:
-            payload["system"] = system_text
-        if temperature > 0:
-            payload["temperature"] = temperature
+        payload = _build_anthropic_payload_from_messages(
+            messages or [],
+            model=provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
+            max_tokens=2048,
+            temperature=temperature,
+        )
 
     if DEBUG_MODE:
         print(f"[DEBUG] Anthropic → {url}")
@@ -407,12 +423,20 @@ def _call_provider(cfg: Config, bundle: PromptBundle | None, temperature: float,
     pcfg = PROVIDERS.get(provider)
     if not pcfg:
         return f"[Unknown provider: {provider}. Available: {', '.join(PROVIDERS.keys())}]"
-    # Build effective config: client prefs override defaults
+    # Build effective config: merge client + server keys
     effective_cfg = dict(pcfg)
-    if not effective_cfg.get("api_key") and client_api_key:
-        effective_cfg["api_key"] = client_api_key
     if client_model:
         effective_cfg["default_model"] = client_model
+    # Key precedence:
+    #   Stateless mode: client key → server key (client owns state)
+    #   Server mode:    server key → hot-reload → client key (server owns state)
+    if STATELESS_MODE:
+        if client_api_key:
+            effective_cfg["api_key"] = client_api_key
+        # Fall through to server key if client didn't provide one
+    else:
+        if not effective_cfg.get("api_key") and client_api_key:
+            effective_cfg["api_key"] = client_api_key
     if not effective_cfg.get("api_key"):
         if not STATELESS_MODE:
             # Hot-reload config.yaml in case keys were added after server start
@@ -440,6 +464,50 @@ def _call_provider(cfg: Config, bundle: PromptBundle | None, temperature: float,
 # ---------------------------------------------------------------------------
 # Dynamic provider call (from trust entry <provider> block)
 # ---------------------------------------------------------------------------
+def _resolve_dynamic_api_key(raw_key: str, api_url: str) -> str:
+    """Resolve a dynamic provider's API key with fallback to PROVIDERS/env vars.
+
+    Precedence:
+      1. trust entry <api_key> (env-var syntax like $ANTHROPIC_API_KEY resolved)
+      2. PROVIDERS registry (matches api_url to known provider URLs)
+      3. Hot-reload config.yaml (for keys added after server start)
+      4. Direct env-var lookup by URL pattern
+    """
+    if raw_key:
+        resolved = resolve_api_key(raw_key)
+        if resolved:
+            return resolved
+
+    # Fallback: match api_url to a known PROVIDERS entry
+    matched_provider_key = None
+    if api_url:
+        for _key, pcfg in PROVIDERS.items():
+            prov_url = pcfg.get("url", "")
+            if prov_url and (prov_url in api_url or api_url in prov_url):
+                if pcfg.get("api_key"):
+                    return pcfg["api_key"]
+                matched_provider_key = _key
+                break
+
+    # Hot-reload config.yaml (mirrors _call_provider hot-reload logic)
+    if matched_provider_key and not STATELESS_MODE:
+        fresh = _load_config_yaml()
+        fresh_key = (fresh.get("providers", {}).get(matched_provider_key) or {}).get("api_key", "")
+        if fresh_key:
+            # Cache so subsequent calls don't need to reload
+            if matched_provider_key in PROVIDERS:
+                PROVIDERS[matched_provider_key]["api_key"] = fresh_key
+            return fresh_key
+
+    # Last resort: try env vars directly by URL pattern
+    if api_url:
+        if "anthropic.com" in api_url:
+            return os.getenv("ANTHROPIC_API_KEY", "")
+        if "openai.com" in api_url:
+            return os.getenv("OPENAI_API_KEY", "")
+    return ""
+
+
 def _call_dynamic_provider(
     provider_config: dict, messages: List[Dict], temperature: float, cfg: Config,
 ) -> str:
@@ -450,7 +518,7 @@ def _call_dynamic_provider(
     timeout = provider_config.get("timeout") or int(cfg.timeout_s)
     max_tokens = provider_config.get("max_tokens") or 2048
 
-    api_key = resolve_api_key(raw_key) if raw_key else ""
+    api_key = _resolve_dynamic_api_key(raw_key, api_url)
 
     if "anthropic.com" in api_url:
         return _call_dynamic_anthropic(api_url, api_key, model, messages, temperature, timeout, max_tokens)
@@ -482,34 +550,12 @@ def _call_dynamic_anthropic(
     messages: List[Dict], temperature: float, timeout: int, max_tokens: int,
 ) -> str:
     """Call a dynamic Anthropic endpoint from a <provider> trust entry."""
-    system_text = ""
-    api_messages = []
-    for msg in messages:
-        if msg["role"] == "user" and msg["content"].startswith("[Context]") and not api_messages:
-            system_text = msg["content"]
-            continue
-        if msg["role"] == "assistant" and not api_messages:
-            continue
-        api_messages.append(msg)
-
-    cleaned = []
-    last_role = None
-    for msg in api_messages:
-        if msg["role"] == last_role:
-            cleaned[-1]["content"] += "\n" + msg["content"]
-        else:
-            cleaned.append(dict(msg))
-            last_role = msg["role"]
-    if cleaned and cleaned[0]["role"] != "user":
-        cleaned.insert(0, {"role": "user", "content": "(continuing conversation)"})
-
-    payload: Dict[str, Any] = {"model": model or "claude-sonnet-4-20250514",
-                                "max_tokens": max_tokens, "messages": cleaned}
-    if system_text:
-        payload["system"] = system_text
-    if temperature > 0:
-        payload["temperature"] = temperature
-
+    payload = _build_anthropic_payload_from_messages(
+        messages,
+        model=model or "claude-sonnet-4-20250514",
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
     headers = {"Content-Type": "application/json",
                "x-api-key": api_key,
                "anthropic-version": "2023-06-01"}
@@ -586,7 +632,7 @@ def _fan_out_and_aggregate(
         payload = to_anthropic_payload(final_bundle, model=model,
                                        max_tokens=max_tokens, temperature=temperature)
         raw_key = primary_config.get("api_key", "")
-        api_key = resolve_api_key(raw_key) if raw_key else ""
+        api_key = _resolve_dynamic_api_key(raw_key, api_url)
         timeout = primary_config.get("timeout") or int(cfg.timeout_s)
         headers = {"Content-Type": "application/json",
                    "x-api-key": api_key,
@@ -741,10 +787,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         # Provider metadata (non-secret)
         prov_meta = {}
         for key, pcfg in PROVIDERS.items():
+            needs_key = key not in ("wikioracle",)
             prov_meta[key] = {
                 "name": pcfg["name"],
                 "streaming": pcfg.get("streaming", False),
                 "model": pcfg.get("default_model", ""),
+                "has_key": bool(pcfg.get("api_key")) or not needs_key,
+                "needs_key": needs_key,
             }
         result["providers"] = prov_meta
 
@@ -791,9 +840,6 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 # Update in-memory state without writing to disk
                 _MEMORY_STATE = data
                 return jsonify({"ok": True})
-            version = data.get("version")
-            if version not in (1, 2):
-                return jsonify({"ok": False, "error": "unsupported_version"}), 400
             try:
                 _save_state(cfg, data)
                 return jsonify({"ok": True})
@@ -848,7 +894,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         prefs.setdefault("message_window", yaml_chat.get("message_window", 40))
         prefs.setdefault("retrieval", yaml_chat.get("retrieval", {}))
 
-        # v2 conversation routing
+        # Conversation routing
         conversation_id = body.get("conversation_id")  # append to this conversation
         branch_from = body.get("branch_from")           # create child of this conversation
 
@@ -865,8 +911,15 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             # Determine which conversation to use for upstream context
             context_conv_id = conversation_id or branch_from
 
-            # Check for dynamic provider trust entries
+            # Compute derived truth via Kleene implication engine
             trust = state.get("truth", {}).get("trust", [])
+            derived = compute_derived_truth(trust)
+            for entry in trust:
+                eid = entry.get("id", "")
+                if eid in derived and abs(derived[eid] - entry.get("certainty", 0.0)) > 1e-9:
+                    entry["_derived_certainty"] = derived[eid]
+
+            # Check for dynamic provider trust entries
             dyn_providers = get_provider_entries(trust)
 
             if dyn_providers:
@@ -893,6 +946,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                         state["truth"] = {"trust": trust_list}
                     else:
                         state["truth"]["trust"] = trust_list
+                # Recompute derived truth after HME added secondary responses
+                derived = compute_derived_truth(state.get("truth", {}).get("trust", []))
+                for entry in state.get("truth", {}).get("trust", []):
+                    eid = entry.get("id", "")
+                    if eid in derived and abs(derived[eid] - entry.get("certainty", 0.0)) > 1e-9:
+                        entry["_derived_certainty"] = derived[eid]
+
                 llm_provider_name = primary_config.get("name", "unknown")
                 llm_model = primary_config.get("model", "")
             else:
@@ -912,7 +972,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                         role = m.get("role", "?")
                         content = m.get("content", "")
                         print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
-                response_text = _call_provider(cfg, bundle, temperature, provider, "", client_model)
+                # In stateless mode, resolve API key from runtime_config
+                client_api_key = ""
+                if STATELESS_MODE:
+                    rc_providers = runtime_cfg.get("providers", {})
+                    rc_pcfg = rc_providers.get(provider, {})
+                    client_api_key = rc_pcfg.get("api_key", "")
+                response_text = _call_provider(cfg, bundle, temperature, provider, client_api_key, client_model)
                 if DEBUG_MODE:
                     print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
                 llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
@@ -925,52 +991,96 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             user_display = runtime_cfg.get("user", {}).get("name", "User")
             llm_display = llm_provider_name  # provider.name from YAML
 
-            user_entry = {
+            query_entry = {
                 "role": "user",
                 "username": user_display,
                 "time": user_timestamp,
                 "content": user_content,
             }
-            ensure_message_id(user_entry)
+            ensure_message_id(query_entry)
 
-            assistant_entry = {
+            response_entry = {
                 "role": "assistant",
                 "username": llm_display,
                 "time": assistant_timestamp,
                 "content": assistant_content,
             }
-            ensure_message_id(assistant_entry)
+            ensure_message_id(response_entry)
 
             conversations = state.get("conversations", [])
 
+            # In stateless mode the client already added the query
+            # to state before sending — server only appends the response.
+            client_owns_query = STATELESS_MODE
+
             if conversation_id:
                 # Append to existing conversation
-                add_message_to_conversation(conversations, conversation_id, user_entry)
-                add_message_to_conversation(conversations, conversation_id, assistant_entry)
+                if not client_owns_query:
+                    add_message_to_conversation(conversations, conversation_id, query_entry)
+                add_message_to_conversation(conversations, conversation_id, response_entry)
                 state["selected_conversation"] = conversation_id
             elif branch_from:
-                # Create new child conversation
-                first_words = strip_xhtml(user_content)[:50]
-                new_conv = {
-                    "title": first_words,
-                    "messages": [user_entry, assistant_entry],
-                    "children": [],
-                }
-                ensure_conversation_id(new_conv)
-                add_child_conversation(conversations, branch_from, new_conv)
-                state["selected_conversation"] = new_conv["id"]
+                if client_owns_query:
+                    # Client already created the optimistic conversation;
+                    # find it and append the response.
+                    parent = find_conversation(conversations, branch_from)
+                    opt = parent["children"][-1] if parent and parent.get("children") else None
+                    if opt:
+                        opt["messages"].append(response_entry)
+                        state["selected_conversation"] = opt["id"]
+                    else:
+                        # Defensive: client didn't add it — create normally
+                        first_words = strip_xhtml(user_content)[:50]
+                        new_conv = {
+                            "title": first_words,
+                            "messages": [query_entry, response_entry],
+                            "children": [],
+                        }
+                        ensure_conversation_id(new_conv)
+                        add_child_conversation(conversations, branch_from, new_conv)
+                        state["selected_conversation"] = new_conv["id"]
+                else:
+                    # Stateful: server creates the child conversation
+                    first_words = strip_xhtml(user_content)[:50]
+                    new_conv = {
+                        "title": first_words,
+                        "messages": [query_entry, response_entry],
+                        "children": [],
+                    }
+                    ensure_conversation_id(new_conv)
+                    add_child_conversation(conversations, branch_from, new_conv)
+                    state["selected_conversation"] = new_conv["id"]
             else:
-                # New root conversation
-                first_words = strip_xhtml(user_content)[:50]
-                new_conv = {
-                    "title": first_words,
-                    "messages": [user_entry, assistant_entry],
-                    "children": [],
-                }
-                ensure_conversation_id(new_conv)
-                from wikioracle_state import _normalize_conversation
-                conversations.append(_normalize_conversation(new_conv))
-                state["selected_conversation"] = new_conv["id"]
+                if client_owns_query:
+                    # Client already pushed the optimistic root; find it
+                    # and append the response.
+                    opt = conversations[-1] if conversations else None
+                    if opt and len(opt.get("messages", [])) == 1 and opt["messages"][0].get("_pending"):
+                        opt["messages"][0].pop("_pending", None)
+                        opt["messages"].append(response_entry)
+                        state["selected_conversation"] = opt["id"]
+                    else:
+                        # Defensive fallback
+                        first_words = strip_xhtml(user_content)[:50]
+                        new_conv = {
+                            "title": first_words,
+                            "messages": [query_entry, response_entry],
+                            "children": [],
+                        }
+                        ensure_conversation_id(new_conv)
+                        conversations.append(normalize_conversation(new_conv))
+                        state["selected_conversation"] = new_conv["id"]
+                else:
+                    # Stateful: server creates the root conversation
+                    first_words = strip_xhtml(user_content)[:50]
+                    new_conv = {
+                        "title": first_words,
+                        "messages": [query_entry, response_entry],
+                        "children": [],
+                    }
+                    ensure_conversation_id(new_conv)
+                    conversations.append(normalize_conversation(new_conv))
+                    state["selected_conversation"] = new_conv["id"]
 
             state["conversations"] = conversations
 
@@ -1056,7 +1166,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 "url_fetch": chat.get("url_fetch", False),
                 "confirm_actions": chat.get("confirm_actions", False),
             },
-            "css": ui.get("css", ""),
+            "theme": ui.get("theme", "system"),
         }
 
     @app.route(url_prefix + "/parse_config", methods=["POST", "OPTIONS"])
@@ -1118,8 +1228,10 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 return jsonify({"ok": False, "error": f"YAML parse error: {exc}"}), 400
             try:
                 cfg_path.write_text(new_yaml, encoding="utf-8")
-                # Hot-reload the in-memory config
+                # Hot-reload the in-memory config AND rebuild providers
                 _CONFIG_YAML = _load_config_yaml()
+                PROVIDERS.clear()
+                PROVIDERS.update(_build_providers())
                 return jsonify({"ok": True, "parsed": parsed, "prefs": _derive_prefs(parsed)})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 500
@@ -1146,10 +1258,14 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
         result = {}
         for key, pcfg in PROVIDERS.items():
+            # WikiOracle (NanoChat) never needs a client-side key
+            needs_key = key not in ("wikioracle",)
             result[key] = {
                 "name": pcfg["name"],
                 "streaming": pcfg.get("streaming", False),
                 "model": pcfg.get("default_model", ""),
+                "has_key": bool(pcfg.get("api_key")) or not needs_key,
+                "needs_key": needs_key,
             }
         return jsonify({"providers": result})
 
@@ -1182,6 +1298,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     data.setdefault("ui", {})["default_provider"] = body["provider"]
                 if "layout" in body:
                     data.setdefault("ui", {})["layout"] = body["layout"]
+                if "theme" in body:
+                    data.setdefault("ui", {})["theme"] = body["theme"]
+                    # Remove legacy css key if present
+                    if "css" in data.get("ui", {}):
+                        del data["ui"]["css"]
                 if "chat" in body and isinstance(body["chat"], dict):
                     chat_sec = data.setdefault("chat", {})
                     for key in ("temperature", "message_window", "rag", "url_fetch", "confirm_actions"):
@@ -1190,6 +1311,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
                 cfg_path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
                 _CONFIG_YAML = _load_config_yaml()
+                PROVIDERS.clear()
+                PROVIDERS.update(_build_providers())
                 return jsonify({"ok": True})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400

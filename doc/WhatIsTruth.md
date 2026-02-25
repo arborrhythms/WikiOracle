@@ -57,7 +57,7 @@ Instead of collapsing these into one answer, the system should:
 - Preserve live disputes.  
 - Keep minority views visible and searchable.  
 
-Distrust between communities is not a defect. It creates epistemic distance, preventing forced consensus. A plural system can remain coherent without being uniform.
+Distrust between communities is not a defect. It creates epistemic distance, preventing forced consensus. A plural system can remain coherent without being uniform. This model of truth is simultaneously multicultural (respecting diverse cultural frameworks), multivalent (allowing claims to carry different weights under different perspectives), and pluralistic (treating the coexistence of competing truths as a structural feature rather than a flaw).
 
 ---
 

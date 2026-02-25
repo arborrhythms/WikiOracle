@@ -19,24 +19,12 @@ Root (/)
 
 | File | Purpose |
 |---|---|
-| `index.html` | Single-page app shell — layout, CSS, settings panel |
-| `reading.css` | Shared reading/layout styles for chat and tree panels |
-| `wikioracle.js` | Client logic — state management, API calls, message rendering, drag/context-menu interactions |
+| `index.html` | Single-page app shell — layout, settings panel |
+| `wikioracle.css` | Stylesheet — layout, dark mode, chat and tree panel styles |
+| `wikioracle.js` | Client logic — state management, API calls, message rendering, settings, trust editor |
 | `d3tree.js` | D3.js tree renderer — hierarchy layout, click/double-click/right-click navigation, drag-to-merge |
+| `util.js` | Shared helpers — `escapeHtml`, `stripTags`, `truncate`, `tempId`, `findInTree`, `removeFromTree`, `countTreeMessages`, `onDoubleTap`, `setupZoom`, `cssVar` |
 | `404.html` | Fallback error page |
-
-### Simulator scripts (legacy)
-
-These Node.js scripts test parts of the rendering pipeline outside the browser and are kept for reference.
-
-| Script | What it does |
-|---|---|
-| `simulate_rendering.js` | End-to-end rendering pipeline: JSONL parsing, graph building, path resolution, conversation grouping |
-| `visualize_structure.js` | ASCII tree visualisation with branch-point analysis |
-| `show_conversations.js` | Conversation segment grouping for D3 tree nodes |
-| `mock_render_output.js` | Generates the HTML that the chat view would produce |
-
-Run any of them with `node <script>.js` from this directory (no external dependencies).
 
 ## Interactions
 
@@ -53,8 +41,7 @@ Run any of them with `node <script>.js` from this directory (no external depende
 
 | Gesture | Action |
 |---|---|
-| **Right-click** | Context menu (Move up / Move down / Delete) |
-| **Drag message** | Reorder within the conversation |
+| **Right-click** | Context menu (Split / Delete) |
 
 ## Data model
 

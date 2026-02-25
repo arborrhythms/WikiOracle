@@ -21,7 +21,7 @@ Browser  ──HTTP──▸  WikiOracle.py  ──HTTP──▸  Upstream LLM
 | Tree renderer | `html/d3tree.js` | D3.js top-down hierarchy — layout, navigation, drag-to-merge |
 | Shell | `html/index.html` | Single-page app: layout, CSS, settings panel |
 | Spec | `spec/llm_state.json` | JSON Schema for the state format |
-| Tests | `test/test_wikioracle_state.py` | 51 tests covering tree ops, JSONL roundtrip, merge |
+| Tests | `tests/test_derived_truth.py` | 16 tests covering implication parsing, modus ponens, chains, cycles, hme.jsonl integration |
 
 ## Data model
 
@@ -92,7 +92,7 @@ The server calls `get_context_messages()` to build the upstream prompt (see Rend
 
 ## Rendering
 
-For a detailed treatment of the display layer — HTML structure, CSS classes, D3 node shapes, optimistic UI, and state persistence — see [display.md](display.md).
+The display layer covers HTML structure, CSS classes, D3 node shapes, optimistic UI, and state persistence.
 
 ### Context for the upstream LLM
 

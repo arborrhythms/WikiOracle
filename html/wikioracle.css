@@ -1,6 +1,24 @@
-/* ═══ WikiOracle — Main application styles ═══ */
+/* ═══ WikiOracle — Main application styles ═══
+ *
+ * Key classes:
+ *   .tree-container    — Tree panel wrapper (overflow:hidden, position:relative)
+ *   .chat-container    — Chat scroll area (flex:1, overflow-y:auto)
+ *   .message           — Each message div (flex column, role-based alignment)
+ *   .message.user      — Right-aligned, accent background
+ *   .message.assistant — Left-aligned, neutral background
+ *   .msg-meta          — Username + timestamp (small muted text)
+ *   .msg-bubble        — Content area (padded, rounded corners)
+ *   .tree-context-menu — Context menus (tree + messages), position:absolute, shadow
+ *   .ctx-item          — Menu items (hover highlight with --accent)
+ *   .ctx-danger        — Delete items (red text)
+ *   .chat-placeholder  — Empty-state prompt (centred, muted)
+ *
+ * CSS custom properties (--accent, --border, --fg, etc.) are read by d3tree.js
+ * at render time via cssVar() from util.js.
+ */
 
-:root {
+/* Light theme (default) */
+:root, [data-theme="light"] {
   --bg: #ffffff;
   --fg: #111827;
   --fg-muted: #6b7280;
@@ -11,6 +29,45 @@
   --bubble-assistant: #ffffff;
   --input-bg: #ffffff;
   --header-bg: #f9fafb;
+  --overlay-bg: rgba(0,0,0,0.3);
+  --shadow-color: rgba(0,0,0,0.15);
+  color-scheme: light;
+}
+
+/* Dark theme */
+[data-theme="dark"] {
+  --bg: #1a1b1e;
+  --fg: #e4e5e7;
+  --fg-muted: #9ca3af;
+  --border: #2d2f34;
+  --accent: #60a5fa;
+  --accent-light: #1e3a5f;
+  --bubble-user: #2d2f34;
+  --bubble-assistant: #1a1b1e;
+  --input-bg: #232428;
+  --header-bg: #141517;
+  --overlay-bg: rgba(0,0,0,0.55);
+  --shadow-color: rgba(0,0,0,0.4);
+  color-scheme: dark;
+}
+
+/* System preference (when data-theme="system" or absent) */
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    --bg: #1a1b1e;
+    --fg: #e4e5e7;
+    --fg-muted: #9ca3af;
+    --border: #2d2f34;
+    --accent: #60a5fa;
+    --accent-light: #1e3a5f;
+    --bubble-user: #2d2f34;
+    --bubble-assistant: #1a1b1e;
+    --input-bg: #232428;
+    --header-bg: #141517;
+    --overlay-bg: rgba(0,0,0,0.55);
+    --shadow-color: rgba(0,0,0,0.4);
+    color-scheme: dark;
+  }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; font-family: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--fg); }
@@ -23,12 +80,12 @@ body { display: flex; flex-direction: column; }
 .header-btn:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 
 /* Settings panel */
-.settings-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; }
+.settings-overlay { display: none; position: fixed; inset: 0; background: var(--overlay-bg); z-index: 100; }
 .settings-overlay.active { display: flex; align-items: center; justify-content: center; }
-.settings-panel { background: var(--bg); border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+.settings-panel { background: var(--bg); border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px var(--shadow-color); }
 .settings-panel h2 { font-size: 1.1rem; margin-bottom: 1rem; }
 .settings-panel label { display: block; font-size: 0.85rem; color: var(--fg-muted); margin-bottom: 0.3rem; margin-top: 0.8rem; }
-.settings-panel input, .settings-panel select, .settings-panel textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+.settings-panel input, .settings-panel select, .settings-panel textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: inherit; background: var(--input-bg); color: var(--fg); }
 .settings-panel textarea { min-height: 80px; resize: vertical; }
 .settings-row { display: flex; gap: 0.75rem; align-items: center; }
 .settings-row input[type=range] { flex: 1; }
@@ -44,7 +101,7 @@ body { display: flex; flex-direction: column; }
 /* Tree view (top-down hierarchy) */
 .tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 220px; min-height: 0; overflow: auto; }
 .tree-container svg { display: block; min-width: 100%; min-height: 100%; }
-.tree-tooltip { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.72rem; pointer-events: none; z-index: 10; max-width: 240px; word-wrap: break-word; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.4; }
+.tree-tooltip { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.72rem; pointer-events: none; z-index: 10; max-width: 240px; word-wrap: break-word; box-shadow: 0 2px 8px var(--shadow-color); line-height: 1.4; }
 
 /* Chat */
 .chat-container { flex: 1; overflow-y: auto; }
@@ -65,17 +122,17 @@ body { display: flex; flex-direction: column; }
 /* Input */
 .input-bar { flex-shrink: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 0.75rem 1rem; }
 .input-wrapper { max-width: 48rem; margin: 0 auto; display: flex; gap: 0.5rem; }
-.input-wrapper textarea { flex: 1; padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; font-family: inherit; resize: none; max-height: 120px; line-height: 1.4; }
+.input-wrapper textarea { flex: 1; padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; font-family: inherit; resize: none; max-height: 120px; line-height: 1.4; background: var(--input-bg); color: var(--fg); }
 .send-btn { padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 0.95rem; cursor: pointer; transition: opacity 0.15s; }
 .send-btn:hover { opacity: 0.85; }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Context menu (for tree nodes) */
-.tree-context-menu { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 20; min-width: 140px; padding: 4px 0; font-size: 0.82rem; }
+.tree-context-menu { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow-color); z-index: 20; min-width: 140px; padding: 4px 0; font-size: 0.82rem; }
 .tree-context-menu .ctx-item { padding: 0.45rem 0.9rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; color: var(--fg); }
 .tree-context-menu .ctx-item:hover { background: var(--accent-light); color: var(--accent); }
 .tree-context-menu .ctx-item.ctx-danger { color: #dc2626; }
-.tree-context-menu .ctx-item.ctx-danger:hover { background: #fef2f2; color: #dc2626; }
+.tree-context-menu .ctx-item.ctx-danger:hover { background: var(--accent-light); color: #dc2626; }
 .tree-context-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
 .tree-context-menu .ctx-item.ctx-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
@@ -88,12 +145,12 @@ body { display: flex; flex-direction: column; }
 @media (pointer: coarse) { .resize-divider { height: 14px; } body.layout-vertical .resize-divider { width: 14px; } }
 
 /* Context editor modal (reuses settings overlay pattern) */
-.context-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; }
+.context-overlay { display: none; position: fixed; inset: 0; background: var(--overlay-bg); z-index: 100; }
 .context-overlay.active { display: flex; align-items: center; justify-content: center; }
-.context-panel { background: var(--bg); border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+.context-panel { background: var(--bg); border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px var(--shadow-color); }
 .context-panel h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
 .context-panel p { font-size: 0.8rem; color: var(--fg-muted); margin-bottom: 0.8rem; }
-.context-panel textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: inherit; min-height: 100px; resize: vertical; }
+.context-panel textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: inherit; min-height: 100px; resize: vertical; background: var(--input-bg); color: var(--fg); }
 .context-panel .settings-actions { margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
 
 /* Flat layout (deprecated — use divider to minimize tree instead) */
@@ -140,7 +197,7 @@ body.layout-vertical .chat-container { flex: 1; }
 
 /* Config editor */
 .config-panel    { max-width: 560px; }
-.config-textarea { width: 100%; min-height: 300px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; line-height: 1.5; tab-size: 2; resize: vertical; padding: 0.6rem; border: 1px solid var(--border); border-radius: 6px; }
+.config-textarea { width: 100%; min-height: 300px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; line-height: 1.5; tab-size: 2; resize: vertical; padding: 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--fg); }
 .config-error    { display: none; color: #dc2626; font-size: 0.8rem; margin-top: 0.4rem; }
 
 /* Trust editor */
@@ -148,8 +205,8 @@ body.layout-vertical .chat-container { flex: 1; }
 .trust-entries-scroll { max-height: 400px; overflow-y: auto; margin-bottom: 0.6rem; }
 .trust-label          { font-size: 0.82rem; font-weight: 600; }
 .trust-label-hint     { font-weight: normal; color: var(--fg-muted); }
-.trust-input          { width: 100%; margin-bottom: 0.5rem; padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; }
-.trust-textarea       { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; line-height: 1.5; padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px; resize: vertical; }
+.trust-input          { width: 100%; margin-bottom: 0.5rem; padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; background: var(--input-bg); color: var(--fg); }
+.trust-textarea       { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; line-height: 1.5; padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px; resize: vertical; background: var(--input-bg); color: var(--fg); }
 .trust-empty          { color: var(--fg-muted); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 
 /* Settings-actions spacing variants */

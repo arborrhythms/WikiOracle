@@ -1,6 +1,6 @@
 # How To Ensure Safety
   
-## Three Dimensions of Being and the Safe Development of WikiOracle
+## The Safe Development of WikiOracle
 
 ### Overview
 

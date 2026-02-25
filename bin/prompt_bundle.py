@@ -78,13 +78,17 @@ def rank_retrieval_entries(
 
     candidates = []
     for entry in trust_entries:
-        certainty = entry.get("certainty", 0)
+        # Use derived certainty (from implication engine) when available
+        certainty = entry.get("_derived_certainty", entry.get("certainty", 0))
         if abs(certainty) < min_certainty:
             continue
         content = entry.get("content", "")
         if exclude_providers and "<provider" in content:
             continue
         if exclude_srcs and "<src" in content:
+            continue
+        # Implication entries are structural, not content — exclude from RAG
+        if "<implication" in content:
             continue
 
         # Rank by |certainty| (both strong belief and strong disbelief are relevant)

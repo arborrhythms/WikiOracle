@@ -1,14 +1,35 @@
-// d3tree.js — D3.js top-down branching hierarchy for WikiOracle v2
-// State IS the tree (conversations with children). No groupConversations needed.
+// d3tree.js — D3.js top-down branching hierarchy for WikiOracle
+// State IS the tree (conversations with children).
 // Supports: click (navigate), double-click/double-tap (context menu), right-click,
 //           drag-and-drop (merge: reparent dragged node under drop target).
+//
+// Data flow:
+//   conversationsToHierarchy(conversations, selectedId) -> D3 hierarchy data
+//   renderTree(hierarchyData, callbacks) -> SVG in #treeContainer
+//
+// Layout: d3.tree(), top-down (root at top). Separation 1.2x siblings, 1.8x cousins.
+// Colours from CSS custom properties: --accent, --accent-light, --border, --fg,
+//   --fg-muted, --bg. Merge target highlight: amber #f59e0b.
+//
+// Node shapes:
+//   Root       -> circle r=14
+//   Selected   -> rounded rect, two-line label (title + "N Qs, M msgs")
+//   Default    -> pill (fully rounded rect), single-line truncated title
+//
+// Interactions:
+//   Click (200ms timer) -> callbacks.onNavigate(id)
+//   Double-click (cancels click timer) -> context menu (Branch, Delete)
+//   Right-click -> same context menu
+//   Drag (left button, non-root) -> highlight nearest valid target within 30px
+//   Drop (excludes self + descendants) -> confirm -> callbacks.onMerge(src, tgt)
+//   Hover (suppressed during drag) -> tooltip: title, date, Q+R count
 
 // Internal state
 let _tooltip = null;
 let _dragState = null; // { sourceNode, sourceEl } while dragging
 
 /**
- * Convert v2 conversations tree to D3 hierarchy data.
+ * Convert conversations tree to D3 hierarchy data.
  */
 function conversationsToHierarchy(conversations, selectedId) {
   function mapConv(conv) {
@@ -492,6 +513,10 @@ function _showRootContextMenu(event, callbacks) {
 }
 
 
+// Context menu: appended to document.body with position:fixed to avoid
+// clipping by the tree container's overflow:hidden. The _justOpened flag
+// with a 300ms grace period prevents the document-level click handler
+// from immediately closing the menu on the same event.
 function _showContextMenu(event, nodeData, callbacks, container) {
   _hideContextMenu();
 

@@ -1,6 +1,40 @@
 // wikioracle.js — WikiOracle v2 client (conversation-based hierarchy)
 // Preferences: served by config.yaml when writable; localStorage when stateless.
 
+// ─── XHTML validation and repair ───
+function validateXhtml(content) {
+  // Quick check: try to parse as XML fragment in a wrapper
+  try {
+    const wrapped = `<div xmlns="http://www.w3.org/1999/xhtml">${content}</div>`;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(wrapped, "application/xhtml+xml");
+    return !doc.querySelector("parsererror");
+  } catch { return false; }
+}
+
+function repairXhtml(content) {
+  // Deterministic sanitizer: use the browser's HTML parser to fix broken markup,
+  // then re-serialize as well-formed HTML (close to XHTML).
+  const template = document.createElement("template");
+  template.innerHTML = content;
+  const div = document.createElement("div");
+  div.appendChild(template.content.cloneNode(true));
+  // Self-close void elements for XHTML compat
+  let repaired = div.innerHTML;
+  repaired = repaired.replace(/<(br|hr|img|input|meta|link)(\s[^>]*)?\/?>/gi,
+    (m, tag, attrs) => `<${tag}${attrs || ""} />`);
+  return repaired;
+}
+
+function ensureXhtml(content) {
+  if (!content) return "<div/>";
+  if (validateXhtml(content)) return content;
+  const repaired = repairXhtml(content);
+  if (validateXhtml(repaired)) return repaired;
+  // Last resort: escape and wrap
+  return `<p>${escapeHtml(content)}</p>`;
+}
+
 // ─── Server info (loaded on init) ───
 let _serverInfo = { stateless: false, url_prefix: "" };
 
@@ -96,21 +130,10 @@ async function api(method, path, body) {
   return resp.json();
 }
 
-// ─── Conversation tree helpers ───
+// ─── Conversation tree helpers (findInTree, removeFromTree, countTreeMessages, tempId in util.js) ───
 
 function findConversation(conversations, convId) {
-  for (const conv of conversations) {
-    if (conv.id === convId) return conv;
-    const found = findConversation(conv.children || [], convId);
-    if (found) return found;
-  }
-  return null;
-}
-
-function tempId(prefix) {
-  prefix = prefix || "m_";
-  return prefix + Array.from(crypto.getRandomValues(new Uint8Array(8)))
-    .map(b => b.toString(16).padStart(2, "0")).join("");
+  return findInTree(conversations, convId);
 }
 
 // ─── Tree navigation ───
@@ -142,24 +165,10 @@ function deleteConversation(convId) {
   const conv = findConversation(state.conversations, convId);
   if (!conv) return;
 
-  // Count messages in this conversation and all descendants
-  function countMsgs(c) {
-    let n = (c.messages || []).length;
-    for (const child of (c.children || [])) n += countMsgs(child);
-    return n;
-  }
-  const count = countMsgs(conv);
+  const count = countTreeMessages(conv);
   if (!confirmAction(`Delete "${conv.title}" and all its branches? (${count} message${count !== 1 ? "s" : ""})`)) return;
 
-  // Remove from tree
-  function removeFromList(list, id) {
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].id === id) { list.splice(i, 1); return true; }
-      if (removeFromList(list[i].children || [], id)) return true;
-    }
-    return false;
-  }
-  removeFromList(state.conversations, convId);
+  removeFromTree(state.conversations, convId);
   selectedConvId = null;
   state.selected_conversation = null;
   renderMessages();
@@ -192,14 +201,7 @@ function mergeConversation(sourceId, targetId) {
   }
 
   // Remove source from tree
-  function removeFromList(list, id) {
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].id === id) { list.splice(i, 1); return true; }
-      if (removeFromList(list[i].children || [], id)) return true;
-    }
-    return false;
-  }
-  removeFromList(state.conversations, sourceId);
+  removeFromTree(state.conversations, sourceId);
 
   // If we were viewing the source, switch to target
   if (selectedConvId === sourceId) {
@@ -212,6 +214,22 @@ function mergeConversation(sourceId, targetId) {
   setStatus(`Merged "${source.title}" into "${target.title}" (${target.messages.length} messages)`);
 }
 
+function _deleteAllConversations() {
+  if (!state || !state.conversations || state.conversations.length === 0) {
+    setStatus("No conversations to delete.");
+    return;
+  }
+  let total = 0;
+  for (const c of state.conversations) total += countTreeMessages(c);
+  if (!confirmAction(`Delete ALL conversations? (${state.conversations.length} root conversations, ${total} total messages)`)) return;
+  state.conversations = [];
+  selectedConvId = null;
+  state.selected_conversation = null;
+  renderMessages();
+  _persistState();
+  setStatus("All conversations deleted.");
+}
+
 function _splitAfterMessage(msgIdx) {
   if (!state || !selectedConvId) return;
   const conv = findConversation(state.conversations, selectedConvId);
@@ -220,7 +238,7 @@ function _splitAfterMessage(msgIdx) {
 
   const tailMessages = conv.messages.splice(msgIdx + 1);
   const firstMsg = tailMessages[0] || {};
-  const preview = (firstMsg.content || "").replace(/<[^>]+>/g, "").slice(0, 40);
+  const preview = truncate(stripTags(firstMsg.content), 40);
   const newTitle = preview || "Split";
 
   const newConv = {
@@ -257,29 +275,11 @@ function _showMsgContextMenu(event, msgIdx, totalMsgs) {
   menu._justOpened = true;
   setTimeout(() => { menu._justOpened = false; }, 300);
 
-  // Move up
-  if (msgIdx > 0) {
-    const item = document.createElement("div");
-    item.className = "ctx-item";
-    item.textContent = "Move up";
-    item.addEventListener("click", (e) => { e.stopPropagation(); _hideMsgContextMenu(); _moveMessage(msgIdx, msgIdx - 1); });
-    menu.appendChild(item);
-  }
-
-  // Move down
-  if (msgIdx < totalMsgs - 1) {
-    const item = document.createElement("div");
-    item.className = "ctx-item";
-    item.textContent = "Move down";
-    item.addEventListener("click", (e) => { e.stopPropagation(); _hideMsgContextMenu(); _moveMessage(msgIdx, msgIdx + 1); });
-    menu.appendChild(item);
-  }
-
-  // Split (after) — only if there are messages after this one
+  // Split (after) — mirrors "Branch..." on tree nodes
   if (msgIdx < totalMsgs - 1) {
     const splitItem = document.createElement("div");
     splitItem.className = "ctx-item";
-    splitItem.textContent = "Split (after)";
+    splitItem.textContent = "Split...";
     splitItem.addEventListener("click", (e) => { e.stopPropagation(); _hideMsgContextMenu(); _splitAfterMessage(msgIdx); });
     menu.appendChild(splitItem);
   }
@@ -289,7 +289,7 @@ function _showMsgContextMenu(event, msgIdx, totalMsgs) {
   sep.className = "ctx-sep";
   menu.appendChild(sep);
 
-  // Delete
+  // Delete — mirrors tree node delete
   const delItem = document.createElement("div");
   delItem.className = "ctx-item ctx-danger";
   delItem.textContent = "Delete";
@@ -327,19 +327,12 @@ function _deleteMessage(msgIdx) {
   if (!conv || !conv.messages) return;
   const msg = conv.messages[msgIdx];
   if (!msg) return;
-  const preview = (msg.content || "").replace(/<[^>]+>/g, "").slice(0, 60);
+  const preview = truncate(stripTags(msg.content), 60);
   if (!confirmAction(`Delete this message?\n"${preview}"`)) return;
   conv.messages.splice(msgIdx, 1);
   // If conversation is now empty, remove it too
   if (conv.messages.length === 0 && (!conv.children || conv.children.length === 0)) {
-    function removeFromList(list, id) {
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].id === id) { list.splice(i, 1); return true; }
-        if (removeFromList(list[i].children || [], id)) return true;
-      }
-      return false;
-    }
-    removeFromList(state.conversations, selectedConvId);
+    removeFromTree(state.conversations, selectedConvId);
     selectedConvId = null;
     state.selected_conversation = null;
   }
@@ -392,14 +385,14 @@ function _toggleContextEditor() {
     });
     document.getElementById("ctxReset").addEventListener("click", async function() {
       const defaults = await _getSpecDefaults();
-      document.getElementById("contextTextarea").value = defaults.context.replace(/<[^>]+>/g, "").trim();
+      document.getElementById("contextTextarea").value = stripTags(defaults.context).trim();
     });
     document.getElementById("ctxCancel").addEventListener("click", function() {
       overlay.classList.remove("active");
     });
     document.getElementById("ctxSave").addEventListener("click", function() {
       const newText = document.getElementById("contextTextarea").value.trim();
-      const currentPlain = (state?.context || "").replace(/<[^>]+>/g, "").trim();
+      const currentPlain = stripTags(state?.context || "").trim();
       if (state && newText !== currentPlain) {
         state.context = newText;
         _persistState();
@@ -411,7 +404,7 @@ function _toggleContextEditor() {
 
   // Populate and show
   const rawCtx = state?.context || "";
-  document.getElementById("contextTextarea").value = rawCtx.replace(/<[^>]+>/g, "").trim();
+  document.getElementById("contextTextarea").value = stripTags(rawCtx).trim();
   overlay.classList.add("active");
   document.getElementById("contextTextarea").focus();
 }
@@ -479,7 +472,7 @@ function renderMessages() {
   if (!state) state = {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
 
-  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor, onEditOutput: _toggleOutputEditor };
+  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor, onDeleteAll: _deleteAllConversations };
 
   // Validate selectedConvId: if it points to a missing conversation, reset to root
   if (selectedConvId !== null && !findConversation(state.conversations, selectedConvId)) {
@@ -519,13 +512,15 @@ function renderMessages() {
 
     const bubble = document.createElement("div");
     bubble.className = "msg-bubble";
-    bubble.innerHTML = msg.content || "";
+    bubble.innerHTML = ensureXhtml(msg.content || "");
 
     div.appendChild(meta);
     div.appendChild(bubble);
 
-    // Drag-to-reorder messages
-    div.draggable = true;
+    // Drag-to-reorder messages (desktop only — touch uses tap gestures)
+    if (window.matchMedia("(pointer: fine)").matches) {
+      div.draggable = true;
+    }
     div.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/plain", String(idx));
       div.classList.add("msg-dragging");
@@ -550,6 +545,16 @@ function renderMessages() {
       e.stopPropagation();
       _showMsgContextMenu(e, idx, visible.length);
     });
+
+    // Double-click to open context menu (desktop)
+    div.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _showMsgContextMenu(e, idx, visible.length);
+    });
+
+    // Double-tap detection (mobile — dblclick doesn't fire on most touch browsers)
+    onDoubleTap(div, (synth) => { _showMsgContextMenu(synth, idx, visible.length); });
 
     wrapper.appendChild(div);
   }
@@ -633,7 +638,7 @@ async function sendMessage() {
     role: "user",
     username: prefs.username || "User",
     time: now,
-    content: `<p>${text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</p>`,
+    content: `<p>${escapeHtml(text)}</p>`,
     _pending: true,
   };
 
@@ -805,25 +810,34 @@ async function _openConfigEditor() {
       const textarea = document.getElementById("configEditorTextarea");
       const errEl = document.getElementById("configEditorError");
       errEl.style.display = "none";
-      try {
-        if (_serverInfo.stateless) {
-          localStorage.setItem(_CONFIG_KEY, textarea.value);
-          overlay.classList.remove("active");
-          setStatus("config.yaml saved (localStorage)");
-        } else {
+
+      // Always persist to localStorage first (shared path)
+      try { localStorage.setItem(_CONFIG_KEY, textarea.value); } catch {}
+
+      // Then attempt disk write if server is writable
+      if (!_serverInfo.stateless) {
+        try {
           const resp = await api("POST", "/config", { yaml: textarea.value });
           if (resp.ok) {
             overlay.classList.remove("active");
             setStatus("config.yaml saved");
-          } else {
-            errEl.textContent = resp.error || "Unknown error";
-            errEl.style.display = "block";
+            return;
           }
+          errEl.textContent = resp.error || "Unknown error";
+          errEl.style.display = "block";
+          return;
+        } catch (e) {
+          // Disk write failed — localStorage already has the data
+          if (!e.message || !e.message.includes("403")) {
+            errEl.textContent = "Disk write failed: " + e.message + " (saved to localStorage)";
+            errEl.style.display = "block";
+            return;
+          }
+          // 403 = stateless, fall through to success
         }
-      } catch (e) {
-        errEl.textContent = e.message;
-        errEl.style.display = "block";
       }
+      overlay.classList.remove("active");
+      setStatus("config.yaml saved (localStorage)");
     });
   }
 
@@ -875,14 +889,13 @@ function _serializeConversations(conversations) {
   if (!conversations || !conversations.length) return "";
   let html = "";
   for (const conv of conversations) {
-    const title = (conv.title || "Untitled").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const title = escapeHtml(conv.title || "Untitled");
     html += `<div class="conversation" data-id="${conv.id || ''}">\n`;
     html += `  <div class="conv-title">${title}</div>\n`;
     for (const msg of (conv.messages || [])) {
       const role = msg.role || "user";
-      const username = (msg.username || role).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-      const content = (msg.content || "").replace(/<[^>]+>/g, "").trim();
-      const escaped = content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const username = escapeHtml(msg.username || role);
+      const escaped = escapeHtml(stripTags(msg.content).trim());
       html += `  <p class="message ${role}" data-role="${role}"><strong>${username}:</strong> ${escaped}</p>\n`;
     }
     // Recurse into children
@@ -917,16 +930,39 @@ async function _openReadView() {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 <title>WikiOracle — Read View</title>
 <style>
 ${css}
+/* d3 pinch-zoom support */
+#reading-content { transform-origin: top center; }
 </style>
 </head>
 <body>
+<article id="reading-content">
 <h1>WikiOracle</h1>
 <div class="meta">Exported ${now} — ${state.conversations.length} root conversation${state.conversations.length !== 1 ? "s" : ""}</div>
 ${body}
+</article>
+<script src="https://d3js.org/d3.v7.min.js"><\/script>
+<script>
+// Optional d3 pinch-zoom on the reading content
+(function() {
+  if (typeof d3 === "undefined") return;
+  var content = document.getElementById("reading-content");
+  var zoom = d3.zoom()
+    .scaleExtent([0.5, 4])
+    .filter(function(event) {
+      if (event.type === "wheel") return event.ctrlKey;
+      if (event.type === "touchstart" || event.type === "touchmove") return event.touches.length >= 2;
+      return false;
+    })
+    .on("zoom", function(event) {
+      content.style.transform = "scale(" + event.transform.k + ")";
+    });
+  d3.select(document.body).call(zoom).on("dblclick.zoom", null);
+})();
+<\/script>
 </body>
 </html>`;
 
@@ -1167,9 +1203,20 @@ async function init() {
       }
     } catch {}
 
-    // 3) Apply layout and update placeholder from prefs
+    // 3) Apply layout, CSS overrides, and update placeholder from prefs
     applyLayout(prefs.layout);
     _updatePlaceholder();
+
+    // Inject CSS overrides from config (ui.css section)
+    if (prefs.css) {
+      let styleEl = document.getElementById("wikioracle-css-override");
+      if (!styleEl) {
+        styleEl = document.createElement("style");
+        styleEl.id = "wikioracle-css-override";
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = prefs.css;
+    }
 
     // 4) Load state: server provides seed defaults; localStorage is the full
     //    persistent copy in stateless mode (conversations, context, output, etc.)

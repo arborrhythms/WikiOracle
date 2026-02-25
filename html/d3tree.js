@@ -61,13 +61,13 @@ function renderTree(hierarchyData, callbacks) {
       .style("display", "none");
   }
 
-  // CSS vars
-  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563eb";
-  const accentLight = getComputedStyle(document.documentElement).getPropertyValue("--accent-light").trim() || "#dbeafe";
-  const border = getComputedStyle(document.documentElement).getPropertyValue("--border").trim() || "#e5e7eb";
-  const fg = getComputedStyle(document.documentElement).getPropertyValue("--fg").trim() || "#111827";
-  const fgMuted = getComputedStyle(document.documentElement).getPropertyValue("--fg-muted").trim() || "#6b7280";
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#ffffff";
+  // CSS vars (via shared cssVar from util.js)
+  const accent = cssVar("--accent", "#2563eb");
+  const accentLight = cssVar("--accent-light", "#dbeafe");
+  const border = cssVar("--border", "#e5e7eb");
+  const fg = cssVar("--fg", "#111827");
+  const fgMuted = cssVar("--fg-muted", "#6b7280");
+  const bg = cssVar("--bg", "#ffffff");
   const mergeHighlight = "#f59e0b"; // amber for merge target
 
   // Build hierarchy
@@ -104,8 +104,20 @@ function renderTree(hierarchyData, callbacks) {
   const offsetX = (svgW - contentW) / 2 + margin.left;
   const offsetY = (svgH - contentH) / 2 + margin.top;
 
-  const g = svg.append("g")
+  // Zoom container — wraps all tree content for pinch/scroll zoom
+  const zoomG = svg.append("g");
+  const g = zoomG.append("g")
     .attr("transform", `translate(${offsetX},${offsetY})`);
+
+  // d3.zoom for pinch-zoom and scroll-zoom on the tree (shared setupZoom from util.js)
+  const zoom = setupZoom({
+    container: svg,
+    target: zoomG.node(),
+    mode: "svg",
+    scaleExtent: [0.3, 4],
+    resetOnDblclick: true,
+    resetTarget: svgEl
+  });
 
   // Links — curved top-down
   g.selectAll(".conv-link")
@@ -381,19 +393,24 @@ function renderTree(hierarchyData, callbacks) {
     }
   });
 
-  // ─── Hover tooltip ───
+  // ─── Hover tooltip (title, short date, node count) ───
   node.on("mouseenter", function(event, d) {
     if (_dragState) return; // suppress tooltip during drag
     if (d.data.id === "root") return;
     const msgs = d.data.messages || [];
     const qCount = d.data.questionCount || 0;
-    let tip = d.data.title;
-    if (qCount > 0) tip += ` — ${qCount} Q/A`;
-    if (msgs.length > 0) {
-      const lastMsg = msgs[msgs.length - 1];
-      const preview = (lastMsg.content || "").replace(/<[^>]+>/g, "").slice(0, 80);
-      if (preview) tip += "\n" + preview;
+    const rCount = msgs.length - qCount;
+    // Title
+    let tip = d.data.title || "(untitled)";
+    // Short date from first message
+    if (msgs.length > 0 && msgs[0].time) {
+      try {
+        const dt = new Date(msgs[0].time);
+        tip += `\n${dt.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+      } catch {}
     }
+    // Node count: queries + responses
+    tip += `\n${qCount}Q + ${rCount}R`;
     _tooltip
       .style("display", "block")
       .style("white-space", "pre-wrap")
@@ -446,15 +463,19 @@ function _showRootContextMenu(event, callbacks) {
   });
   menu.appendChild(ctxItem);
 
-  const outItem = document.createElement("div");
-  outItem.className = "ctx-item";
-  outItem.textContent = "Edit Output";
-  outItem.addEventListener("click", function(e) {
+  const sep = document.createElement("div");
+  sep.className = "ctx-sep";
+  menu.appendChild(sep);
+
+  const deleteAllItem = document.createElement("div");
+  deleteAllItem.className = "ctx-item ctx-danger";
+  deleteAllItem.textContent = "Delete All";
+  deleteAllItem.addEventListener("click", function(e) {
     e.stopPropagation();
     _hideContextMenu();
-    if (callbacks.onEditOutput) callbacks.onEditOutput();
+    if (callbacks.onDeleteAll) callbacks.onDeleteAll();
   });
-  menu.appendChild(outItem);
+  menu.appendChild(deleteAllItem);
 
   document.body.appendChild(menu);
   _ctxMenu = menu;

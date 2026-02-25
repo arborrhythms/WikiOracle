@@ -271,10 +271,13 @@ def build_prompt_bundle(
 
     bundle = PromptBundle()
 
-    # 1) System context
+    # 1) System context (with mandatory XHTML output instruction)
+    XHTML_INSTRUCTION = "Return strictly valid XHTML: no Markdown, close all tags, escape entities, one root element."
     context_text = strip_xhtml_fn(state.get("context", ""))
     if context_text:
-        bundle.system = context_text
+        bundle.system = f"{context_text}\n\n{XHTML_INSTRUCTION}"
+    else:
+        bundle.system = XHTML_INSTRUCTION
 
     # 2) Certainty-aware source retrieval (RAG)
     if prefs.get("tools", {}).get("rag", True):
@@ -350,20 +353,8 @@ def build_prompt_bundle(
     bundle.query = user_message
 
     # 6) Structured output instructions (always in state after ensure_minimal_state)
-    #    output_format from config.yaml is appended as "output_format: <value>" line.
-    raw_output = state.get("output", "")
-    chat_prefs = prefs.get("chat", {}) if isinstance(prefs.get("chat"), dict) else {}
-    if "output_format" in prefs:
-        output_format = prefs.get("output_format") or ""
-    elif "output_format" in chat_prefs:
-        output_format = chat_prefs.get("output_format") or ""
-    else:
-        output_format = ""
-    if output_format:
-        fmt_line = f"output_format: {output_format}"
-        bundle.output = f"{raw_output}\n{fmt_line}" if raw_output else fmt_line
-    else:
-        bundle.output = raw_output
+    #    XHTML format is now enforced via system context; output_format removed from config.
+    bundle.output = state.get("output", "")
 
     return bundle
 

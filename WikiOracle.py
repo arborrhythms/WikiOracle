@@ -167,17 +167,6 @@ def _load_config_yaml() -> Dict[str, Any]:
 _CONFIG_YAML = _load_config_yaml()
 
 
-def _effective_output_format(prefs: Dict[str, Any], yaml_chat: Dict[str, Any]) -> str:
-    """Resolve output format from prefs and config."""
-    chat_prefs = prefs.get("chat", {}) if isinstance(prefs.get("chat"), dict) else {}
-    if "output_format" in prefs:
-        return prefs.get("output_format") or ""
-    if "output_format" in chat_prefs:
-        return chat_prefs.get("output_format") or ""
-    if "output_format" in yaml_chat:
-        return yaml_chat.get("output_format") or ""
-    return ""
-
 
 # ---------------------------------------------------------------------------
 # Provider configuration
@@ -781,7 +770,6 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         prefs["tools"].setdefault("rag", yaml_chat.get("rag", True))
         prefs["tools"].setdefault("url_fetch", yaml_chat.get("url_fetch", False))
         prefs.setdefault("message_window", yaml_chat.get("message_window", 40))
-        prefs["output_format"] = _effective_output_format(prefs, yaml_chat)
         prefs.setdefault("retrieval", yaml_chat.get("retrieval", {}))
 
         # v2 conversation routing
@@ -1052,11 +1040,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 "chat": {
                     "temperature": yaml_chat.get("temperature", 0.7),
                     "message_window": yaml_chat.get("message_window", 40),
-                    "output_format": yaml_chat.get("output_format", ""),
                     "rag": yaml_chat.get("rag", True),
                     "url_fetch": yaml_chat.get("url_fetch", False),
                     "confirm_actions": yaml_chat.get("confirm_actions", False),
                 },
+                "css": yaml_ui.get("css", ""),
             }
             return jsonify({"prefs": prefs})
         else:
@@ -1081,8 +1069,6 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     for key in ("temperature", "message_window", "rag", "url_fetch", "confirm_actions"):
                         if key in body["chat"]:
                             chat_sec[key] = body["chat"][key]
-                    if "output_format" in body["chat"]:
-                        chat_sec["output_format"] = body["chat"].get("output_format") or ""
 
                 cfg_path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
                 _CONFIG_YAML = _load_config_yaml()

@@ -47,7 +47,7 @@ body { display: flex; flex-direction: column; }
 .btn:hover { background: var(--accent-light); }
 
 /* Tree view (top-down hierarchy) */
-.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 220px; min-height: 120px; overflow: auto; }
+.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 220px; min-height: 0; overflow: auto; }
 .tree-container svg { display: block; min-width: 100%; min-height: 100%; }
 .tree-tooltip { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.72rem; pointer-events: none; z-index: 10; max-width: 240px; word-wrap: break-word; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.4; }
 
@@ -84,12 +84,13 @@ body { display: flex; flex-direction: column; }
 .tree-context-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
 .tree-context-menu .ctx-item.ctx-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
-/* Resize divider between tree and chat */
-.resize-divider { flex-shrink: 0; height: 6px; background: var(--border); cursor: row-resize; position: relative; z-index: 5; transition: background 0.15s; touch-action: none; }
+/* Resize divider between tree and chat — wider hit area near screen edges */
+.resize-divider { flex-shrink: 0; height: 8px; background: var(--border); cursor: row-resize; position: relative; z-index: 5; transition: background 0.15s; touch-action: none; }
 .resize-divider:hover, .resize-divider.active { background: var(--accent); }
+.resize-divider::before { content: ""; position: absolute; inset: -6px 0; z-index: -1; } /* invisible hit-area expander */
 .resize-divider::after { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 32px; height: 2px; background: var(--fg-muted); border-radius: 1px; opacity: 0.4; }
 .resize-divider:hover::after, .resize-divider.active::after { opacity: 0.8; background: #fff; }
-@media (pointer: coarse) { .resize-divider { height: 12px; } body.layout-vertical .resize-divider { width: 12px; } }
+@media (pointer: coarse) { .resize-divider { height: 14px; } body.layout-vertical .resize-divider { width: 14px; } }
 
 /* Context editor modal (reuses settings overlay pattern) */
 .context-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; }
@@ -100,14 +101,14 @@ body { display: flex; flex-direction: column; }
 .context-panel textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; font-family: inherit; min-height: 100px; resize: vertical; }
 .context-panel .settings-actions { margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
 
-/* Flat layout — hide tree and divider */
-body.layout-flat .tree-container { display: none; }
-body.layout-flat .resize-divider { display: none; }
+/* Flat layout (deprecated — use divider to minimize tree instead) */
+body.layout-flat .tree-container { height: 0; min-height: 0; overflow: hidden; }
+body.layout-flat .resize-divider { display: block; }
 
 /* Vertical (side-by-side) layout */
 .main-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 body.layout-vertical .main-area { flex-direction: row; }
-body.layout-vertical .tree-container { height: auto; width: 280px; min-width: 120px; min-height: auto; border-bottom: none; border-right: 1px solid var(--border); }
+body.layout-vertical .tree-container { height: auto; width: 280px; min-width: 0; min-height: auto; border-bottom: none; border-right: 1px solid var(--border); overflow: hidden; }
 body.layout-vertical .resize-divider { height: auto; width: 6px; cursor: col-resize; }
 body.layout-vertical .resize-divider::after { width: 2px; height: 32px; }
 body.layout-vertical .chat-container { flex: 1; }
@@ -118,10 +119,10 @@ body.layout-vertical .chat-container { flex: 1; }
 <!-- Header -->
 <div class="header">
   <h1><a href="https://WikiOracle.org" target="_blank" style="color:inherit;text-decoration:none">WikiOracle</a></h1>
-  <button class="header-btn" id="btnSettings" title="Settings">Settings</button>
+  <button class="header-btn" id="btnImport" title="Open an llm_*.jsonl state file">Open</button>
   <button class="header-btn" id="btnRead" title="Open conversations in a readable view">Read</button>
-  <button class="header-btn" id="btnImport" title="Import an llm_*.jsonl file">Import State</button>
-  <button class="header-btn" id="btnExport" title="Export session as llm_*.jsonl">Export State</button>
+  <button class="header-btn" id="btnExport" title="Save session as llm_*.jsonl">Save</button>
+  <button class="header-btn" id="btnSettings" title="Settings">Settings</button>
 </div>
 
 <!-- Settings overlay -->
@@ -141,7 +142,6 @@ body.layout-vertical .chat-container { flex: 1; }
 
     <label for="setLayout">Layout</label>
     <select id="setLayout">
-      <option value="flat">Flat (chat only)</option>
       <option value="horizontal">Horizontal (tree on top)</option>
       <option value="vertical">Vertical (tree on left)</option>
     </select>
@@ -209,8 +209,9 @@ body.layout-vertical .chat-container { flex: 1; }
 <input type="file" id="fileImport" accept=".json,.jsonl" style="display:none">
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="d3tree.js?v=15"></script>
-<script src="wikioracle.js?v=25"></script>
+<script src="util.js?v=1"></script>
+<script src="d3tree.js?v=16"></script>
+<script src="wikioracle.js?v=26"></script>
 <script>
 // Draggable divider between tree and chat (supports mouse + touch, horizontal + vertical)
 (function() {
@@ -234,10 +235,12 @@ body.layout-vertical .chat-container { flex: 1; }
   function moveDrag(clientX, clientY) {
     if (!dragging) return;
     if (isVertical()) {
-      const newW = Math.max(120, Math.min(window.innerWidth * 0.6, startSize + (clientX - startPos)));
+      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
+      const newW = Math.max(0, Math.min(window.innerWidth * 0.8, startSize + (clientX - startPos)));
       tree.style.width = newW + "px";
     } else {
-      const newH = Math.max(60, Math.min(window.innerHeight * 0.7, startSize + (clientY - startPos)));
+      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
+      const newH = Math.max(0, Math.min(window.innerHeight * 0.8, startSize + (clientY - startPos)));
       tree.style.height = newH + "px";
     }
   }
@@ -271,6 +274,21 @@ body.layout-vertical .chat-container { flex: 1; }
   }, { passive: false });
   document.addEventListener("touchend", endDrag);
   document.addEventListener("touchcancel", endDrag);
+})();
+
+// Pinch-zoom on chat panel (shared setupZoom from util.js)
+(function() {
+  const chatContainer = document.getElementById("chatContainer");
+  const chatWrapper = document.getElementById("chatWrapper");
+  if (!chatContainer || !chatWrapper || typeof setupZoom === "undefined") return;
+  setupZoom({
+    container: d3.select(chatContainer),
+    target: chatWrapper,
+    mode: "css",
+    scaleExtent: [0.5, 3],
+    filter: "pinch",
+    resetOnDblclick: true
+  });
 })();
 </script>
 </body>

@@ -267,16 +267,25 @@ def build_prompt_bundle(
         trust_entries = state.get("truth", {}).get("trust", [])
         retrieval_prefs = prefs.get("retrieval", {})
 
+        # Compute derived certainty from implication chains
+        from wikioracle_state import compute_derived_truth
+        derived = compute_derived_truth(trust_entries)
+        for entry in trust_entries:
+            eid = entry.get("id", "")
+            if eid in derived:
+                entry["_derived_certainty"] = derived[eid]
+
         # Ranked normal entries (excluding providers and srcs)
         ranked = rank_retrieval_entries(
             trust_entries, retrieval_prefs,
             exclude_providers=True, exclude_srcs=True,
         )
         for entry in ranked:
+            certainty = entry.get("_derived_certainty", entry.get("certainty", 0))
             bundle.sources.append(Source(
                 source_id=entry.get("id", ""),
                 title=entry.get("title", "untitled"),
-                certainty=entry.get("certainty", 0),
+                certainty=certainty,
                 content=strip_xhtml_fn(entry.get("content", "")),
                 kind="fact",
                 time=entry.get("time", ""),
@@ -414,7 +423,7 @@ def to_openai_messages(bundle: PromptBundle) -> List[Dict[str, str]]:
 
 def to_anthropic_payload(
     bundle: PromptBundle,
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-4-6",
     max_tokens: int = 2048,
     temperature: float = 0.7,
 ) -> Dict[str, Any]:

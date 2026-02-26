@@ -290,9 +290,9 @@ class TestPromptStructure(unittest.TestCase):
         self.assertIn("t_axiom_01", user_msg)
 
     def test_all_trust_entries_loaded(self):
-        """hme.jsonl has 12 trust entries; all should be in state."""
+        """hme.jsonl has 16 trust entries (9 facts + 4 implications + 3 meta); all should be in state."""
         trust = self.state.get("truth", {}).get("trust", [])
-        self.assertEqual(len(trust), 12)
+        self.assertEqual(len(trust), 16)
 
     def test_provider_entries_excluded_from_rag(self):
         """<provider> entries should be excluded from normal RAG sources."""

@@ -103,6 +103,8 @@ function onDoubleTap(element, callback, threshold) {
  *   scaleExtent — [min, max], default [0.5, 4]
  *   filter      — "pinch" (ctrl+wheel / 2-finger touch only), or a function, or null (all events)
  *   resetOnDblclick — true (default): double-click/double-tap empty area resets zoom
+ *                     If a function, called with (zoom, currentTransform) instead
+ *                     of the default reset-to-resetTransform behaviour.
  *   resetTarget — DOM element that triggers reset when it is the event.target
  *                 (defaults to container.node())
  * @returns the d3 zoom instance
@@ -130,6 +132,15 @@ function setupZoom(opts) {
 
   if (filter) zoom.filter(filter);
 
+  // wheelPan: two-finger trackpad scroll pans (translates) instead of zooming.
+  // Pinch-to-zoom (ctrl+wheel on macOS) still zooms normally.
+  if (opts.wheelPan) {
+    zoom.filter(function(event) {
+      if (event.type === "wheel") return event.ctrlKey; // only pinch-zoom
+      return !event.button; // allow drag-to-pan, touch
+    });
+  }
+
   zoom.on("zoom", function(event) {
     if (mode === "svg") {
       d3.select(opts.target).attr("transform", event.transform);
@@ -142,12 +153,37 @@ function setupZoom(opts) {
   opts.container.call(zoom)
     .on("dblclick.zoom", null); // disable d3's default double-click zoom
 
+  // wheelPan: intercept non-ctrl wheel events and translate instead of zoom
+  if (opts.wheelPan) {
+    opts.container.on("wheel.pan", function(event) {
+      if (event.ctrlKey) return; // pinch-zoom handled by d3.zoom
+      event.preventDefault();
+      var t = d3.zoomTransform(opts.container.node());
+      var newT = d3.zoomIdentity
+        .translate(t.x - event.deltaX, t.y - event.deltaY)
+        .scale(t.k);
+      opts.container.call(zoom.transform, newT);
+    });
+  }
+
   if (resetOn) {
+    var resetTo = opts.resetTransform || d3.zoomIdentity;
+    var isCallback = typeof opts.resetOnDblclick === "function";
+
+    function _handleBgDblclick() {
+      if (isCallback) {
+        var curT = d3.zoomTransform(opts.container.node());
+        opts.resetOnDblclick(zoom, curT);
+      } else {
+        opts.container.transition().duration(300)
+          .call(zoom.transform, resetTo);
+      }
+    }
+
     // Desktop: double-click on empty area
     opts.container.on("dblclick", function(event) {
       if (event.target === resetTarget) {
-        opts.container.transition().duration(300)
-          .call(zoom.transform, d3.zoomIdentity);
+        _handleBgDblclick();
       }
     });
     // Mobile: double-tap on empty area
@@ -157,8 +193,7 @@ function setupZoom(opts) {
       var now = Date.now();
       if (now - bgLastTap < 350) {
         event.preventDefault();
-        opts.container.transition().duration(300)
-          .call(zoom.transform, d3.zoomIdentity);
+        _handleBgDblclick();
         bgLastTap = 0;
       } else {
         bgLastTap = now;

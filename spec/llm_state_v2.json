@@ -57,7 +57,11 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Unique conversation ID. Recommended: c_ + hex."
+          "description": "Unique conversation ID (UUID recommended)."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable conversation title. Optional; derived from first user message if absent."
         },
         "messages": {
           "type": "array",
@@ -78,7 +82,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Stable unique message ID."
+          "description": "Stable unique message ID (UUID recommended)."
         },
         "role": {
           "type": "string",
@@ -103,7 +107,7 @@
       "type": "object",
       "required": ["id", "title", "time", "certainty", "content"],
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "description": "Unique trust entry ID (UUID recommended)." },
         "title": { "type": "string" },
         "time": { "type": "string", "format": "date-time" },
         "certainty": { "type": "number", "minimum": -1.0, "maximum": 1.0 },

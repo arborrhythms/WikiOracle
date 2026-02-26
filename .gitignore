@@ -11,3 +11,4 @@ __pycache__/
 /llm.jsonl
 *.merged
 /config.yaml
+/conversations/*.json

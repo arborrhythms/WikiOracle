@@ -99,7 +99,29 @@ function _derivePrefs(cfg) {
       confirm_actions: !!chat.confirm_actions,
     },
     theme: ui.theme || "system",
+    splitter_pct: ui.splitter_pct != null ? ui.splitter_pct : null,
   };
+}
+
+// Persist current prefs to config bundle (stateless) or server (stateful).
+function _persistPrefs() {
+  if (_serverInfo.stateless) {
+    const bundle = _loadLocalConfig() || { yaml: "", parsed: {}, prefs: {} };
+    bundle.parsed = bundle.parsed || {};
+    bundle.parsed.ui = bundle.parsed.ui || {};
+    bundle.parsed.ui.splitter_pct = prefs.splitter_pct;
+    bundle.prefs = { ...prefs };
+    _saveLocalConfig(bundle);
+  } else {
+    api("POST", "/prefs", {
+      provider: prefs.provider,
+      username: prefs.username,
+      layout: prefs.layout,
+      theme: prefs.theme,
+      chat: prefs.chat,
+      splitter_pct: prefs.splitter_pct,
+    }).catch(function() {});
+  }
 }
 
 // One-time migration: wikioracle_prefs → config bundle
@@ -313,10 +335,100 @@ function findConversation(conversations, convId) {
   return findInTree(conversations, convId);
 }
 
+// Return the parent conversation object of convId, or null if convId is a root.
+function findParentConversation(conversations, convId) {
+  if (!convId || !conversations) return null;
+  for (var i = 0; i < conversations.length; i++) {
+    var ch = conversations[i].children || [];
+    for (var k = 0; k < ch.length; k++) {
+      if (ch[k].id === convId) return conversations[i];
+    }
+    var deeper = findParentConversation(ch, convId);
+    if (deeper) return deeper;
+  }
+  return null;
+}
+
+// Build a pruned conversation tree containing only the ancestor path to convId.
+// Each node on the path keeps only the child that leads to the target.
+// Returns a new array (does not mutate the original).
+function _buildAncestorPath(conversations, convId) {
+  if (!convId || !conversations) return [];
+  function _search(convs, target) {
+    for (var i = 0; i < convs.length; i++) {
+      var c = convs[i];
+      if (c.id === target) {
+        // Found target — return it with its children intact (includes optimistic conv)
+        return [{ id: c.id, title: c.title, messages: c.messages || [], children: c.children || [] }];
+      }
+      var deeper = _search(c.children || [], target);
+      if (deeper) {
+        // This node is on the path — keep only the child that leads to target
+        return [{ id: c.id, title: c.title, messages: c.messages || [], children: deeper }];
+      }
+    }
+    return null;
+  }
+  return _search(conversations, convId) || [];
+}
+
+// Merge a response-state's conversation tree back into the full local state.
+// Finds the selected conversation in respState and updates/inserts it in localConvs.
+function _mergeResponseConversation(localConvs, respState) {
+  var selId = respState.selected_conversation;
+  if (!selId) return;
+  // Find the conversation in the response
+  var respConv = findInTree(respState.conversations || [], selId);
+  if (!respConv) return;
+  // Try to find and update in the local tree
+  var localConv = findInTree(localConvs, selId);
+  if (localConv) {
+    localConv.messages = respConv.messages || [];
+    localConv.title = respConv.title || localConv.title;
+    // Merge children (response may have added a new child)
+    if (respConv.children) {
+      if (!localConv.children) localConv.children = [];
+      for (var i = 0; i < respConv.children.length; i++) {
+        var rc = respConv.children[i];
+        if (!findInTree(localConv.children, rc.id)) {
+          localConv.children.push(rc);
+        }
+      }
+    }
+  } else {
+    // New conversation — find its parent in the response path and insert there
+    // Walk the response tree to find the parent
+    function _findParent(convs, childId) {
+      for (var j = 0; j < convs.length; j++) {
+        var ch = convs[j].children || [];
+        for (var k = 0; k < ch.length; k++) {
+          if (ch[k].id === childId) return convs[j].id;
+        }
+        var deeper = _findParent(ch, childId);
+        if (deeper) return deeper;
+      }
+      return null;
+    }
+    var parentId = _findParent(respState.conversations || [], selId);
+    if (parentId) {
+      var localParent = findInTree(localConvs, parentId);
+      if (localParent) {
+        if (!localParent.children) localParent.children = [];
+        localParent.children.push(respConv);
+      } else {
+        localConvs.push(respConv);
+      }
+    } else {
+      localConvs.push(respConv);
+    }
+  }
+}
+
 // ─── Tree navigation ───
 
 function navigateToNode(nodeId) {
   if (!state) return;
+  if (selectedConvId === nodeId) return; // already on this node (dedup)
   selectedConvId = nodeId;
   _pendingBranchParent = null; // cancel any pending branch
   state.selected_conversation = nodeId;
@@ -391,6 +503,22 @@ function mergeConversation(sourceId, targetId) {
   setStatus(`Merged "${source.title}" into "${target.title}" (${target.messages.length} messages)`);
 }
 
+function _copyConversationContent(convId) {
+  if (!state) return;
+  const conv = findConversation(state.conversations || [], convId);
+  if (!conv || !conv.messages) return;
+  const text = conv.messages.map(function(m) {
+    const who = m.username || m.role || "unknown";
+    const body = stripTags(m.content || "");
+    return who + ": " + body;
+  }).join("\n\n");
+  navigator.clipboard.writeText(text).then(function() {
+    setStatus("Copied " + conv.messages.length + " messages");
+  }).catch(function() {
+    setStatus("Copy failed (clipboard permission denied)");
+  });
+}
+
 function _deleteAllConversations() {
   if (!state || !state.conversations || state.conversations.length === 0) {
     setStatus("No conversations to delete.");
@@ -441,11 +569,17 @@ function _hideMsgContextMenu() {
   if (_msgCtxMenu) { _msgCtxMenu.remove(); _msgCtxMenu = null; }
 }
 
+// Dismiss all context menus across both panes
+function _hideAllContextMenus() {
+  _hideMsgContextMenu();
+  if (typeof _hideContextMenu === "function") _hideContextMenu(); // tree pane menu
+}
+
 // Context menu for chat messages. Uses position:fixed to avoid clipping by
 // the chat container's overflow. The _justOpened flag + 300ms grace period
 // prevents the document-level click handler from immediately closing the menu.
 function _showMsgContextMenu(event, msgIdx, totalMsgs) {
-  _hideMsgContextMenu();
+  _hideAllContextMenus();
 
   const menu = document.createElement("div");
   menu.className = "tree-context-menu"; // reuse tree context menu style
@@ -531,6 +665,28 @@ async function _getSpecDefaults() {
 }
 
 
+// ─── Shared dialog factory ───
+// Creates a modal overlay with title bar and close button.
+// Returns { overlay, close } where close() hides the dialog.
+// bodyHTML is injected into the panel; panelClass adds extra CSS classes.
+// onClose is an optional callback invoked after hiding.
+function _createDialog(id, title, bodyHTML, panelClass, onClose) {
+  const overlay = document.createElement("div");
+  overlay.id = id;
+  overlay.className = "context-overlay";
+  const cls = panelClass ? `context-panel ${panelClass}` : "context-panel";
+  overlay.innerHTML =
+    `<div class="${cls}">` +
+    `<div class="dialog-title-bar"><h2>${title}</h2><button class="dialog-close" data-dialog-close>&times;</button></div>` +
+    bodyHTML +
+    `</div>`;
+  document.body.appendChild(overlay);
+  const closeBtn = overlay.querySelector("[data-dialog-close]");
+  function close() { overlay.classList.remove("active"); if (onClose) onClose(); }
+  closeBtn.addEventListener("click", close);
+  return { overlay, close };
+}
+
 // ─── Context editor (floating modal, triggered from root node) ───
 function _toggleContextEditor() {
   let overlay = document.getElementById("contextOverlay");
@@ -543,33 +699,22 @@ function _toggleContextEditor() {
 
   // Create overlay on first use
   if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "contextOverlay";
-    overlay.className = "context-overlay";
-    overlay.innerHTML = `
-      <div class="context-panel">
-        <h2>Context</h2>
+    const body = `
         <p>Injected into every LLM call as background information.</p>
         <textarea id="contextTextarea" placeholder="Describe the project, key facts, instructions..."></textarea>
         <div class="settings-actions">
           <button class="btn" id="ctxReset">Reset</button>
           <button class="btn" id="ctxCancel">Cancel</button>
           <button class="btn btn-primary" id="ctxSave">Save</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
+        </div>`;
+    var dlg = _createDialog("contextOverlay", "Context", body);
+    overlay = dlg.overlay;
 
-    // Close on overlay background click
-    overlay.addEventListener("click", function(e) {
-      if (e.target === overlay) overlay.classList.remove("active");
-    });
     document.getElementById("ctxReset").addEventListener("click", async function() {
       const defaults = await _getSpecDefaults();
       document.getElementById("contextTextarea").value = stripTags(defaults.context).trim();
     });
-    document.getElementById("ctxCancel").addEventListener("click", function() {
-      overlay.classList.remove("active");
-    });
+    document.getElementById("ctxCancel").addEventListener("click", dlg.close);
     document.getElementById("ctxSave").addEventListener("click", function() {
       const newText = document.getElementById("contextTextarea").value.trim();
       const currentPlain = stripTags(state?.context || "").trim();
@@ -578,7 +723,7 @@ function _toggleContextEditor() {
         _persistState();
         setStatus("Context saved");
       }
-      overlay.classList.remove("active");
+      dlg.close();
     });
   }
 
@@ -599,28 +744,18 @@ function _toggleOutputEditor() {
   }
 
   if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "outputOverlay";
-    overlay.className = "context-overlay";
-    overlay.innerHTML = `
-      <div class="context-panel">
-        <h2>Output</h2>
+    const body = `
         <p>Instructions appended to every LLM call describing the desired response format.</p>
         <textarea id="outputTextarea" placeholder="Describe the desired output format..."></textarea>
         <div class="settings-actions">
           <button class="btn" id="outReset">Reset</button>
           <button class="btn" id="outCancel">Cancel</button>
           <button class="btn btn-primary" id="outSave">Save</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
+        </div>`;
+    var dlg = _createDialog("outputOverlay", "Output", body);
+    overlay = dlg.overlay;
 
-    overlay.addEventListener("click", function(e) {
-      if (e.target === overlay) overlay.classList.remove("active");
-    });
-    document.getElementById("outCancel").addEventListener("click", function() {
-      overlay.classList.remove("active");
-    });
+    document.getElementById("outCancel").addEventListener("click", dlg.close);
     document.getElementById("outReset").addEventListener("click", async function() {
       const defaults = await _getSpecDefaults();
       document.getElementById("outputTextarea").value = defaults.output ?? "";
@@ -632,7 +767,7 @@ function _toggleOutputEditor() {
         _persistState();
         setStatus("Output saved");
       }
-      overlay.classList.remove("active");
+      dlg.close();
     });
   }
 
@@ -651,13 +786,20 @@ function _toggleOutputEditor() {
 // calls conversationsToHierarchy() + renderTree() to sync the tree panel.
 // Auto-scrolls chat container to bottom after render.
 function renderMessages() {
+  _hideAllContextMenus();
   const wrapper = document.getElementById("chatWrapper");
   wrapper.innerHTML = "";
+
+  // Click on empty area clears bubble selection
+  wrapper.addEventListener("click", () => {
+    const sel = wrapper.querySelector(".msg-selected");
+    if (sel) sel.classList.remove("msg-selected");
+  });
 
   if (!state) state = {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
 
-  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations };
+  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onCopy: _copyConversationContent, onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations };
 
   // Validate selectedConvId: if it points to a missing conversation, reset to root
   if (selectedConvId !== null && !findConversation(state.conversations, selectedConvId)) {
@@ -681,6 +823,25 @@ function renderMessages() {
   console.log("[WikiOracle] renderMessages: selectedConv=", selectedConvId,
               "visible=", visible.length, "conversations=", state.conversations.length);
 
+  // Show parent navigation link at top of chat
+  if (!_pendingBranchParent && selectedConvId !== null) {
+    var parentConv = findParentConversation(state.conversations, selectedConvId);
+    var parentNav = document.createElement("div");
+    parentNav.className = "conv-parent-nav";
+    var parentLink = document.createElement("button");
+    parentLink.className = "conv-parent-link";
+    if (parentConv) {
+      parentLink.textContent = "\u2190 " + (parentConv.title || "(untitled)");
+      parentLink.addEventListener("click", function() { navigateToNode(parentConv.id); });
+    } else {
+      // Current node is a root — link goes to root view
+      parentLink.textContent = "\u2190 Root";
+      parentLink.addEventListener("click", function() { navigateToNode(null); });
+    }
+    parentNav.appendChild(parentLink);
+    wrapper.appendChild(parentNav);
+  }
+
   for (let idx = 0; idx < visible.length; idx++) {
     const msg = visible[idx];
     const role = msg.role || "user";
@@ -701,6 +862,14 @@ function renderMessages() {
 
     div.appendChild(meta);
     div.appendChild(bubble);
+
+    // Click bubble to select (highlight outline, like tree-node selection)
+    bubble.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const prev = wrapper.querySelector(".msg-selected");
+      if (prev && prev !== bubble) prev.classList.remove("msg-selected");
+      bubble.classList.toggle("msg-selected");
+    });
 
     // Drag-to-reorder messages (desktop only — touch uses tap gestures)
     if (window.matchMedia("(pointer: fine)").matches) {
@@ -744,8 +913,29 @@ function renderMessages() {
     wrapper.appendChild(div);
   }
 
-  // Show placeholder when at root or empty conversation
-  if (visible.length === 0) {
+  // Show child conversations as clickable links (navigate deeper into tree)
+  if (!_pendingBranchParent) {
+    var currentConv = selectedConvId ? findConversation(state.conversations, selectedConvId) : null;
+    var childConvs = currentConv ? (currentConv.children || []) : state.conversations;
+    if (childConvs.length > 0) {
+      const childNav = document.createElement("div");
+      childNav.className = "conv-children-nav";
+      for (const child of childConvs) {
+        const link = document.createElement("button");
+        link.className = "conv-child-link";
+        const msgs = child.messages || [];
+        const qCount = msgs.filter(function(m) { return m.role === "user"; }).length;
+        link.textContent = (child.title || "(untitled)") + " (" + qCount + "Q " + (msgs.length - qCount) + "R)";
+        link.addEventListener("click", (function(id) { return function() { navigateToNode(id); }; })(child.id));
+        childNav.appendChild(link);
+      }
+      wrapper.appendChild(childNav);
+    }
+  }
+
+  // Show placeholder when at root or empty conversation (no children either)
+  var hasChildren = typeof childConvs !== "undefined" && childConvs && childConvs.length > 0;
+  if (visible.length === 0 && !hasChildren) {
     const placeholder = document.createElement("div");
     placeholder.className = "chat-placeholder";
     if (_pendingBranchParent) {
@@ -782,7 +972,8 @@ function _updatePlaceholder() {
   const input = document.getElementById("msgInput");
   const meta = _providerMeta[prefs.provider];
   const name = meta ? meta.name : prefs.provider;
-  input.placeholder = `Message ${name}...`;
+  const model = prefs.model || (meta ? meta.model : "");
+  input.placeholder = model ? `Message ${name} (${model})...` : `Message ${name}...`;
 }
 
 // ─── Send message ───
@@ -870,21 +1061,40 @@ async function sendMessage() {
       branch_from: branchFrom || undefined,
       prefs: {
         provider: prefs.provider,
-        model: (_providerMeta[prefs.provider] || {}).model || "",
+        model: prefs.model || (_providerMeta[prefs.provider] || {}).model || "",
         username: prefs.username,
         chat: prefs.chat || {},
       },
     };
-    // Stateless: include authoritative state + runtime_config
+    // Include pruned state (ancestor path only) + runtime_config
+    const targetConvId = conversationId || branchFrom || selectedConvId;
+    const prunedState = {
+      version: state.version, schema: state.schema, time: state.time,
+      context: state.context, output: state.output, truth: state.truth,
+      selected_conversation: state.selected_conversation,
+      conversations: _buildAncestorPath(state.conversations, targetConvId),
+      _path_only: true,
+    };
+    // If new root (no targetConvId), include the optimistic conversation
+    if (!targetConvId && state.conversations.length > 0) {
+      prunedState.conversations = [state.conversations[state.conversations.length - 1]];
+    }
     if (_serverInfo.stateless) {
-      chatBody.state = state;
+      chatBody.state = prunedState;
       chatBody.runtime_config = _buildRuntimeConfig();
+    } else {
+      chatBody.state = prunedState;
     }
     const data = await api("POST", "/chat", chatBody);
-    state = data.state || state;
-    if (!Array.isArray(state.conversations)) state.conversations = [];
+    const respState = data.state || {};
 
-    // Server sets selected_conversation; use it
+    // Merge response into local full state (path_only means response has pruned tree)
+    if (!Array.isArray(state.conversations)) state.conversations = [];
+    _mergeResponseConversation(state.conversations, respState);
+    state.selected_conversation = respState.selected_conversation || state.selected_conversation;
+    // Update truth (derived certainty may have changed)
+    if (respState.truth) state.truth = respState.truth;
+
     if (state.selected_conversation) {
       selectedConvId = state.selected_conversation;
     }
@@ -916,6 +1126,9 @@ async function sendMessage() {
 function openSettings() {
   document.getElementById("setUsername").value = prefs.username || "User";
   document.getElementById("setProvider").value = prefs.provider || "wikioracle";
+  _populateModelDropdown(prefs.provider);
+  var currentModel = prefs.model || (_providerMeta[prefs.provider] || {}).model || "";
+  if (currentModel) document.getElementById("setModel").value = currentModel;
   document.getElementById("setLayout").value = prefs.layout || "flat";
   document.getElementById("setTheme").value = prefs.theme || "system";
 
@@ -945,6 +1158,7 @@ async function saveSettings() {
   }
 
   prefs.provider = newProvider;
+  prefs.model = document.getElementById("setModel").value || "";
   prefs.username = document.getElementById("setUsername").value.trim() || "User";
   prefs.layout = document.getElementById("setLayout").value;
   prefs.theme = document.getElementById("setTheme").value || "system";
@@ -975,6 +1189,7 @@ async function saveSettings() {
     bundle.parsed.ui.default_provider = prefs.provider;
     bundle.parsed.ui.layout = prefs.layout;
     bundle.parsed.ui.theme = prefs.theme;
+    if (prefs.splitter_pct != null) bundle.parsed.ui.splitter_pct = prefs.splitter_pct;
     bundle.parsed.chat = bundle.parsed.chat || {};
     Object.assign(bundle.parsed.chat, {
       temperature: prefs.chat.temperature,
@@ -1011,25 +1226,17 @@ async function _openConfigEditor() {
 
   let overlay = document.getElementById("configOverlay");
   if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "configOverlay";
-    overlay.className = "context-overlay"; // reuse context overlay style
-    overlay.innerHTML = `
-      <div class="context-panel config-panel">
-        <h2>config.yaml</h2>
+    const body = `
         <textarea id="configEditorTextarea" class="config-textarea"></textarea>
         <div id="configEditorError" class="config-error"></div>
         <div class="settings-actions settings-actions-md">
           <button class="btn" id="cfgReset">Reset</button>
           <button class="btn" id="cfgCancel">Cancel</button>
           <button class="btn btn-primary" id="cfgOk">OK</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
+        </div>`;
+    var dlg = _createDialog("configOverlay", "config.yaml", body, "config-panel");
+    overlay = dlg.overlay;
 
-    overlay.addEventListener("click", function(e) {
-      if (e.target === overlay) overlay.classList.remove("active");
-    });
     document.getElementById("cfgReset").addEventListener("click", async function() {
       const defaults = await _getSpecDefaults();
       if (defaults.config_yaml) {
@@ -1038,9 +1245,7 @@ async function _openConfigEditor() {
         setStatus("spec/config.yaml not found");
       }
     });
-    document.getElementById("cfgCancel").addEventListener("click", function() {
-      overlay.classList.remove("active");
-    });
+    document.getElementById("cfgCancel").addEventListener("click", dlg.close);
     document.getElementById("cfgOk").addEventListener("click", async function() {
       const textarea = document.getElementById("configEditorTextarea");
       const errEl = document.getElementById("configEditorError");
@@ -1082,7 +1287,7 @@ async function _openConfigEditor() {
         }
       }
 
-      overlay.classList.remove("active");
+      dlg.close();
       // Refresh prefs + provider metadata (keys may have changed)
       try {
         var prefsData = await api("GET", "/prefs");
@@ -1128,12 +1333,7 @@ function _openTruthEditor() {
 
   let overlay = document.getElementById("truthOverlay");
   if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "truthOverlay";
-    overlay.className = "context-overlay";
-    overlay.innerHTML = `
-      <div class="context-panel trust-panel">
-        <h2>Trust</h2>
+    const body = `
         <div id="truthListView">
           <div id="truthEntries" class="trust-entries-scroll"></div>
           <div class="settings-actions settings-actions-xs">
@@ -1161,6 +1361,8 @@ function _openTruthEditor() {
           <select id="implAntecedent" class="trust-input"></select>
           <label class="trust-label">Consequent <span class="trust-label-hint">(\u2026then raise certainty of this entry)</span></label>
           <select id="implConsequent" class="trust-input"></select>
+          <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = false, 0 = unknown, +1 = true)</span></label>
+          <input id="implCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
           <label class="trust-label">Type</label>
           <select id="implType" class="trust-input">
             <option value="material">Material (Strong Kleene)</option>
@@ -1171,18 +1373,11 @@ function _openTruthEditor() {
             <button class="btn" id="implEditCancel">Cancel</button>
             <button class="btn btn-primary" id="implEditSave">Save</button>
           </div>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
+        </div>`;
+    var dlg = _createDialog("truthOverlay", "Trust", body, "trust-panel", function() { _truthEditing = null; });
+    overlay = dlg.overlay;
 
-    overlay.addEventListener("click", function(e) {
-      if (e.target === overlay) { overlay.classList.remove("active"); _truthEditing = null; }
-    });
-
-    document.getElementById("truthClose").addEventListener("click", function() {
-      overlay.classList.remove("active");
-      _truthEditing = null;
-    });
+    document.getElementById("truthClose").addEventListener("click", dlg.close);
 
     document.getElementById("truthAdd").addEventListener("click", function() {
       _truthEditing = "new";
@@ -1225,6 +1420,7 @@ function _openTruthEditor() {
     document.getElementById("truthAddImpl").addEventListener("click", function() {
       _truthEditing = "new_impl";
       document.getElementById("implTitle").value = "";
+      document.getElementById("implCertainty").value = "0.5";
       document.getElementById("implType").value = "material";
       _populateImplDropdowns();
       _truthShowImplView();
@@ -1239,20 +1435,28 @@ function _openTruthEditor() {
       const title = document.getElementById("implTitle").value.trim() || "Untitled implication";
       const ant = document.getElementById("implAntecedent").value;
       const con = document.getElementById("implConsequent").value;
+      const certainty = Math.min(1, Math.max(-1, parseFloat(document.getElementById("implCertainty").value) || 0));
       const implType = document.getElementById("implType").value;
       const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 
-      if (!ant || !con) return;
+      if (!ant || !con) {
+        const input = document.getElementById("msgInput");
+        const savedPH = input.placeholder;
+        input.placeholder = "Select both antecedent and consequent";
+        setTimeout(() => { input.placeholder = savedPH; }, 3000);
+        return;
+      }
 
       const content = "<implication><antecedent>" + ant + "</antecedent><consequent>" + con + "</consequent><type>" + implType + "</type></implication>";
 
       if (_truthEditing === "new_impl") {
-        const entry = { id: tempId("i_"), title: title, certainty: 0, content: content, time: now };
+        const entry = { id: tempId("i_"), title: title, certainty: certainty, content: content, time: now };
         state.truth.trust.push(entry);
       } else if (typeof _truthEditing === "number") {
         const entry = state.truth.trust[_truthEditing];
         if (entry) {
           entry.title = title;
+          entry.certainty = certainty;
           entry.content = content;
           entry.time = now;
         }
@@ -1317,6 +1521,12 @@ function _populateImplDropdowns(selectedAnt, selectedCon) {
   var conSel = document.getElementById("implConsequent");
   antSel.innerHTML = "";
   conSel.innerHTML = "";
+  var blankA = document.createElement("option");
+  blankA.value = ""; blankA.textContent = "\u2014 select \u2014";
+  antSel.appendChild(blankA);
+  var blankC = document.createElement("option");
+  blankC.value = ""; blankC.textContent = "\u2014 select \u2014";
+  conSel.appendChild(blankC);
   for (var i = 0; i < entries.length; i++) {
     var e = entries[i];
     if (_isImplication(e)) continue; // skip implication entries themselves
@@ -1410,6 +1620,7 @@ function _truthRenderList() {
         if (isImplication) {
           const implData = _parseImplContent(e.content);
           document.getElementById("implTitle").value = e.title || "";
+          document.getElementById("implCertainty").value = e.certainty || 0;
           document.getElementById("implType").value = (implData && implData.type) || "material";
           _populateImplDropdowns(implData && implData.antecedent, implData && implData.consequent);
           _truthShowImplView();
@@ -1444,37 +1655,104 @@ function _truthRenderList() {
 }
 
 // ─── Read view (XHTML export to new window) ───
-const _READING_CSS_FALLBACK = `
-body { font-family: Georgia, serif; line-height: 1.8; color: #1a1a1a; background: #fafaf8; max-width: 52rem; margin: 0 auto; padding: 2rem 1.5rem; }
-h1 { font-size: 1.6rem; margin-bottom: 0.5rem; }
-.meta { font-size: 0.85rem; color: #888; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #e0e0e0; }
-.conversation { margin-bottom: 1.5rem; padding-left: 1.2rem; border-left: 2px solid #d0d0d0; }
-.conv-title { font-size: 0.9rem; font-weight: 600; color: #555; margin-bottom: 0.6rem; }
-p.message { margin-bottom: 0.6rem; font-size: 0.95rem; white-space: pre-wrap; }
-p.message strong { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
-p.message.user strong { color: #2563eb; }
-p.message.assistant strong { color: #059669; }
-`;
 
-function _serializeConversations(conversations) {
+function _serializeConversations(conversations, depth, prefix) {
   if (!conversations || !conversations.length) return "";
+  if (depth === undefined) depth = 0;
+  if (prefix === undefined) prefix = "";
   let html = "";
-  for (const conv of conversations) {
+  for (let i = 0; i < conversations.length; i++) {
+    const conv = conversations[i];
+    const number = prefix ? prefix + "." + (i + 1) : String(i + 1);
     const title = escapeHtml(conv.title || "Untitled");
-    html += `<div class="conversation" data-id="${conv.id || ''}">\n`;
-    html += `  <div class="conv-title">${title}</div>\n`;
-    for (const msg of (conv.messages || [])) {
+    const msgs = conv.messages || [];
+    const qCount = msgs.filter(function(m) { return m.role === "user"; }).length;
+    const rCount = msgs.length - qCount;
+    let dateStr = "";
+    if (msgs.length > 0 && msgs[0].time) {
+      try { dateStr = new Date(msgs[0].time).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch(e) {}
+    }
+    const isRoot = depth === 0;
+    const depthClass = isRoot ? " conv-root" : "";
+    // HR between root-level conversations
+    if (isRoot && i > 0) html += `<hr class="conv-rule">\n`;
+    html += `<div class="conversation${depthClass}" data-id="${conv.id || ''}" data-depth="${depth}">\n`;
+    html += `  <div class="conv-title">${escapeHtml(number)}. ${title}</div>\n`;
+    if (dateStr || msgs.length > 0) {
+      html += `  <div class="conv-meta">${qCount}Q ${rCount}R${dateStr ? " \u2022 " + escapeHtml(dateStr) : ""}</div>\n`;
+    }
+    for (const msg of msgs) {
       const role = msg.role || "user";
       const username = escapeHtml(msg.username || role);
       const escaped = escapeHtml(stripTags(msg.content).trim());
       html += `  <p class="message ${role}" data-role="${role}"><strong>${username}:</strong> ${escaped}</p>\n`;
     }
-    // Recurse into children
     if (conv.children && conv.children.length) {
-      html += _serializeConversations(conv.children);
+      html += _serializeConversations(conv.children, depth + 1, number);
     }
     html += `</div>\n`;
   }
+  return html;
+}
+
+// Build an ordered ancestor path (root → ... → target) for the selected conversation.
+function _getAncestorPath(conversations, convId) {
+  if (!convId) return null;
+  function _search(convs, target) {
+    for (var i = 0; i < convs.length; i++) {
+      if (convs[i].id === target) return [convs[i]];
+      var deeper = _search(convs[i].children || [], target);
+      if (deeper) { deeper.unshift(convs[i]); return deeper; }
+    }
+    return null;
+  }
+  return _search(conversations, convId);
+}
+
+// Serialize the ancestor path as nested conversation divs with correct hierarchical numbers.
+// `allConversations` is the full tree (needed to compute sibling indices).
+// `path` is an array [root, ..., target] of conversation objects on the path.
+function _serializeAncestorPath(allConversations, path) {
+  if (!path || !path.length) return "";
+  let html = "";
+  let closeTags = "";
+  // Walk each node on the path, computing its 1-based sibling index
+  let siblings = allConversations; // siblings at current level
+  let numberParts = [];
+  for (let d = 0; d < path.length; d++) {
+    const conv = path[d];
+    // Find sibling index
+    let idx = 0;
+    for (let s = 0; s < siblings.length; s++) {
+      if (siblings[s].id === conv.id) { idx = s; break; }
+    }
+    numberParts.push(idx + 1);
+    const number = numberParts.join(".");
+    const title = escapeHtml(conv.title || "Untitled");
+    const msgs = conv.messages || [];
+    const qCount = msgs.filter(function(m) { return m.role === "user"; }).length;
+    const rCount = msgs.length - qCount;
+    let dateStr = "";
+    if (msgs.length > 0 && msgs[0].time) {
+      try { dateStr = new Date(msgs[0].time).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch(e) {}
+    }
+    const depthClass = d === 0 ? " conv-root" : "";
+    html += `<div class="conversation${depthClass}" data-id="${conv.id || ''}" data-depth="${d}">\n`;
+    html += `  <div class="conv-title">${escapeHtml(number)}. ${title}</div>\n`;
+    if (dateStr || msgs.length > 0) {
+      html += `  <div class="conv-meta">${qCount}Q ${rCount}R${dateStr ? " \u2022 " + escapeHtml(dateStr) : ""}</div>\n`;
+    }
+    for (const msg of msgs) {
+      const role = msg.role || "user";
+      const username = escapeHtml(msg.username || role);
+      const escaped = escapeHtml(stripTags(msg.content).trim());
+      html += `  <p class="message ${role}" data-role="${role}"><strong>${username}:</strong> ${escaped}</p>\n`;
+    }
+    closeTags += `</div>\n`;
+    // Next level: siblings are this node's children
+    siblings = conv.children || [];
+  }
+  html += closeTags;
   return html;
 }
 
@@ -1484,18 +1762,22 @@ async function _openReadView() {
     return;
   }
 
-  // Fetch reading.css and inline it
-  let css = _READING_CSS_FALLBACK;
-  try {
-    const resp = await fetch(_apiPath("/reading.css"));
-    if (resp.ok) {
-      css = await resp.text();
-    }
-  } catch (e) {
-    // fallback CSS already set
-  }
+  // Base URL for referencing server-hosted assets (CSS, JS)
+  const baseUrl = window.location.origin + (_serverInfo.url_prefix || "");
 
-  const body = _serializeConversations(state.conversations);
+  // Default: serialize only the ancestor path (root → selected node).
+  // If nothing is selected, show all root conversations.
+  let body = "";
+  let pathDesc = "";
+  const ancestorPath = selectedConvId ? _getAncestorPath(state.conversations, selectedConvId) : null;
+  let pathLine = "";
+  if (ancestorPath && ancestorPath.length > 0) {
+    body = _serializeAncestorPath(state.conversations, ancestorPath);
+    pathLine = ancestorPath.map(function(c) { return c.title || "Untitled"; }).join(" \u2192 ");
+  } else {
+    body = _serializeConversations(state.conversations);
+    pathLine = state.conversations.length + " root conversation" + (state.conversations.length !== 1 ? "s" : "");
+  }
   const now = new Date().toLocaleString();
   const doc = `<!DOCTYPE html>
 <html lang="en">
@@ -1503,37 +1785,15 @@ async function _openReadView() {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 <title>WikiOracle — Read View</title>
-<style>
-${css}
-/* d3 pinch-zoom support */
-#reading-content { transform-origin: top center; }
-</style>
+<link rel="stylesheet" href="${baseUrl}/reading.css">
 </head>
 <body>
 <article id="reading-content">
 <h1>WikiOracle</h1>
-<div class="meta">Exported ${now} — ${state.conversations.length} root conversation${state.conversations.length !== 1 ? "s" : ""}</div>
+<div class="meta"><span class="meta-label">Date:</span> ${escapeHtml(now)}<br><span class="meta-label">Path:</span> ${escapeHtml(pathLine)}</div>
+<hr class="meta-rule">
 ${body}
 </article>
-<script src="https://d3js.org/d3.v7.min.js"><\/script>
-<script>
-// Optional d3 pinch-zoom on the reading content
-(function() {
-  if (typeof d3 === "undefined") return;
-  var content = document.getElementById("reading-content");
-  var zoom = d3.zoom()
-    .scaleExtent([0.5, 4])
-    .filter(function(event) {
-      if (event.type === "wheel") return event.ctrlKey;
-      if (event.type === "touchstart" || event.type === "touchmove") return event.touches.length >= 2;
-      return false;
-    })
-    .on("zoom", function(event) {
-      content.style.transform = "scale(" + event.transform.k + ")";
-    });
-  d3.select(document.body).call(zoom).on("dblclick.zoom", null);
-})();
-<\/script>
 </body>
 </html>`;
 
@@ -1547,6 +1807,120 @@ ${body}
   }
   // Revoke after a delay so the new tab has time to load
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ─── Search ───
+
+function _openSearch() {
+  var overlay = document.getElementById("searchOverlay");
+
+  if (overlay && overlay.classList.contains("active")) {
+    overlay.classList.remove("active");
+    return;
+  }
+
+  if (!overlay) {
+    var body = '<div class="search-bar">' +
+      '<input id="searchInput" type="text" placeholder="Regex search through conversations...">' +
+      '<button class="btn btn-primary" id="searchGo">Search</button>' +
+      '</div>' +
+      '<div id="searchInfo" class="search-info"></div>' +
+      '<div id="searchResults" class="search-results"></div>';
+    var dlg = _createDialog("searchOverlay", "Search", body, "search-panel");
+    overlay = dlg.overlay;
+
+    var searchInput = document.getElementById("searchInput");
+    var searchGo = document.getElementById("searchGo");
+
+    function doSearch() {
+      var query = searchInput.value.trim();
+      if (!query || !state) return;
+      var results = [];
+      var re;
+      try { re = new RegExp(query, "gi"); } catch (e) {
+        document.getElementById("searchInfo").textContent = "Invalid regex: " + e.message;
+        return;
+      }
+
+      // Walk entire conversation tree
+      function walkConvs(convs, path) {
+        for (var i = 0; i < convs.length; i++) {
+          var conv = convs[i];
+          var convPath = path.concat(conv.title || "(untitled)");
+          var msgs = conv.messages || [];
+          for (var j = 0; j < msgs.length; j++) {
+            var text = stripTags(msgs[j].content || "");
+            re.lastIndex = 0;
+            var match = re.exec(text);
+            if (match) {
+              // Build snippet around match
+              var start = Math.max(0, match.index - 30);
+              var end = Math.min(text.length, match.index + match[0].length + 30);
+              var snippet = (start > 0 ? "..." : "") +
+                escapeHtml(text.slice(start, match.index)) +
+                "<mark>" + escapeHtml(match[0]) + "</mark>" +
+                escapeHtml(text.slice(match.index + match[0].length, end)) +
+                (end < text.length ? "..." : "");
+              results.push({
+                convId: conv.id,
+                convTitle: conv.title || "(untitled)",
+                msgIdx: j,
+                msgId: msgs[j].id,
+                role: msgs[j].role || "user",
+                snippet: snippet,
+                path: convPath.join(" > ")
+              });
+            }
+          }
+          walkConvs(conv.children || [], convPath);
+        }
+      }
+      walkConvs(state.conversations || [], []);
+
+      document.getElementById("searchInfo").textContent = results.length + " match" + (results.length !== 1 ? "es" : "") + " found";
+      var container = document.getElementById("searchResults");
+      container.innerHTML = "";
+
+      for (var k = 0; k < results.length; k++) {
+        (function(r) {
+          var div = document.createElement("div");
+          div.className = "search-result";
+          div.innerHTML = '<div class="search-result-title">' + escapeHtml(r.convTitle) + ' <span style="color:var(--fg-muted);font-weight:normal">(' + r.role + ')</span></div>' +
+            '<div class="search-result-snippet">' + r.snippet + '</div>';
+          div.addEventListener("click", function() {
+            dlg.close();
+            navigateToNode(r.convId);
+            // Scroll to the matching message after render
+            setTimeout(function() {
+              var msgEl = document.querySelector('[data-msg-id="' + r.msgId + '"]') ||
+                          document.querySelector('[data-msg-idx="' + r.msgIdx + '"]');
+              if (msgEl) {
+                msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                var bubble = msgEl.querySelector(".msg-bubble");
+                if (bubble) {
+                  bubble.classList.add("msg-selected");
+                  setTimeout(function() { bubble.classList.remove("msg-selected"); }, 2000);
+                }
+              }
+            }, 100);
+          });
+          container.appendChild(div);
+        })(results[k]);
+      }
+    }
+
+    searchGo.addEventListener("click", doSearch);
+    searchInput.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") { e.preventDefault(); doSearch(); }
+    });
+  }
+
+  // Clear and show
+  document.getElementById("searchInput").value = "";
+  document.getElementById("searchInfo").textContent = "";
+  document.getElementById("searchResults").innerHTML = "";
+  overlay.classList.add("active");
+  document.getElementById("searchInput").focus();
 }
 
 // ─── Bind UI events ───
@@ -1703,6 +2077,9 @@ function bindEvents() {
     e.target.value = "";
   });
 
+  // Search
+  document.getElementById("btnSearch").addEventListener("click", _openSearch);
+
   // Settings
   document.getElementById("btnSettings").addEventListener("click", openSettings);
   document.getElementById("btnSettingsCancel").addEventListener("click", closeSettings);
@@ -1714,10 +2091,10 @@ function bindEvents() {
   document.getElementById("setWindow").addEventListener("input", function() {
     document.getElementById("setWindowVal").textContent = this.value;
   });
-  document.getElementById("settingsOverlay").addEventListener("click", function(e) {
-    // Close settings when clicking the background overlay (not the panel itself)
-    if (e.target === this) closeSettings();
+  document.getElementById("setProvider").addEventListener("change", function() {
+    _populateModelDropdown(this.value);
   });
+  document.getElementById("btnSettingsClose").addEventListener("click", closeSettings);
 
   // Edit config.yaml button
   document.getElementById("btnEditConfig").addEventListener("click", _openConfigEditor);
@@ -1737,6 +2114,105 @@ function bindEvents() {
       sendMessage();
     }
   });
+
+  // ─── Tree navigation helpers (shared by arrow keys and scroll-at-border) ───
+  function _treeNav(direction) {
+    if (!state) return false;
+    var convs = state.conversations || [];
+
+    function buildPreorder(nodes) {
+      var result = [null];
+      function walk(arr) {
+        for (var i = 0; i < arr.length; i++) {
+          result.push(arr[i]);
+          if (arr[i].children && arr[i].children.length > 0) walk(arr[i].children);
+        }
+      }
+      walk(nodes);
+      return result;
+    }
+
+    var flat = buildPreorder(convs);
+    var curIdx = flat.findIndex(function(c) {
+      return c === null ? selectedConvId === null : c.id === selectedConvId;
+    });
+
+    switch (direction) {
+      case "up": {
+        if (selectedConvId === null) return false;
+        var parent = findParentConversation(convs, selectedConvId);
+        treeRequestFocus();
+        navigateToNode(parent ? parent.id : null);
+        return true;
+      }
+      case "down": {
+        var cur = selectedConvId === null ? null : findConversation(convs, selectedConvId);
+        var hasChildren = selectedConvId === null
+          ? convs.length > 0
+          : (cur && cur.children && cur.children.length > 0);
+        if (hasChildren && curIdx >= 0 && curIdx < flat.length - 1) {
+          var next = flat[curIdx + 1];
+          treeRequestFocus();
+          navigateToNode(next ? next.id : null);
+          return true;
+        }
+        return false;
+      }
+      case "right": {
+        if (curIdx >= 0 && curIdx < flat.length - 1) {
+          var next = flat[curIdx + 1];
+          treeRequestFocus();
+          navigateToNode(next ? next.id : null);
+          return true;
+        }
+        return false;
+      }
+      case "left": {
+        if (curIdx > 0) {
+          var prev = flat[curIdx - 1];
+          treeRequestFocus();
+          navigateToNode(prev ? prev.id : null);
+          return true;
+        }
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // ─── Arrow-key navigation for conversation tree ───
+  document.addEventListener("keydown", function(e) {
+    var tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
+    if (document.querySelector(".context-overlay.active")) return;
+    var dirMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+    var dir = dirMap[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    _treeNav(dir);
+  });
+
+  // ─── Scroll-at-border: wheel past top/bottom/left/right navigates tree ───
+  var _scrollNavCooldown = 0;
+  document.getElementById("chatContainer").addEventListener("wheel", function(e) {
+    var now = Date.now();
+    if (now - _scrollNavCooldown < 600) return;
+    var el = this;
+    var atTop = el.scrollTop <= 0;
+    var atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+
+    if (atTop && e.deltaY < -5) {
+      _scrollNavCooldown = now;
+      _treeNav("up");
+    } else if (atBottom && e.deltaY > 5) {
+      _scrollNavCooldown = now;
+      _treeNav("down");
+    } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 20) {
+      // Horizontal scroll (trackpad swipe)
+      _scrollNavCooldown = now;
+      _treeNav(e.deltaX > 0 ? "right" : "left");
+    }
+  }, { passive: true });
 }
 
 // ─── Init: load prefs + state from server ───
@@ -1770,6 +2246,20 @@ async function init() {
     applyLayout(prefs.layout);
     applyTheme(prefs.theme);
     _updatePlaceholder();
+
+    // Restore splitter position from prefs (percentage of viewport)
+    if (prefs.splitter_pct != null) {
+      const tree = document.getElementById("treeContainer");
+      if (tree) {
+        const pct = prefs.splitter_pct;
+        if (document.body.classList.contains("layout-vertical")) {
+          tree.style.width = pct === 0 ? "0px" : (pct / 100 * window.innerWidth) + "px";
+        } else {
+          tree.style.height = pct === 0 ? "0px" : (pct / 100 * window.innerHeight) + "px";
+        }
+        tree.classList.toggle("tree-collapsed", pct === 0);
+      }
+    }
 
     // Restore selected conversation from state
     if (state.selected_conversation && findConversation(state.conversations, state.selected_conversation)) {
@@ -1897,7 +2387,30 @@ function _populateProviderDropdown() {
     const opt = document.createElement("option");
     opt.value = key;
     const keyWarning = (info.needs_key && !info.has_key) ? " \u26a0 no key" : "";
-    opt.textContent = info.name + (info.model ? ` (${info.model})` : "") + keyWarning;
+    opt.textContent = info.name + keyWarning;
+    sel.appendChild(opt);
+  }
+}
+
+// Populate the model <select> dropdown for the currently selected provider
+function _populateModelDropdown(providerKey) {
+  const sel = document.getElementById("setModel");
+  sel.innerHTML = "";
+  const meta = _providerMeta[providerKey || prefs.provider];
+  if (!meta) return;
+  const models = meta.models || [];
+  if (models.length === 0 && meta.model) {
+    // Fallback: single model from default
+    const opt = document.createElement("option");
+    opt.value = meta.model;
+    opt.textContent = meta.model;
+    sel.appendChild(opt);
+    return;
+  }
+  for (const m of models) {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = m;
     sel.appendChild(opt);
   }
 }
@@ -1960,6 +2473,15 @@ init();
     divider.classList.remove("active");
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
+    // Persist splitter position as percentage into prefs/config
+    // Use clientHeight/clientWidth (excludes borders) and snap small values to 0
+    var size = isVertical() ? tree.clientWidth : tree.clientHeight;
+    var viewport = isVertical() ? window.innerWidth : window.innerHeight;
+    var pct = size < 4 ? 0 : Math.round(size / viewport * 1000) / 10;
+    prefs.splitter_pct = pct;
+    // Toggle collapsed state for border hiding
+    tree.classList.toggle("tree-collapsed", pct === 0);
+    _persistPrefs();
     if (typeof renderMessages === "function") renderMessages();
   }
 

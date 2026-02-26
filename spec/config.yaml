@@ -29,7 +29,7 @@ providers:
     username: you@example.com
     url: https://api.anthropic.com/v1/messages
     api_key: ""                          # or set ANTHROPIC_API_KEY env var
-    default_model: claude-sonnet-4-20250514
+    default_model: claude-sonnet-4-6
 
 # --- Chat settings -----------------------------------------------------------
 

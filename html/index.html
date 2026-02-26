@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>WikiOracle</title>
 <link rel="stylesheet" href="wikioracle.css">
 </head>
@@ -14,13 +14,14 @@
   <button class="header-btn" id="btnImport" title="Open an llm_*.jsonl state file">Open</button>
   <button class="header-btn" id="btnRead" title="Open conversations in a readable view">Read</button>
   <button class="header-btn" id="btnExport" title="Save session as llm_*.jsonl">Save</button>
+  <button class="header-btn" id="btnSearch" title="Search conversations">Search</button>
   <button class="header-btn" id="btnSettings" title="Settings">Settings</button>
 </div>
 
 <!-- Settings overlay -->
-<div class="settings-overlay" id="settingsOverlay">
+<div class="context-overlay" id="settingsOverlay">
   <div class="settings-panel">
-    <h2>Settings</h2>
+    <div class="dialog-title-bar"><h2>Settings</h2><button class="dialog-close" id="btnSettingsClose">&times;</button></div>
 
     <label for="setUsername">Your name</label>
     <input type="text" id="setUsername" placeholder="Alec">
@@ -31,6 +32,9 @@
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic</option>
     </select>
+
+    <label for="setModel">Model</label>
+    <select id="setModel"></select>
 
     <label for="setLayout">Layout</label>
     <select id="setLayout">

@@ -510,7 +510,7 @@ class TestProviderParsing(unittest.TestCase):
         '<name>claude</name>'
         '<api_url>https://api.anthropic.com/v1/messages</api_url>'
         '<api_key>sk-test-key-123</api_key>'
-        '<model>claude-sonnet-4-20250514</model>'
+        '<model>claude-sonnet-4-6</model>'
         '<timeout>60</timeout>'
         '<max_tokens>4096</max_tokens>'
         '</provider>'
@@ -522,7 +522,7 @@ class TestProviderParsing(unittest.TestCase):
         self.assertEqual(result["name"], "claude")
         self.assertEqual(result["api_url"], "https://api.anthropic.com/v1/messages")
         self.assertEqual(result["api_key"], "sk-test-key-123")
-        self.assertEqual(result["model"], "claude-sonnet-4-20250514")
+        self.assertEqual(result["model"], "claude-sonnet-4-6")
         self.assertEqual(result["timeout"], 60)
         self.assertEqual(result["max_tokens"], 4096)
 

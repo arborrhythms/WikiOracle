@@ -13,7 +13,7 @@ Usage:
     # CLI merge mode
     python WikiOracle.py merge llm_2026.02.22.1441.jsonl llm_2026.02.23.0900.jsonl
 
-Then open http://127.0.0.1:8787/
+Then open https://localhost:8888/
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ import concurrent.futures
 import json
 import os
 import re
+import ssl
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,6 +78,83 @@ from prompt_bundle import (
 
 
 # ---------------------------------------------------------------------------
+# TLS certificate helpers
+# ---------------------------------------------------------------------------
+_DEFAULT_SSL_DIR = Path.home() / ".ssl"
+_DEFAULT_HOSTNAME = __import__("socket").gethostname().split(".")[0]
+_DEFAULT_CERT = _DEFAULT_SSL_DIR / f"{_DEFAULT_HOSTNAME}.pem"
+_DEFAULT_KEY = _DEFAULT_SSL_DIR / f"{_DEFAULT_HOSTNAME}-key.pem"
+
+
+def _ensure_self_signed_cert(cert_path: Path, key_path: Path) -> None:
+    """Generate a self-signed TLS certificate if it doesn't already exist.
+
+    Creates ~/.ssl/ and generates a cert valid for 10 years, covering
+    localhost, 127.0.0.1, ::1, the machine's .local hostname, and its
+    current LAN IP.
+    """
+    if cert_path.exists() and key_path.exists():
+        return
+
+    cert_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Collect SAN entries
+    san_dns = ["localhost"]
+    san_ip = ["127.0.0.1", "::1"]
+
+    # Machine hostname (e.g. ArborBook.local)
+    import socket
+    local_name = "localhost"
+    try:
+        hostname = socket.gethostname()  # e.g. "ArborBook.local"
+        if hostname and hostname not in san_dns:
+            san_dns.append(hostname)
+        short = hostname.split(".")[0]
+        local_name = f"{short}.local"
+        if local_name not in san_dns:
+            san_dns.append(local_name)
+    except Exception:
+        pass
+
+    # Current LAN IP
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        lan_ip = s.getsockname()[0]
+        s.close()
+        if lan_ip and lan_ip not in san_ip:
+            san_ip.append(lan_ip)
+    except Exception:
+        pass
+
+    # Build SAN string for openssl
+    san_entries = [f"DNS:{d}" for d in san_dns] + [f"IP:{ip}" for ip in san_ip]
+    san_value = ",".join(san_entries)
+
+    print(f"  Generating self-signed TLS certificate …")
+    print(f"    Cert : {cert_path}")
+    print(f"    Key  : {key_path}")
+    print(f"    SANs : {san_value}")
+
+    subprocess.run(
+        [
+            "openssl", "req",
+            "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+            "-keyout", str(key_path),
+            "-out", str(cert_path),
+            "-days", "3650",
+            "-nodes",  # no passphrase
+            "-subj", f"/CN={local_name}",
+            "-addext", f"subjectAltName={san_value}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    key_path.chmod(0o600)
+    print(f"    ✓ Certificate created.\n")
+
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 @dataclass
@@ -85,8 +164,10 @@ class Config:
     state_file: Path  # Canonical on-disk state location (ignored in stateless mode).
     base_url: str = "https://wikioracle.org"  # Upstream NanoChat-compatible base URL.
     api_path: str = "/chat/completions"  # Upstream endpoint path appended to base_url.
-    bind_host: str = "127.0.0.1"  # Local interface to bind the Flask server.
-    bind_port: int = 8787  # Local port for browser/UI traffic.
+    bind_host: str = "0.0.0.0"  # Bind all interfaces (LAN-accessible).
+    bind_port: int = 8888  # Local port for browser/UI traffic.
+    ssl_cert: Path = field(default_factory=lambda: _DEFAULT_CERT)  # TLS certificate.
+    ssl_key: Path = field(default_factory=lambda: _DEFAULT_KEY)  # TLS private key.
     timeout_s: float = 120.0  # Network timeout for provider requests.
     max_state_bytes: int = 5_000_000  # Hard upper bound for serialized state size.
     max_context_chars: int = 40_000  # Context rewrite cap for merge appendix generation.
@@ -95,7 +176,7 @@ class Config:
     auto_context_rewrite: bool = False  # Enable delta-based context append during merges.
     merged_suffix: str = ".merged"  # Suffix applied to files after successful import.
     allowed_origins: set = field(default_factory=lambda: {
-        "http://127.0.0.1:8787", "http://localhost:8787"
+        "https://127.0.0.1:8888", "https://localhost:8888"
     })
 
 
@@ -113,20 +194,26 @@ def load_config() -> Config:
         os.environ.get("WIKIORACLE_STATE_FILE", str(Path.cwd() / "llm.jsonl"))
     ).expanduser().resolve()
 
+    port = int(os.environ.get("WIKIORACLE_BIND_PORT", "8888"))
     allowed_origins_raw = os.environ.get(
         "WIKIORACLE_ALLOWED_ORIGINS",
-        "http://127.0.0.1:8787,http://localhost:8787",
+        f"https://127.0.0.1:{port},https://localhost:{port}",
     )
     allowed_origins = {v.strip() for v in allowed_origins_raw.split(",") if v.strip()}
+
+    ssl_cert = Path(os.environ.get("WIKIORACLE_SSL_CERT", str(_DEFAULT_CERT))).expanduser()
+    ssl_key = Path(os.environ.get("WIKIORACLE_SSL_KEY", str(_DEFAULT_KEY))).expanduser()
 
     return Config(
         state_file=state_file,
         base_url=os.environ.get("WIKIORACLE_BASE_URL", "https://wikioracle.org").rstrip("/"),
         api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/chat/completions"),
-        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "127.0.0.1"),
-        bind_port=int(os.environ.get("WIKIORACLE_BIND_PORT", "8787")),
+        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "0.0.0.0"),
+        bind_port=port,
+        ssl_cert=ssl_cert,
+        ssl_key=ssl_key,
         timeout_s=float(os.environ.get("WIKIORACLE_TIMEOUT_S", "120")),
-        max_state_bytes=int(os.environ.get("WIKIORACLE_MAX_STATE_BYTES", str(5_000_000))),
+        max_state_bytes=int(os.environ.get("WIKIORACLE_MAX_STATE_BYTES", str(20_000_000))),
         max_context_chars=int(os.environ.get("WIKIORACLE_MAX_CONTEXT_CHARS", "40000")),
         reject_symlinks=_env_bool("WIKIORACLE_REJECT_SYMLINKS", True),
         auto_merge_on_start=_env_bool("WIKIORACLE_AUTO_MERGE_ON_START", True),
@@ -193,7 +280,7 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "name": "Anthropic",
             "url": "https://api.anthropic.com/v1/messages",
             "api_key": os.getenv("ANTHROPIC_API_KEY", ""),
-            "default_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
+            "default_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             "streaming": False,
         },
     }
@@ -375,14 +462,14 @@ def _call_anthropic(bundle: PromptBundle | None, temperature: float, provider_cf
     if bundle is not None:
         payload = to_anthropic_payload(
             bundle,
-            model=provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
+            model=provider_cfg.get("default_model", "claude-sonnet-4-6"),
             max_tokens=2048,
             temperature=temperature,
         )
     else:
         payload = _build_anthropic_payload_from_messages(
             messages or [],
-            model=provider_cfg.get("default_model", "claude-sonnet-4-20250514"),
+            model=provider_cfg.get("default_model", "claude-sonnet-4-6"),
             max_tokens=2048,
             temperature=temperature,
         )
@@ -552,7 +639,7 @@ def _call_dynamic_anthropic(
     """Call a dynamic Anthropic endpoint from a <provider> trust entry."""
     payload = _build_anthropic_payload_from_messages(
         messages,
-        model=model or "claude-sonnet-4-20250514",
+        model=model or "claude-sonnet-4-6",
         max_tokens=max_tokens,
         temperature=temperature,
     )
@@ -627,7 +714,7 @@ def _fan_out_and_aggregate(
     # Route to primary provider using appropriate adapter
     api_url = primary_config.get("api_url", "")
     if "anthropic.com" in api_url:
-        model = primary_config.get("model", "claude-sonnet-4-20250514")
+        model = primary_config.get("model", "claude-sonnet-4-6")
         max_tokens = primary_config.get("max_tokens") or 2048
         payload = to_anthropic_payload(final_bundle, model=model,
                                        max_tokens=max_tokens, temperature=temperature)
@@ -792,6 +879,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 "name": pcfg["name"],
                 "streaming": pcfg.get("streaming", False),
                 "model": pcfg.get("default_model", ""),
+                "models": _PROVIDER_MODELS.get(key, []),
                 "has_key": bool(pcfg.get("api_key")) or not needs_key,
                 "needs_key": needs_key,
             }
@@ -898,14 +986,27 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         conversation_id = body.get("conversation_id")  # append to this conversation
         branch_from = body.get("branch_from")           # create child of this conversation
 
+        path_only = isinstance(body.get("state"), dict) and body["state"].get("_path_only", False)
+
         try:
             if STATELESS_MODE:
                 # Client-supplied state is authoritative — no disk/memory reads.
                 import copy
                 state = copy.deepcopy(body["state"])
+                state.pop("_path_only", None)
                 state = ensure_minimal_state(state, strict=False)
             else:
                 state = _load_state(cfg)
+                # In stateful mode, merge client-supplied trust/context/output
+                # (client may have edited these since last save)
+                if isinstance(body.get("state"), dict):
+                    client_state = body["state"]
+                    if "truth" in client_state:
+                        state["truth"] = client_state["truth"]
+                    if "context" in client_state:
+                        state["context"] = client_state["context"]
+                    if "output" in client_state:
+                        state["output"] = client_state["output"]
             user_timestamp = utc_now_iso()
 
             # Determine which conversation to use for upstream context
@@ -1167,6 +1268,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 "confirm_actions": chat.get("confirm_actions", False),
             },
             "theme": ui.get("theme", "system"),
+            "splitter_pct": ui.get("splitter_pct"),
         }
 
     @app.route(url_prefix + "/parse_config", methods=["POST", "OPTIONS"])
@@ -1252,6 +1354,12 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 pass
         return jsonify(result)
 
+    # Known models per provider (for UI model selector dropdown)
+    _PROVIDER_MODELS = {
+        "openai": ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
+        "anthropic": ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"],
+    }
+
     @app.route(url_prefix + "/providers", methods=["GET"])
     def providers():
         """Expose non-secret provider metadata for UI model selectors."""
@@ -1264,6 +1372,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 "name": pcfg["name"],
                 "streaming": pcfg.get("streaming", False),
                 "model": pcfg.get("default_model", ""),
+                "models": _PROVIDER_MODELS.get(key, []),
                 "has_key": bool(pcfg.get("api_key")) or not needs_key,
                 "needs_key": needs_key,
             }
@@ -1303,6 +1412,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     # Remove legacy css key if present
                     if "css" in data.get("ui", {}):
                         del data["ui"]["css"]
+                if "splitter_pct" in body:
+                    data.setdefault("ui", {})["splitter_pct"] = body["splitter_pct"]
                 if "chat" in body and isinstance(body["chat"], dict):
                     chat_sec = data.setdefault("chat", {})
                     for key in ("temperature", "message_window", "rag", "url_fetch", "confirm_actions"):
@@ -1415,11 +1526,15 @@ def main() -> int:
             initial = ensure_minimal_state({}, strict=False)
             atomic_write_jsonl(cfg.state_file, initial, reject_symlinks=cfg.reject_symlinks)
 
+    # Ensure TLS certificate exists
+    _ensure_self_signed_cert(cfg.ssl_cert, cfg.ssl_key)
+
     print(f"\n{'='*60}")
     print(f"  WikiOracle Local Shim")
     print(f"{'='*60}")
     print(f"  State file : {cfg.state_file}{' (STATELESS — no writes)' if STATELESS_MODE else ''}")
     print(f"  Bind       : {cfg.bind_host}:{cfg.bind_port}")
+    print(f"  TLS cert   : {cfg.ssl_cert}")
     if url_prefix:
         print(f"  URL prefix : {url_prefix}")
     prov_info = []
@@ -1440,11 +1555,24 @@ def main() -> int:
     print(f"  Config YAML: {_CONFIG_YAML_STATUS}")
     print(f"  Stateless  : {'ON' if STATELESS_MODE else 'off'}")
     print(f"  Debug      : {'ON' if DEBUG_MODE else 'off'}")
-    print(f"  UI         : http://{cfg.bind_host}:{cfg.bind_port}{url_prefix}/")
+    print(f"  UI         : https://{cfg.bind_host}:{cfg.bind_port}{url_prefix}/")
+    if cfg.bind_host == "0.0.0.0":
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("10.255.255.255", 1))  # doesn't actually send anything
+            lan_ip = s.getsockname()[0]
+            s.close()
+            print(f"  LAN        : https://{lan_ip}:{cfg.bind_port}{url_prefix}/")
+        except Exception:
+            pass
     print(f"{'='*60}\n")
 
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_ctx.load_cert_chain(str(cfg.ssl_cert), str(cfg.ssl_key))
+
     app = create_app(cfg, url_prefix=url_prefix)
-    app.run(host=cfg.bind_host, port=cfg.bind_port, debug=False)
+    app.run(host=cfg.bind_host, port=cfg.bind_port, debug=False, ssl_context=ssl_ctx)
     return 0
 
 

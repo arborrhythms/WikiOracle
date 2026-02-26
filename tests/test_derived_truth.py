@@ -64,8 +64,8 @@ def test_ensure_implication_id_preserves_existing():
 def test_ensure_implication_id_generates():
     entry = {"content": "<implication><antecedent>t_a</antecedent><consequent>t_b</consequent><type>material</type></implication>"}
     iid = ensure_implication_id(entry)
-    assert iid.startswith("i_")
-    assert len(iid) == 18  # "i_" + 16 hex chars
+    # Generated IDs are deterministic UUIDs (36 chars with dashes).
+    assert len(iid) == 36 and iid.count("-") == 4
     assert entry["id"] == iid
 
 

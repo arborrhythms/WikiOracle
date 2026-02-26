@@ -25,8 +25,19 @@
 //   Hover (suppressed during drag) -> tooltip: title, date, Q+R count
 
 // Internal state
-let _tooltip = null;
 let _dragState = null; // { sourceNode, sourceEl } while dragging
+let _lastClickTime = 0; // for double-click detection (persists across re-renders)
+let _lastClickId = null;
+let _savedTransform = null; // persists zoom/pan across re-renders
+let _focusOnSelected = false; // when true, next render pans to selected node
+
+// Kept across renders for background-dblclick zoom toggle
+let _fitTransform = null;    // d3.zoomIdentity.translate(…).scale(fitScale)
+let _zoomInstance = null;     // the d3.zoom() object
+let _treeRoot = null;         // d3.hierarchy root
+let _treeMargin = null;       // { top, right, bottom, left }
+let _treeSvgW = 0;
+let _treeSvgH = 0;
 
 /**
  * Convert conversations tree to D3 hierarchy data.
@@ -75,12 +86,9 @@ function renderTree(hierarchyData, callbacks) {
   const width = container.clientWidth || 600;
   const height = container.clientHeight || 200;
 
-  // Tooltip
-  if (!_tooltip) {
-    _tooltip = d3.select(container).append("div")
-      .attr("class", "tree-tooltip")
-      .style("display", "none");
-  }
+  // Remove legacy tooltip if present
+  var oldTip = container.querySelector(".tree-tooltip");
+  if (oldTip) oldTip.remove();
 
   // CSS vars (via shared cssVar from util.js)
   const accent = cssVar("--accent", "#2563eb");
@@ -111,34 +119,74 @@ function renderTree(hierarchyData, callbacks) {
   const contentW = needW + margin.left + margin.right;
   const contentH = needH + margin.top + margin.bottom;
 
-  // SVG fills the container (at minimum), or expands for scrolling if content is larger
-  const svgW = Math.max(width, contentW);
-  const svgH = Math.max(height, contentH);
+  // SVG is always sized to the container — zoom/pan handles navigation
+  const svgW = width;
+  const svgH = height;
+
+  // Preserve zoom/pan state before clearing SVG
+  const svg = d3.select(svgEl);
+  const prev = d3.zoomTransform(svgEl);
+  if (prev.k !== 1 || prev.x !== 0 || prev.y !== 0) {
+    _savedTransform = prev;
+  }
 
   // Clear and draw
-  const svg = d3.select(svgEl);
   svg.selectAll("*").remove();
   svg.attr("viewBox", `0 0 ${svgW} ${svgH}`)
      .attr("width", svgW).attr("height", svgH);
 
-  // Center the tree content within the SVG
-  const offsetX = (svgW - contentW) / 2 + margin.left;
-  const offsetY = (svgH - contentH) / 2 + margin.top;
-
   // Zoom container — wraps all tree content for pinch/scroll zoom
   const zoomG = svg.append("g");
   const g = zoomG.append("g")
-    .attr("transform", `translate(${offsetX},${offsetY})`);
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  // Compute zoom-to-fit transform (used for initial view + double-click reset)
+  const fitScaleX = (svgW - margin.left - margin.right) / contentW;
+  const fitScaleY = (svgH - margin.top - margin.bottom) / contentH;
+  const fitScale = Math.min(fitScaleX, fitScaleY, 1); // never zoom in beyond 1:1
+  const fitTx = (svgW - contentW * fitScale) / 2;
+  const fitTy = (svgH - contentH * fitScale) / 2;
+  const fitTransform = d3.zoomIdentity.translate(fitTx, fitTy).scale(fitScale);
+
+  // Stash for background-dblclick zoom toggle
+  _fitTransform = fitTransform;
+  _treeRoot = root;
+  _treeMargin = margin;
+  _treeSvgW = svgW;
+  _treeSvgH = svgH;
 
   // d3.zoom for pinch-zoom and scroll-zoom on the tree (shared setupZoom from util.js)
+  // Double-click on empty area toggles between zoom-to-fit and zoom-to-selected.
   const zoom = setupZoom({
     container: svg,
     target: zoomG.node(),
     mode: "svg",
-    scaleExtent: [0.3, 4],
-    resetOnDblclick: true,
-    resetTarget: svgEl
+    scaleExtent: [0.05, 4],
+    wheelPan: true,           // two-finger scroll pans; pinch zooms
+    resetOnDblclick: function(zoomObj, curT) {
+      _dblclickZoomToggle(svg, zoomObj, curT);
+    },
+    resetTarget: svgEl,
+    resetTransform: fitTransform
   });
+
+  _zoomInstance = zoom;
+
+  // Restore zoom or pan to selected node (keyboard navigation)
+  if (_focusOnSelected) {
+    const selNode = root.descendants().find(d => d.data.selected);
+    const k = _savedTransform ? _savedTransform.k : fitScale;
+    if (selNode) {
+      const tx = svgW / 2 - (margin.left + selNode.x) * k;
+      const ty = svgH / 2 - (margin.top + selNode.y) * k;
+      svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+    } else {
+      svg.call(zoom.transform, _savedTransform || fitTransform);
+    }
+    _focusOnSelected = false;
+  } else {
+    svg.call(zoom.transform, _savedTransform || fitTransform);
+  }
 
   // Links — curved top-down
   g.selectAll(".conv-link")
@@ -235,6 +283,9 @@ function renderTree(hierarchyData, callbacks) {
     }
   });
 
+  // Raise selected node to top of SVG z-order so it isn't overlaid by siblings
+  node.filter(d => d.data.selected).raise();
+
   // ─── Drag-to-merge ───
   // Dragging a node onto another reparents it (merge/move).
   // Cannot drag root. Cannot drop onto self or descendants.
@@ -264,20 +315,27 @@ function renderTree(hierarchyData, callbacks) {
   }
 
   let _dragTarget = null;
+  let _dragMoved = false;
 
   const dragBehavior = d3.drag()
     .filter(function(event, d) {
+      // Ctrl/meta-click should not start drag — let click handler show context menu
+      if (event.ctrlKey || event.metaKey) return false;
       // Only allow drag on non-root nodes, left button only
       return d.data.id !== "root" && event.button === 0;
     })
     .on("start", function(event, d) {
       _hideContextMenu();
-      _tooltip && _tooltip.style("display", "none");
+      _dragMoved = false;
       _dragState = { sourceNode: d, sourceEl: this };
-      d3.select(this).raise().style("opacity", 0.7);
     })
     .on("drag", function(event, d) {
       if (!_dragState) return;
+      // Only start visual drag after significant movement
+      const dx = event.x - d.x, dy = event.y - d.y;
+      if (!_dragMoved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+      _dragMoved = true;
+      d3.select(this).raise().style("opacity", 0.7);
       // Move the dragged node visually
       d3.select(this).attr("transform", `translate(${event.x},${event.y})`);
 
@@ -303,6 +361,28 @@ function renderTree(hierarchyData, callbacks) {
     })
     .on("end", function(event, d) {
       if (!_dragState) return;
+
+      if (!_dragMoved) {
+        // No movement — detect double-click vs single click (compare by ID
+        // since navigate re-renders the tree, creating new node objects)
+        const now = Date.now();
+        const nodeId = d.data.id;
+        if (_lastClickId === nodeId && (now - _lastClickTime) < 400) {
+          // Double-click: open context menu
+          _lastClickTime = 0;
+          _lastClickId = null;
+          _dragState = null;
+          _dragTarget = null;
+          _triggerContextMenu(event.sourceEvent, d);
+          return;
+        }
+        _lastClickTime = now;
+        _lastClickId = nodeId;
+        _dragState = null;
+        _dragTarget = null;
+        if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
+        return;
+      }
 
       // Reset visual state
       d3.select(this).style("opacity", 1)
@@ -337,34 +417,51 @@ function renderTree(hierarchyData, callbacks) {
       _dragTarget = null;
     });
 
+  // Prevent text selection on tree nodes
+  node.style("user-select", "none");
+
   node.call(dragBehavior);
 
-  // ─── Click: navigate ───
-  // D3 drag consumes mousedown, so we use click for navigation.
-  // We need to distinguish click from drag: only navigate if the mouse didn't move.
-  let _clickTimer = null;
-
+  // ─── Click: navigate + ctrl-click/double-click → context menu ───
+  // For non-root nodes, drag-end is the primary handler (fires before click).
+  // This click handler is a fallback: d3.drag can suppress clicks after
+  // micro-movement, so drag-end is authoritative for non-root. Both paths
+  // may fire; navigateToNode deduplicates by selected-ID check.
   node.on("click", function(event, d) {
     event.preventDefault();
     event.stopPropagation();
     _hideContextMenu();
 
-    // Delay click to let dblclick fire first
-    if (_clickTimer) clearTimeout(_clickTimer);
-    _clickTimer = setTimeout(() => {
-      if (d.data.id === "root") {
-        if (callbacks.onNavigate) callbacks.onNavigate(null);
-      } else {
-        if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
-      }
-    }, 350);
+    // Ctrl-click / meta-click → context menu (any node)
+    if (event.ctrlKey || event.metaKey) {
+      _triggerContextMenu(event, d);
+      return;
+    }
+
+    if (d.data.id !== "root") {
+      // Non-root fallback: drag-end already navigated (navigateToNode deduplicates)
+      if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
+      return;
+    }
+
+    // Root double-click detection (root excluded from drag, so only this handler fires)
+    var now = Date.now();
+    var nodeId = d.data.id;
+    if (_lastClickId === nodeId && (now - _lastClickTime) < 400) {
+      _lastClickTime = 0;
+      _lastClickId = null;
+      _triggerContextMenu(event, d);
+      return;
+    }
+    _lastClickTime = now;
+    _lastClickId = nodeId;
+    if (callbacks.onNavigate) callbacks.onNavigate(null);
   });
 
-  // ─── Double-click / double-tap: context menu ───
+  // Double-click opens context menu (backup for root; non-root handled in drag end)
   node.on("dblclick", function(event, d) {
     event.preventDefault();
     event.stopPropagation();
-    if (_clickTimer) { clearTimeout(_clickTimer); _clickTimer = null; }
     _triggerContextMenu(event, d);
   });
 
@@ -377,7 +474,6 @@ function renderTree(hierarchyData, callbacks) {
     if (isSameNode && (now - _lastTapTime) < 350) {
       // Double-tap detected
       event.preventDefault();
-      if (_clickTimer) { clearTimeout(_clickTimer); _clickTimer = null; }
       // Use touch position for menu placement
       const touch = event.changedTouches && event.changedTouches[0];
       const synth = touch ? { clientX: touch.clientX, clientY: touch.clientY,
@@ -414,42 +510,48 @@ function renderTree(hierarchyData, callbacks) {
     }
   });
 
-  // ─── Hover tooltip (title, short date, node count) ───
-  node.on("mouseenter", function(event, d) {
-    if (_dragState) return; // suppress tooltip during drag
-    if (d.data.id === "root") return;
-    const msgs = d.data.messages || [];
-    const qCount = d.data.questionCount || 0;
-    const rCount = msgs.length - qCount;
-    // Title
-    let tip = d.data.title || "(untitled)";
-    // Short date from first message
-    if (msgs.length > 0 && msgs[0].time) {
-      try {
-        const dt = new Date(msgs[0].time);
-        tip += `\n${dt.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
-      } catch {}
+}
+
+/**
+ * Toggle zoom on background double-click/double-tap.
+ *
+ * If currently zoomed-out (at or near fit scale), zoom in to center the
+ * selected node at a legible magnification (scale ≈ 1.0).
+ * If currently zoomed-in, zoom back out to fit the whole tree.
+ */
+function _dblclickZoomToggle(svg, zoomObj, curT) {
+  if (!_fitTransform || !_treeRoot) return;
+
+  var fitK = _fitTransform.k;
+  // "Near fit" = within 10% of the fit scale
+  var atFit = Math.abs(curT.k - fitK) / fitK < 0.10;
+
+  if (atFit || curT.k <= fitK) {
+    // Zoom IN to the selected node at legible scale
+    var selNode = _treeRoot.descendants().find(function(d) { return d.data.selected; });
+    if (!selNode) {
+      // Fallback: just zoom to fit
+      svg.transition().duration(300).call(zoomObj.transform, _fitTransform);
+      return;
     }
-    // Node count: queries + responses
-    tip += `\n${qCount}Q + ${rCount}R`;
-    _tooltip
-      .style("display", "block")
-      .style("white-space", "pre-wrap")
-      .text(tip)
-      .style("left", (event.offsetX + 14) + "px")
-      .style("top", (event.offsetY - 10) + "px");
-  });
+    // Target scale: 1.0 (1:1 pixels) but at least fitK (don't zoom out)
+    var targetK = Math.max(1.0, fitK);
+    var tx = _treeSvgW / 2 - (_treeMargin.left + selNode.x) * targetK;
+    var ty = _treeSvgH / 2 - (_treeMargin.top + selNode.y) * targetK;
+    var zoomIn = d3.zoomIdentity.translate(tx, ty).scale(targetK);
+    svg.transition().duration(300).call(zoomObj.transform, zoomIn);
+  } else {
+    // Zoom OUT to fit the whole tree
+    svg.transition().duration(300).call(zoomObj.transform, _fitTransform);
+  }
+}
 
-  node.on("mousemove", function(event) {
-    if (_dragState) return;
-    if (_tooltip) _tooltip
-      .style("left", (event.offsetX + 14) + "px")
-      .style("top", (event.offsetY - 10) + "px");
-  });
-
-  node.on("mouseleave", function() {
-    if (_tooltip) _tooltip.style("display", "none");
-  });
+/**
+ * Request that the next renderTree() pans to center the selected node.
+ * Call before navigateToNode() for keyboard-driven navigation.
+ */
+function treeRequestFocus() {
+  _focusOnSelected = true;
 }
 
 // ─── Context menu helpers ───
@@ -460,6 +562,8 @@ function _hideContextMenu() {
     _ctxMenu.remove();
     _ctxMenu = null;
   }
+  // Also dismiss chat-pane context menu if present
+  if (typeof _hideMsgContextMenu === "function") _hideMsgContextMenu();
 }
 
 function _showRootContextMenu(event, callbacks) {
@@ -529,6 +633,17 @@ function _showContextMenu(event, nodeData, callbacks, container) {
   // Prevent the initial event from closing the menu
   menu._justOpened = true;
   setTimeout(() => { menu._justOpened = false; }, 300);
+
+  // Copy all message content in this node to clipboard
+  const copyItem = document.createElement("div");
+  copyItem.className = "ctx-item";
+  copyItem.textContent = "Copy";
+  copyItem.addEventListener("click", function(e) {
+    e.stopPropagation();
+    _hideContextMenu();
+    if (callbacks.onCopy) callbacks.onCopy(nodeData.id);
+  });
+  menu.appendChild(copyItem);
 
   const branchItem = document.createElement("div");
   branchItem.className = "ctx-item";

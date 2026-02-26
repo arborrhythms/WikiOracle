@@ -20,10 +20,15 @@ import json
 import os
 import re
 import tempfile
+import unicodedata
+import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+# Stable UUID-5 namespace for deterministic WikiOracle ID generation.
+WIKIORACLE_UUID_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 SCHEMA_URL = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state.json"
 SCHEMA_BASENAME = "llm_state.json"  # Basename accepted when URL host/path vary.
@@ -92,32 +97,73 @@ def schema_url_matches(value: Any) -> bool:
 # ---------------------------------------------------------------------------
 # XHTML helpers
 # ---------------------------------------------------------------------------
-def canonicalize_xhtml(fragment: Any) -> str:
-    """Normalize user content into safe, minimal XHTML-ish fragments."""
-    if not isinstance(fragment, str) or not fragment.strip():
-        return "<div/>"
-    candidate = fragment.strip()
-    wrapped = f"<root>{candidate}</root>"
-    try:
-        root = ET.fromstring(wrapped)
-        parts = []
-        if root.text:
-            parts.append(root.text)
-        for child in list(root):
-            parts.append(ET.tostring(child, encoding="unicode"))
-        rendered = "".join(parts).strip()
-        if not rendered:
-            return "<div/>"
-        if not list(root) and root.text:
-            return f"<p>{html.escape(root.text)}</p>"
-        return rendered
-    except ET.ParseError:
-        return f"<p>{html.escape(candidate)}</p>"
+
+# Regex for control characters that are invalid in XML 1.0 and problematic in
+# JSON/JavaScript: C0 controls (except HT, LF, CR), DEL, and C1 controls.
+_RE_CONTROL = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
+)
+
+# ChatGPT citation artifacts that survive PUA-stripping, e.g. ". citeturn0search3".
+_RE_CITE_MARKER = re.compile(r"\s*\bciteturn\d+\w*\d*\b", re.IGNORECASE)
+
+
+def sanitize_unicode(text: str) -> str:
+    """Replace or remove problematic Unicode characters for safe XHTML/JSON.
+
+    * U+2028 (Line Separator) and U+2029 (Paragraph Separator) → newline
+    * C0 controls (except tab/LF/CR), DEL, C1 controls → removed
+    * U+FEFF (BOM / zero-width no-break space) → removed
+    * Normalize to NFC for consistent representation
+    """
+    if not isinstance(text, str):
+        return text
+    text = text.replace("\u2028", "\n").replace("\u2029", "\n")
+    text = text.replace("\ufeff", "")
+    text = _RE_CONTROL.sub("", text)
+    text = _RE_CITE_MARKER.sub("", text)
+    text = unicodedata.normalize("NFC", text)
+    return text
+
+
+def _escape_plain_text(text: str) -> str:
+    """Wrap plain text in a <p> element with proper HTML escaping."""
+    return f"<p>{html.escape(text)}</p>"
+
+
+def _canonicalize_xml_fragment(fragment: str) -> str:
+    """Parse an XHTML fragment and return C14N-canonicalized inner content.
+
+    Uses ET.canonicalize (C14N 2.0) for proper XML normalization.
+    Raises ET.ParseError if fragment is not well-formed XML.
+    """
+    wrapped = f"<root>{fragment}</root>"
+    canonical = ET.canonicalize(wrapped)
+    inner = canonical.removeprefix("<root>").removesuffix("</root>").strip()
+    return inner
+
+
+def _is_plain_text(fragment: str) -> bool:
+    """Check whether a fragment parsed as XML is just text (no child elements)."""
+    root = ET.fromstring(f"<root>{fragment}</root>")
+    return not list(root) and bool(root.text)
 
 
 def ensure_xhtml(fragment: Any) -> str:
-    """Public wrapper for canonicalize_xhtml for call-site readability."""
-    return canonicalize_xhtml(fragment)
+    """Normalize user content into safe, minimal XHTML fragments.
+
+    Pipeline: sanitize_unicode → parse as XML → canonicalize, or escape as
+    plain text.  Plain text (no markup) is wrapped in ``<p>`` with escaping.
+    """
+    if not isinstance(fragment, str) or not fragment.strip():
+        return "<div/>"
+    cleaned = sanitize_unicode(fragment).strip()
+    try:
+        if _is_plain_text(cleaned):
+            return _escape_plain_text(cleaned)
+        return _canonicalize_xml_fragment(cleaned) or "<div/>"
+    except ET.ParseError:
+        return _escape_plain_text(cleaned)
 
 
 def strip_xhtml(content: str) -> str:
@@ -137,7 +183,7 @@ def _message_fingerprint(message: dict) -> str:
     """Build a stable hash input for message identity derivation."""
     username = str(message.get("username", "")).strip()
     timestamp = str(message.get("time", "")).strip()
-    content = canonicalize_xhtml(message.get("content", ""))
+    content = ensure_xhtml(message.get("content", ""))
     return _stable_sha256(f"{username}|{timestamp}|{content}")
 
 
@@ -146,22 +192,22 @@ def _trust_fingerprint(entry: dict) -> str:
     title = str(entry.get("title", "")).strip()
     timestamp = str(entry.get("time", "")).strip()
     certainty = str(entry.get("certainty", "")).strip()
-    content = canonicalize_xhtml(entry.get("content", ""))
+    content = ensure_xhtml(entry.get("content", ""))
     return _stable_sha256(f"{title}|{timestamp}|{certainty}|{content}")
 
 
 def ensure_message_id(message: dict) -> str:
-    """Ensure a message has an ID, deriving one deterministically if missing."""
+    """Ensure a message has an ID, deriving a deterministic UUID if missing."""
     msg_id = str(message.get("id", "")).strip()
     if msg_id:
         return msg_id
-    msg_id = "m_" + _message_fingerprint(message)[:16]
+    msg_id = str(uuid.uuid5(WIKIORACLE_UUID_NS, _message_fingerprint(message)))
     message["id"] = msg_id
     return msg_id
 
 
 def ensure_conversation_id(conv: dict) -> str:
-    """Ensure a conversation has an ID, deriving one from title/first message."""
+    """Ensure a conversation has an ID, deriving a deterministic UUID from title/first message."""
     cid = str(conv.get("id", "")).strip()
     if cid:
         return cid
@@ -171,33 +217,33 @@ def ensure_conversation_id(conv: dict) -> str:
     seed = title
     if msgs:
         seed += "|" + str(msgs[0].get("id", "")) + "|" + str(msgs[0].get("time", ""))
-    cid = "c_" + _stable_sha256(seed)[:16]
+    cid = str(uuid.uuid5(WIKIORACLE_UUID_NS, seed))
     conv["id"] = cid
     return cid
 
 
 def ensure_trust_id(entry: dict) -> str:
-    """Ensure a trust entry has an ID, deriving one deterministically if missing."""
+    """Ensure a trust entry has an ID, deriving a deterministic UUID if missing."""
     trust_id = str(entry.get("id", "")).strip()
     if trust_id:
         return trust_id
-    trust_id = "t_" + _trust_fingerprint(entry)[:16]
+    trust_id = str(uuid.uuid5(WIKIORACLE_UUID_NS, _trust_fingerprint(entry)))
     entry["id"] = trust_id
     return trust_id
 
 
 def _implication_fingerprint(entry: dict) -> str:
     """Build a stable hash input for implication identity derivation."""
-    content = canonicalize_xhtml(entry.get("content", ""))
+    content = ensure_xhtml(entry.get("content", ""))
     return _stable_sha256(f"implication|{content}")
 
 
 def ensure_implication_id(entry: dict) -> str:
-    """Ensure an implication entry has an ID, deriving one deterministically if missing."""
+    """Ensure an implication entry has an ID, deriving a deterministic UUID if missing."""
     iid = str(entry.get("id", "")).strip()
     if iid:
         return iid
-    iid = "i_" + _implication_fingerprint(entry)[:16]
+    iid = str(uuid.uuid5(WIKIORACLE_UUID_NS, _implication_fingerprint(entry)))
     entry["id"] = iid
     return iid
 
@@ -957,38 +1003,30 @@ def compute_derived_truth(trust_entries: list) -> dict:
     if not implications:
         return certainty
 
+    # Only entries that start at 0.0 (ignorance) are derivable.
+    # Entries with explicit positive or negative certainty are ground truth
+    # and should not be overridden by implication chains.
+    derivable = {eid for eid, c in certainty.items() if c == 0.0}
+
     # Fixed-point iteration
     for _ in range(100):
         changed = False
         for impl in implications:
             ant_id = impl["antecedent"]
             con_id = impl["consequent"]
+            if con_id not in derivable:
+                continue  # Don't override explicit certainty
             ant_c = certainty.get(ant_id, 0.0)
             con_c = certainty.get(con_id, 0.0)
 
-            # Strong Kleene material implication: max(-ant, con)
-            # This gives the "truth value" of the implication itself.
-            # If the implication is true (>0), it supports the consequent.
-            # We propagate: new_con = max(con, min(ant, implication_value))
-            # This means: the consequent gets at least as certain as
-            # the weakest link in the chain (antecedent certainty).
-            impl_value = max(-ant_c, con_c)
-
-            # The consequent's derived certainty is strengthened by
-            # the antecedent's certainty, but only if the antecedent
-            # is positive (believing A supports believing B).
+            # Modus ponens: if antecedent is believed (positive), the
+            # consequent's derived certainty is raised to match.
+            # Only applies to derivable entries (initial certainty 0.0).
             if ant_c > 0 and con_id in certainty:
-                # Modus ponens: if A is believed, B should be at least
-                # as certain as the antecedent (capped at antecedent certainty)
                 new_con = max(con_c, ant_c)
                 if abs(new_con - con_c) > 1e-9:
                     certainty[con_id] = new_con
                     changed = True
-            elif ant_c < 0:
-                # Antecedent is disbelieved — implication is vacuously true,
-                # does not modify consequent (Kleene: max(-(-1), B) = max(1,B) = 1)
-                pass
-            # ant_c == 0: unknown antecedent — no propagation (conservative)
 
         if not changed:
             break

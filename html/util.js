@@ -1,6 +1,13 @@
 // util.js — Shared utilities for WikiOracle front-end
 // Loaded before d3tree.js and wikioracle.js.
 
+// ─── Debug tap tracing ───
+// Enable from console: _tapDebug = true;   or add ?tapDebug to URL
+var _tapDebug = /[?&]tapDebug\b/.test(location.search);
+function _tapLog() {
+  if (_tapDebug) console.log.apply(console, ["[tap]"].concat(Array.prototype.slice.call(arguments)));
+}
+
 // ─── CSS variable helper ───
 
 function cssVar(name, fallback) {
@@ -68,13 +75,51 @@ function countTreeMessages(node) {
 }
 
 // ─── Double-tap detection (mobile) ───
+//
+// onDoubleTap(element, callback)                       — simplest form
+// onDoubleTap(element, callback, opts)                 — with options
+//
+// Options (all optional):
+//   threshold  — max ms between taps (default 400)
+//   state      — external object { time, key } that persists across DOM
+//                re-creates (e.g. module-level variable).  When omitted a
+//                closure-local object is used.
+//   key        — function(event) → string.  When supplied, the second tap
+//                must return the same key as the first (useful when the
+//                DOM element is destroyed and recreated between taps).
+//   onFire     — function() called synchronously when a double-tap fires,
+//                before the callback.  Use for side-effects like setting a
+//                "suppress the next click" flag.
+//   namespace  — d3-style event namespace suffix, e.g. "doubletap".
+//                When set the handler is registered via d3's selection.on()
+//                as "touchend.<namespace>" instead of addEventListener.
+//   target     — for background-tap filtering: if set, the handler bails
+//                out when event.target !== target.
 
-function onDoubleTap(element, callback, threshold) {
-  if (!threshold) threshold = 350;
-  var lastTap = 0;
-  element.addEventListener("touchend", function(e) {
+function onDoubleTap(element, callback, opts) {
+  // Legacy 3rd-arg-is-threshold support (wikioracle.js call site)
+  if (typeof opts === "number") opts = { threshold: opts };
+  opts = opts || {};
+
+  var threshold = opts.threshold || 400;
+  var st = opts.state || { time: 0, key: null };
+  var keyFn = opts.key || null;
+  var onFire = opts.onFire || null;
+  var target = opts.target || null;
+
+  var ns = opts.namespace || "anon";
+
+  function handler(e) {
+    if (target && e.target !== target) {
+      _tapLog(ns, "skip: target mismatch", e.target.tagName, e.target.className);
+      return;
+    }
     var now = Date.now();
-    if (now - lastTap < threshold) {
+    var k = keyFn ? keyFn(e) : "_";
+    var dt = now - st.time;
+    if (st.key === k && dt < threshold) {
+      _tapLog(ns, "DOUBLE-TAP key=" + k, "dt=" + dt + "ms");
+      if (onFire) onFire();
       e.preventDefault();
       var touch = e.changedTouches && e.changedTouches[0];
       var synth = touch
@@ -84,11 +129,23 @@ function onDoubleTap(element, callback, threshold) {
             preventDefault: function() {}, stopPropagation: function() {} }
         : e;
       callback(synth, e);
-      lastTap = 0;
+      st.time = 0;
+      st.key = null;
     } else {
-      lastTap = now;
+      _tapLog(ns, "first-tap key=" + k, st.key !== k ? "(key changed from " + st.key + ")" : "(dt=" + dt + "ms, expired)");
+      st.time = now;
+      st.key = k;
     }
-  });
+  }
+
+  if (opts.namespace) {
+    // d3 selection — element is a d3 selection
+    element.on("touchend." + opts.namespace, handler);
+  } else {
+    // Plain DOM element
+    (element.node ? element.node() : element)
+      .addEventListener("touchend", handler);
+  }
 }
 
 // ─── Zoom utility (d3.zoom wrapper) ───
@@ -150,8 +207,41 @@ function setupZoom(opts) {
     }
   });
 
-  opts.container.call(zoom)
-    .on("dblclick.zoom", null); // disable d3's default double-click zoom
+  opts.container.call(zoom);
+
+  // Replace d3's default dblclick.zoom (which zooms in) with our handler.
+  // d3.zoom internally detects double-tap on mobile (via g.taps) and
+  // programmatically calls the dblclick.zoom handler — so this single
+  // handler covers BOTH desktop double-click AND mobile double-tap.
+  // (The previous approach — .on("dblclick.zoom", null) + separate
+  // touchend.resetzoom — failed because d3.zoom's touchended calls
+  // stopImmediatePropagation(), blocking any later touchend handlers.)
+  if (resetOn) {
+    var resetTo = opts.resetTransform || d3.zoomIdentity;
+    var isCallback = typeof opts.resetOnDblclick === "function";
+
+    function _handleBgDblclick() {
+      _tapLog("bg", "zoom toggle fired");
+      if (isCallback) {
+        var curT = d3.zoomTransform(opts.container.node());
+        opts.resetOnDblclick(zoom, curT);
+      } else {
+        opts.container.transition().duration(300)
+          .call(zoom.transform, resetTo);
+      }
+    }
+
+    opts.container.on("dblclick.zoom", function(event) {
+      _tapLog("bg-dblclick.zoom", "target=" + event.target.tagName +
+        (event.target.className ? "." + event.target.className : ""),
+        "match=" + (event.target === resetTarget));
+      if (event.target === resetTarget) {
+        _handleBgDblclick();
+      }
+    });
+  } else {
+    opts.container.on("dblclick.zoom", null);
+  }
 
   // wheelPan: intercept non-ctrl wheel events and translate instead of zoom
   if (opts.wheelPan) {
@@ -163,41 +253,6 @@ function setupZoom(opts) {
         .translate(t.x - event.deltaX, t.y - event.deltaY)
         .scale(t.k);
       opts.container.call(zoom.transform, newT);
-    });
-  }
-
-  if (resetOn) {
-    var resetTo = opts.resetTransform || d3.zoomIdentity;
-    var isCallback = typeof opts.resetOnDblclick === "function";
-
-    function _handleBgDblclick() {
-      if (isCallback) {
-        var curT = d3.zoomTransform(opts.container.node());
-        opts.resetOnDblclick(zoom, curT);
-      } else {
-        opts.container.transition().duration(300)
-          .call(zoom.transform, resetTo);
-      }
-    }
-
-    // Desktop: double-click on empty area
-    opts.container.on("dblclick", function(event) {
-      if (event.target === resetTarget) {
-        _handleBgDblclick();
-      }
-    });
-    // Mobile: double-tap on empty area
-    var bgLastTap = 0;
-    opts.container.on("touchend.resetzoom", function(event) {
-      if (event.target !== resetTarget) return;
-      var now = Date.now();
-      if (now - bgLastTap < 350) {
-        event.preventDefault();
-        _handleBgDblclick();
-        bgLastTap = 0;
-      } else {
-        bgLastTap = now;
-      }
     });
   }
 

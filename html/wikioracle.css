@@ -79,6 +79,16 @@ body { display: flex; flex-direction: column; touch-action: manipulation; /* dis
 .header-btn { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg-muted); cursor: pointer; padding: 0.4rem 0.7rem; font-size: 0.8rem; transition: all 0.15s; }
 .header-btn:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 
+/* Progress bar — thin strip below header */
+.progress-bar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 9999; background: transparent; pointer-events: none; overflow: hidden; }
+.progress-bar .progress-fill { height: 100%; background: var(--accent); transition: width 0.15s ease; width: 0; }
+.progress-bar.indeterminate .progress-fill { width: 30%; animation: progress-slide 1.2s ease-in-out infinite; }
+@keyframes progress-slide {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(200%); }
+  100% { transform: translateX(400%); }
+}
+
 /* Settings panel (overlay class shared with context-overlay) */
 .settings-panel { background: var(--bg); border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px var(--shadow-color); }
 .settings-panel h2 { font-size: 1.1rem; margin-bottom: 0; }
@@ -97,7 +107,7 @@ body { display: flex; flex-direction: column; touch-action: manipulation; /* dis
 .btn:hover { background: var(--accent-light); }
 
 /* Tree view (top-down hierarchy) */
-.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 220px; min-height: 0; overflow: hidden; }
+.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 40%; min-height: 0; overflow: hidden; }
 .tree-container.tree-collapsed { border-bottom: none; overflow: hidden; }
 .tree-container svg { display: block; min-width: 100%; min-height: 100%; }
 
@@ -105,6 +115,26 @@ body { display: flex; flex-direction: column; touch-action: manipulation; /* dis
 .chat-container { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .chat-wrapper { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
 .chat-placeholder { color: var(--fg-muted); font-size: 0.9rem; text-align: center; padding: 3rem 1rem; }
+
+/* ── Root summary dashboard ── */
+.root-summary { padding: 2rem 1rem; text-align: center; max-width: 420px; margin: 0 auto; }
+.root-summary-title { font-size: 1.3rem; font-weight: 700; margin: 0 0 0.2rem; color: var(--fg); }
+.root-summary-subtitle { font-size: 0.82rem; color: var(--fg-muted); margin: 0 0 1.4rem; }
+
+.root-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-bottom: 1.4rem; }
+.root-stat { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.3rem; }
+.root-stat-value { display: block; font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+.root-stat-label { display: block; font-size: 0.7rem; color: var(--fg-muted); margin-top: 0.15rem; }
+
+.root-summary-meta { font-size: 0.78rem; color: var(--fg-muted); margin-bottom: 1.2rem; display: flex; flex-direction: column; gap: 0.2rem; }
+
+.root-summary-section { text-align: left; margin-bottom: 1rem; padding: 0.6rem 0.8rem; background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; }
+.root-summary-section h3 { font-size: 0.78rem; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.3rem; }
+.root-summary-section p { font-size: 0.82rem; color: var(--fg); margin: 0; line-height: 1.45; }
+.root-summary-context { white-space: pre-line; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+
+.root-summary-hint { font-size: 0.82rem; color: var(--fg-muted); margin-top: 1.4rem; }
+
 .message { display: flex; flex-direction: column; margin-bottom: 0.25rem; position: relative; }
 .msg-meta { font-size: 0.75rem; color: var(--fg-muted); margin-bottom: 0.15rem; padding: 0 0.25rem; }
 .msg-bubble { padding: 0.7rem 1rem; border-radius: 12px; max-width: 85%; line-height: 1.5; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
@@ -115,9 +145,6 @@ body { display: flex; flex-direction: column; touch-action: manipulation; /* dis
 .msg-bubble { cursor: pointer; }
 .msg-bubble.msg-selected { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-/* Message drag reorder */
-.message.msg-dragging { opacity: 0.4; }
-.message.msg-dragover { border-top: 2px solid var(--accent); }
 
 /* Conversation navigation in chat pane */
 .conv-parent-nav { padding: 0.4rem 0; margin-bottom: 0.3rem; border-bottom: 1px solid var(--border); }

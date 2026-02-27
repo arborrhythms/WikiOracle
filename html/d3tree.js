@@ -1,7 +1,7 @@
 // d3tree.js — D3.js top-down branching hierarchy for WikiOracle
 // State IS the tree (conversations with children).
-// Supports: click (navigate), double-click/double-tap (context menu), right-click,
-//           drag-and-drop (merge: reparent dragged node under drop target).
+// Supports: click (navigate), double-click/double-tap (context menu), right-click.
+// Tree operations (cut/copy/paste, branch, delete) via context menu.
 //
 // Data flow:
 //   conversationsToHierarchy(conversations, selectedId) -> D3 hierarchy data
@@ -9,7 +9,7 @@
 //
 // Layout: d3.tree(), top-down (root at top). Separation 1.2x siblings, 1.8x cousins.
 // Colours from CSS custom properties: --accent, --accent-light, --border, --fg,
-//   --fg-muted, --bg. Merge target highlight: amber #f59e0b.
+//   --fg-muted, --bg.
 //
 // Node shapes:
 //   Root       -> circle r=14
@@ -17,17 +17,15 @@
 //   Default    -> pill (fully rounded rect), single-line truncated title
 //
 // Interactions:
-//   Click (200ms timer) -> callbacks.onNavigate(id)
-//   Double-click (cancels click timer) -> context menu (Branch, Delete)
-//   Right-click -> same context menu
-//   Drag (left button, non-root) -> highlight nearest valid target within 30px
-//   Drop (excludes self + descendants) -> confirm -> callbacks.onMerge(src, tgt)
-//   Hover (suppressed during drag) -> tooltip: title, date, Q+R count
+//   Click -> callbacks.onNavigate(id)
+//   Double-click / double-tap / right-click -> context menu (Cut, Copy, Paste, Branch, Delete)
+//   Ctrl/meta-click -> context menu
 
 // Internal state
-let _dragState = null; // { sourceNode, sourceEl } while dragging
-let _lastClickTime = 0; // for double-click detection (persists across re-renders)
-let _lastClickId = null;
+let _doubleTapHandled = false; // suppresses click after double-tap fires context menu
+// Shared state object for onDoubleTap — persists across re-renders so a
+// navigate-triggered re-render between the two taps doesn't reset the timer.
+const _tapState = { time: 0, key: null };
 let _savedTransform = null; // persists zoom/pan across re-renders
 let _focusOnSelected = false; // when true, next render pans to selected node
 
@@ -72,8 +70,7 @@ function conversationsToHierarchy(conversations, selectedId) {
 /**
  * Render the conversation tree as a top-down branching hierarchy.
  * @param {object} hierarchyData — output of conversationsToHierarchy
- * @param {{ onNavigate, onBranch, onDelete, onMerge }} callbacks
- *   onMerge(sourceId, targetId) — move sourceId to become a child of targetId
+ * @param {{ onNavigate, onBranch, onDelete, onCut, onCopy, onPaste }} callbacks
  */
 function renderTree(hierarchyData, callbacks) {
   const container = document.getElementById("treeContainer");
@@ -97,7 +94,6 @@ function renderTree(hierarchyData, callbacks) {
   const fg = cssVar("--fg", "#111827");
   const fgMuted = cssVar("--fg-muted", "#6b7280");
   const bg = cssVar("--bg", "#ffffff");
-  const mergeHighlight = "#f59e0b"; // amber for merge target
 
   // Build hierarchy
   const root = d3.hierarchy(hierarchyData);
@@ -135,6 +131,16 @@ function renderTree(hierarchyData, callbacks) {
   svg.attr("viewBox", `0 0 ${svgW} ${svgH}`)
      .attr("width", svgW).attr("height", svgH);
 
+  // Invisible background rect — guarantees a pointer-event target for taps on
+  // empty space.  Without this, mobile touch hit-testing on an unfilled <svg>
+  // may return a child <g> (or nothing), so the double-tap zoom toggle never
+  // matches resetTarget.  Painted before zoomG so nodes draw on top.
+  const bgRect = svg.append("rect")
+    .attr("width", svgW).attr("height", svgH)
+    .attr("fill", "transparent")
+    .attr("pointer-events", "all")
+    .node();
+
   // Zoom container — wraps all tree content for pinch/scroll zoom
   const zoomG = svg.append("g");
   const g = zoomG.append("g")
@@ -166,7 +172,7 @@ function renderTree(hierarchyData, callbacks) {
     resetOnDblclick: function(zoomObj, curT) {
       _dblclickZoomToggle(svg, zoomObj, curT);
     },
-    resetTarget: svgEl,
+    resetTarget: bgRect,
     resetTransform: fitTransform
   });
 
@@ -286,148 +292,16 @@ function renderTree(hierarchyData, callbacks) {
   // Raise selected node to top of SVG z-order so it isn't overlaid by siblings
   node.filter(d => d.data.selected).raise();
 
-  // ─── Drag-to-merge ───
-  // Dragging a node onto another reparents it (merge/move).
-  // Cannot drag root. Cannot drop onto self or descendants.
-  const allNodes = root.descendants();
-
-  function _isDescendantOf(potentialDescendant, potentialAncestor) {
-    // Walk up from potentialDescendant to see if we hit potentialAncestor
-    let cur = potentialDescendant;
-    while (cur) {
-      if (cur === potentialAncestor) return true;
-      cur = cur.parent;
-    }
-    return false;
-  }
-
-  function _findNodeAt(px, py, excludeNode) {
-    // Find the closest node to (px, py) within hit radius, excluding the dragged node + its subtree
-    let best = null, bestDist = 30; // 30px hit radius
-    for (const n of allNodes) {
-      if (n === excludeNode) continue;
-      if (_isDescendantOf(n, excludeNode)) continue;
-      const dx = n.x - px, dy = n.y - py;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < bestDist) { best = n; bestDist = dist; }
-    }
-    return best;
-  }
-
-  let _dragTarget = null;
-  let _dragMoved = false;
-
-  const dragBehavior = d3.drag()
-    .filter(function(event, d) {
-      // Ctrl/meta-click should not start drag — let click handler show context menu
-      if (event.ctrlKey || event.metaKey) return false;
-      // Only allow drag on non-root nodes, left button only
-      return d.data.id !== "root" && event.button === 0;
-    })
-    .on("start", function(event, d) {
-      _hideContextMenu();
-      _dragMoved = false;
-      _dragState = { sourceNode: d, sourceEl: this };
-    })
-    .on("drag", function(event, d) {
-      if (!_dragState) return;
-      // Only start visual drag after significant movement
-      const dx = event.x - d.x, dy = event.y - d.y;
-      if (!_dragMoved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
-      _dragMoved = true;
-      d3.select(this).raise().style("opacity", 0.7);
-      // Move the dragged node visually
-      d3.select(this).attr("transform", `translate(${event.x},${event.y})`);
-
-      // Highlight potential drop target
-      const target = _findNodeAt(event.x, event.y, d);
-      if (target !== _dragTarget) {
-        // Unhighlight previous
-        if (_dragTarget) {
-          g.selectAll(".conv-node").filter(n => n === _dragTarget)
-            .select(".node-shape")
-            .attr("stroke", n => n.data.selected ? accent : (n.data.id === "root" ? (n.data.selected ? accent : border) : border))
-            .attr("stroke-width", n => n.data.selected || n.data.id === "root" ? 2 : 1);
-        }
-        _dragTarget = target;
-        // Highlight new
-        if (_dragTarget) {
-          g.selectAll(".conv-node").filter(n => n === _dragTarget)
-            .select(".node-shape")
-            .attr("stroke", mergeHighlight)
-            .attr("stroke-width", 3);
-        }
-      }
-    })
-    .on("end", function(event, d) {
-      if (!_dragState) return;
-
-      if (!_dragMoved) {
-        // No movement — detect double-click vs single click (compare by ID
-        // since navigate re-renders the tree, creating new node objects)
-        const now = Date.now();
-        const nodeId = d.data.id;
-        if (_lastClickId === nodeId && (now - _lastClickTime) < 400) {
-          // Double-click: open context menu
-          _lastClickTime = 0;
-          _lastClickId = null;
-          _dragState = null;
-          _dragTarget = null;
-          _triggerContextMenu(event.sourceEvent, d);
-          return;
-        }
-        _lastClickTime = now;
-        _lastClickId = nodeId;
-        _dragState = null;
-        _dragTarget = null;
-        if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
-        return;
-      }
-
-      // Reset visual state
-      d3.select(this).style("opacity", 1)
-        .attr("transform", `translate(${d.x},${d.y})`);
-
-      if (_dragTarget) {
-        // Unhighlight
-        g.selectAll(".conv-node").filter(n => n === _dragTarget)
-          .select(".node-shape")
-          .attr("stroke", n => n.data.selected ? accent : border)
-          .attr("stroke-width", n => n.data.selected ? 2 : 1);
-
-        const sourceId = d.data.id;
-        const targetId = _dragTarget.data.id;
-
-        // Confirm merge
-        if (sourceId !== targetId) {
-          if (targetId === "root") {
-            // Can't merge into root
-          } else {
-            const srcCount = (d.data.messages || []).length;
-            const tgtCount = (_dragTarget.data.messages || []).length;
-            const targetLabel = _dragTarget.data.title;
-            if ((typeof confirmAction === "function" ? confirmAction : confirm)(`Merge "${d.data.title}" (${srcCount} msgs) into "${targetLabel}" (${tgtCount} msgs)?\nMessages will be combined into one conversation.`)) {
-              if (callbacks.onMerge) callbacks.onMerge(sourceId, targetId);
-            }
-          }
-        }
-      }
-
-      _dragState = null;
-      _dragTarget = null;
-    });
-
-  // Prevent text selection on tree nodes
-  node.style("user-select", "none");
-
-  node.call(dragBehavior);
-
-  // ─── Click: navigate + ctrl-click/double-click → context menu ───
-  // For non-root nodes, drag-end is the primary handler (fires before click).
-  // This click handler is a fallback: d3.drag can suppress clicks after
-  // micro-movement, so drag-end is authoritative for non-root. Both paths
-  // may fire; navigateToNode deduplicates by selected-ID check.
+  // ─── Click: navigate; ctrl-click → context menu ───
   node.on("click", function(event, d) {
+    // If touchend.doubletap just opened a context menu, don't let this click close it.
+    if (_doubleTapHandled) {
+      _tapLog("node-click", "SUPPRESSED (doubleTapHandled) id=" + d.data.id);
+      _doubleTapHandled = false;
+      event.stopPropagation();
+      return;
+    }
+    _tapLog("node-click", "id=" + d.data.id, event.type);
     event.preventDefault();
     event.stopPropagation();
     _hideContextMenu();
@@ -438,54 +312,36 @@ function renderTree(hierarchyData, callbacks) {
       return;
     }
 
-    if (d.data.id !== "root") {
-      // Non-root fallback: drag-end already navigated (navigateToNode deduplicates)
-      if (callbacks.onNavigate) callbacks.onNavigate(d.data.id);
-      return;
-    }
-
-    // Root double-click detection (root excluded from drag, so only this handler fires)
-    var now = Date.now();
-    var nodeId = d.data.id;
-    if (_lastClickId === nodeId && (now - _lastClickTime) < 400) {
-      _lastClickTime = 0;
-      _lastClickId = null;
-      _triggerContextMenu(event, d);
-      return;
-    }
-    _lastClickTime = now;
-    _lastClickId = nodeId;
-    if (callbacks.onNavigate) callbacks.onNavigate(null);
+    // Navigate (root → null, else → node id)
+    if (callbacks.onNavigate) callbacks.onNavigate(d.data.id === "root" ? null : d.data.id);
   });
 
-  // Double-click opens context menu (backup for root; non-root handled in drag end)
+  // Double-click opens context menu
   node.on("dblclick", function(event, d) {
     event.preventDefault();
     event.stopPropagation();
     _triggerContextMenu(event, d);
   });
 
-  // Touch double-tap detection (dblclick doesn't fire on most mobile browsers)
-  let _lastTapTime = 0;
-  let _lastTapTarget = null;
-  node.on("touchend.doubletap", function(event, d) {
-    const now = Date.now();
-    const isSameNode = (_lastTapTarget === d);
-    if (isSameNode && (now - _lastTapTime) < 350) {
-      // Double-tap detected
-      event.preventDefault();
-      // Use touch position for menu placement
-      const touch = event.changedTouches && event.changedTouches[0];
-      const synth = touch ? { clientX: touch.clientX, clientY: touch.clientY,
-                              pageX: touch.pageX, pageY: touch.pageY,
-                              preventDefault: () => {}, stopPropagation: () => {} } : event;
-      _triggerContextMenu(synth, d);
-      _lastTapTime = 0;
-      _lastTapTarget = null;
-    } else {
-      _lastTapTime = now;
-      _lastTapTarget = d;
-    }
+  // Touch double-tap detection (dblclick doesn't fire on most mobile browsers).
+  // Uses module-level _tapState so the timer survives navigate-triggered re-renders.
+  // onFire sets _doubleTapHandled so the subsequent click event bails out instead
+  // of calling _hideContextMenu() and closing the menu we're about to open
+  // (on desktop the native dblclick re-opens it; on mobile there's no dblclick).
+  onDoubleTap(node, function(synth, raw) {
+    // d3 binds datum to `this` inside .on(); for onDoubleTap with namespace
+    // the handler runs via selection.on() so `this` is the DOM node.
+    // Recover the d3 datum to pass to _triggerContextMenu.
+    var d = d3.select(raw.currentTarget || raw.target).datum();
+    _triggerContextMenu(synth, d);
+  }, {
+    namespace: "doubletap",
+    state: _tapState,
+    key: function(e) {
+      var d = d3.select(e.currentTarget || e.target).datum();
+      return d && d.data ? d.data.id : "";
+    },
+    onFire: function() { _doubleTapHandled = true; }
   });
 
   function _triggerContextMenu(event, d) {
@@ -506,7 +362,10 @@ function renderTree(hierarchyData, callbacks) {
   // Close context menu when clicking outside of it (with grace period)
   d3.select(document).on("click.tree-ctx", function(event) {
     if (_ctxMenu && !_ctxMenu.contains(event.target) && !_ctxMenu._justOpened) {
+      _tapLog("doc-click", "closing menu (target=" + event.target.tagName + ")");
       _hideContextMenu();
+    } else if (_ctxMenu) {
+      _tapLog("doc-click", "menu kept (contains=" + _ctxMenu.contains(event.target) + " justOpened=" + _ctxMenu._justOpened + ")");
     }
   });
 
@@ -569,45 +428,58 @@ function _hideContextMenu() {
 function _showRootContextMenu(event, callbacks) {
   _hideContextMenu();
 
-  const menu = document.createElement("div");
+  var menu = document.createElement("div");
   menu.className = "tree-context-menu";
   menu.style.position = "fixed";
   menu.style.left = (event.clientX + 4) + "px";
   menu.style.top = (event.clientY + 4) + "px";
 
   menu._justOpened = true;
-  setTimeout(() => { menu._justOpened = false; }, 300);
+  setTimeout(function() { menu._justOpened = false; }, 300);
 
-  const ctxItem = document.createElement("div");
+  // Paste at root level (only if clipboard holds a conversation)
+  if (callbacks.hasClipboard && callbacks.hasClipboard()) {
+    var pasteItem = document.createElement("div");
+    pasteItem.className = "ctx-item";
+    pasteItem.textContent = "Paste";
+    pasteItem.addEventListener("click", function(e) {
+      e.stopPropagation(); _hideContextMenu();
+      if (callbacks.onPaste) callbacks.onPaste("root");
+    });
+    menu.appendChild(pasteItem);
+
+    var sep0 = document.createElement("div");
+    sep0.className = "ctx-sep";
+    menu.appendChild(sep0);
+  }
+
+  var ctxItem = document.createElement("div");
   ctxItem.className = "ctx-item";
   ctxItem.textContent = "Context\u2026";
   ctxItem.addEventListener("click", function(e) {
-    e.stopPropagation();
-    _hideContextMenu();
+    e.stopPropagation(); _hideContextMenu();
     if (callbacks.onEditContext) callbacks.onEditContext();
   });
   menu.appendChild(ctxItem);
 
-  const truthItem = document.createElement("div");
+  var truthItem = document.createElement("div");
   truthItem.className = "ctx-item";
   truthItem.textContent = "Trust\u2026";
   truthItem.addEventListener("click", function(e) {
-    e.stopPropagation();
-    _hideContextMenu();
+    e.stopPropagation(); _hideContextMenu();
     if (callbacks.onEditTruth) callbacks.onEditTruth();
   });
   menu.appendChild(truthItem);
 
-  const sep = document.createElement("div");
+  var sep = document.createElement("div");
   sep.className = "ctx-sep";
   menu.appendChild(sep);
 
-  const deleteAllItem = document.createElement("div");
+  var deleteAllItem = document.createElement("div");
   deleteAllItem.className = "ctx-item ctx-danger";
   deleteAllItem.textContent = "Delete All";
   deleteAllItem.addEventListener("click", function(e) {
-    e.stopPropagation();
-    _hideContextMenu();
+    e.stopPropagation(); _hideContextMenu();
     if (callbacks.onDeleteAll) callbacks.onDeleteAll();
   });
   menu.appendChild(deleteAllItem);
@@ -624,7 +496,7 @@ function _showRootContextMenu(event, callbacks) {
 function _showContextMenu(event, nodeData, callbacks, container) {
   _hideContextMenu();
 
-  const menu = document.createElement("div");
+  var menu = document.createElement("div");
   menu.className = "tree-context-menu";
   menu.style.position = "fixed";
   menu.style.left = (event.clientX + 4) + "px";
@@ -632,42 +504,63 @@ function _showContextMenu(event, nodeData, callbacks, container) {
 
   // Prevent the initial event from closing the menu
   menu._justOpened = true;
-  setTimeout(() => { menu._justOpened = false; }, 300);
+  setTimeout(function() { menu._justOpened = false; }, 300);
 
-  // Copy all message content in this node to clipboard
-  const copyItem = document.createElement("div");
+  // Cut
+  var cutItem = document.createElement("div");
+  cutItem.className = "ctx-item";
+  cutItem.textContent = "Cut";
+  cutItem.addEventListener("click", function(e) {
+    e.stopPropagation(); _hideContextMenu();
+    if (callbacks.onCut) callbacks.onCut(nodeData.id);
+  });
+  menu.appendChild(cutItem);
+
+  // Copy (copies text + sets clipboard for paste-to-duplicate)
+  var copyItem = document.createElement("div");
   copyItem.className = "ctx-item";
   copyItem.textContent = "Copy";
   copyItem.addEventListener("click", function(e) {
-    e.stopPropagation();
-    _hideContextMenu();
+    e.stopPropagation(); _hideContextMenu();
     if (callbacks.onCopy) callbacks.onCopy(nodeData.id);
   });
   menu.appendChild(copyItem);
 
-  const branchItem = document.createElement("div");
-  branchItem.className = "ctx-item";
-  branchItem.textContent = "Branch...";
-  branchItem.addEventListener("click", function(e) {
-    e.stopPropagation();
-    _hideContextMenu();
-    if (callbacks.onBranch) callbacks.onBranch(nodeData.id);
-  });
-  menu.appendChild(branchItem);
+  // Paste (only if clipboard holds a conversation)
+  if (callbacks.hasClipboard && callbacks.hasClipboard()) {
+    var pasteItem = document.createElement("div");
+    pasteItem.className = "ctx-item";
+    pasteItem.textContent = "Paste";
+    pasteItem.addEventListener("click", function(e) {
+      e.stopPropagation(); _hideContextMenu();
+      if (callbacks.onPaste) callbacks.onPaste(nodeData.id);
+    });
+    menu.appendChild(pasteItem);
+  }
 
-  const sep = document.createElement("div");
-  sep.className = "ctx-sep";
-  menu.appendChild(sep);
-
-  const deleteItem = document.createElement("div");
+  // Delete
+  var deleteItem = document.createElement("div");
   deleteItem.className = "ctx-item ctx-danger";
   deleteItem.textContent = "Delete";
   deleteItem.addEventListener("click", function(e) {
-    e.stopPropagation();
-    _hideContextMenu();
+    e.stopPropagation(); _hideContextMenu();
     if (callbacks.onDelete) callbacks.onDelete(nodeData.id);
   });
   menu.appendChild(deleteItem);
+
+  var sep = document.createElement("div");
+  sep.className = "ctx-sep";
+  menu.appendChild(sep);
+
+  // Branch
+  var branchItem = document.createElement("div");
+  branchItem.className = "ctx-item";
+  branchItem.textContent = "Branch\u2026";
+  branchItem.addEventListener("click", function(e) {
+    e.stopPropagation(); _hideContextMenu();
+    if (callbacks.onBranch) callbacks.onBranch(nodeData.id);
+  });
+  menu.appendChild(branchItem);
 
   document.body.appendChild(menu);
   _ctxMenu = menu;

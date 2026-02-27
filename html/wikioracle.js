@@ -277,9 +277,9 @@ function applyLayout(layout) {
     tree.style.height = "";
     if (!tree.style.width) tree.style.width = "280px";
   } else {
-    // horizontal
+    // horizontal — CSS default (height: 40%) applies unless overridden by
+    // saved splitter position; no need to set an explicit pixel fallback.
     tree.style.width = "";
-    if (!tree.style.height) tree.style.height = "220px";
   }
   if (typeof renderMessages === "function") renderMessages();
 }
@@ -302,6 +302,7 @@ let state = null;
 // null = root selected (empty chat, typing creates new root conversation)
 // string = conversation ID in the tree
 let selectedConvId = null;
+var _navScrollHint = null;  // "top" | "bottom" | null — set by _treeNav for continuous scrolling
 
 // Pending branch: when set, the next send creates a child of this conversation
 let _pendingBranchParent = null;
@@ -465,55 +466,92 @@ function deleteConversation(convId) {
   setStatus(`Deleted "${conv.title}"`);
 }
 
-function mergeConversation(sourceId, targetId) {
-  // Merge: combine all messages from source into target conversation.
-  // Source's messages are appended after target's existing messages (preserving order).
-  // Source is then removed from the tree. Source's children are re-parented under target.
-  if (!state || !state.conversations) return;
-  if (sourceId === targetId) return;
-  if (targetId === "root") {
-    setStatus("Cannot merge into root. Drag onto a conversation node.");
+// ─── Clipboard (shared by tree and message context menus) ───
+// Supports cut/copy for both conversations (tree nodes) and messages (Q&R bubbles).
+// Paste destination is determined by which popup menu the user invokes Paste from.
+let _clipboard = null; // { type:"conv"|"msg", action:"cut"|"copy", id?, convId?, msgIdx?, title? }
+
+function _cutConversation(convId) {
+  if (!state) return;
+  var conv = findConversation(state.conversations || [], convId);
+  if (!conv) return;
+  _clipboard = { type: "conv", action: "cut", id: convId, title: conv.title };
+  setStatus('Cut "' + truncate(conv.title, 30) + '" \u2014 navigate to target and Paste');
+}
+
+function _pasteConversation(targetId) {
+  if (!_clipboard || _clipboard.type !== "conv") return;
+  var srcId = _clipboard.id;
+  if (srcId === targetId) { setStatus("Cannot paste onto itself."); return; }
+
+  var src = findConversation(state.conversations || [], srcId);
+  if (!src) { _clipboard = null; setStatus("Source conversation no longer exists."); return; }
+
+  // Prevent pasting a node onto its own descendant (would create a cycle)
+  if (targetId !== "root" && findInTree(src.children || [], targetId)) {
+    setStatus("Cannot paste a node onto its own descendant.");
     return;
   }
 
-  const source = findConversation(state.conversations, sourceId);
-  const target = findConversation(state.conversations, targetId);
-  if (!source || !target) return;
-
-  // Append source messages after target's existing messages (no re-sorting)
-  target.messages = [...(target.messages || []), ...(source.messages || [])];
-
-  // Re-parent source's children under target
-  if (source.children && source.children.length > 0) {
-    if (!target.children) target.children = [];
-    target.children.push(...source.children);
+  if (_clipboard.action === "cut") {
+    // Move: reparent srcId under targetId
+    removeFromTree(state.conversations, srcId);
+    if (targetId === "root") {
+      state.conversations.push(src);
+    } else {
+      var tgt = findConversation(state.conversations, targetId);
+      if (!tgt) return;
+      if (!tgt.children) tgt.children = [];
+      tgt.children.push(src);
+    }
+    var tgtLabel = targetId === "root" ? "Root" : truncate(tgt.title, 30);
+    _clipboard = null;
+    renderMessages();
+    _persistState();
+    setStatus('Moved "' + truncate(src.title, 30) + '" under "' + tgtLabel + '"');
+  } else if (_clipboard.action === "copy") {
+    // Duplicate: deep-clone src and add as child of target
+    var clone = _deepCloneConversation(src);
+    if (targetId === "root") {
+      state.conversations.push(clone);
+    } else {
+      var tgt = findConversation(state.conversations, targetId);
+      if (!tgt) return;
+      if (!tgt.children) tgt.children = [];
+      tgt.children.push(clone);
+    }
+    // Don't clear clipboard — copy allows repeated paste
+    renderMessages();
+    _persistState();
+    setStatus('Duplicated "' + truncate(src.title, 30) + '"');
   }
+}
 
-  // Remove source from tree
-  removeFromTree(state.conversations, sourceId);
-
-  // If we were viewing the source, switch to target
-  if (selectedConvId === sourceId) {
-    selectedConvId = targetId;
-    state.selected_conversation = targetId;
+function _deepCloneConversation(conv) {
+  var clone = JSON.parse(JSON.stringify(conv));
+  function _reassignIds(c) {
+    c.id = tempId("conv_");
+    (c.messages || []).forEach(function(m) { m.id = tempId("msg_"); });
+    (c.children || []).forEach(_reassignIds);
   }
-
-  renderMessages();
-  _persistState();
-  setStatus(`Merged "${source.title}" into "${target.title}" (${target.messages.length} messages)`);
+  _reassignIds(clone);
+  return clone;
 }
 
 function _copyConversationContent(convId) {
   if (!state) return;
-  const conv = findConversation(state.conversations || [], convId);
+  var conv = findConversation(state.conversations || [], convId);
   if (!conv || !conv.messages) return;
-  const text = conv.messages.map(function(m) {
-    const who = m.username || m.role || "unknown";
-    const body = stripTags(m.content || "");
+  // Set internal clipboard for paste-to-duplicate
+  _clipboard = { type: "conv", action: "copy", id: convId, title: conv.title };
+  // Also copy text to system clipboard
+  var text = conv.messages.map(function(m) {
+    var who = m.username || m.role || "unknown";
+    var body = stripTags(m.content || "");
     return who + ": " + body;
   }).join("\n\n");
   navigator.clipboard.writeText(text).then(function() {
-    setStatus("Copied " + conv.messages.length + " messages");
+    setStatus("Copied " + conv.messages.length + " messages \u2014 Paste to duplicate");
   }).catch(function() {
     setStatus("Copy failed (clipboard permission denied)");
   });
@@ -581,34 +619,62 @@ function _hideAllContextMenus() {
 function _showMsgContextMenu(event, msgIdx, totalMsgs) {
   _hideAllContextMenus();
 
-  const menu = document.createElement("div");
+  var menu = document.createElement("div");
   menu.className = "tree-context-menu"; // reuse tree context menu style
   menu.style.position = "fixed";
   menu.style.left = event.clientX + 4 + "px";
   menu.style.top = event.clientY + 4 + "px";
   menu._justOpened = true;
-  setTimeout(() => { menu._justOpened = false; }, 300);
+  setTimeout(function() { menu._justOpened = false; }, 300);
 
-  // Split (after) — mirrors "Branch..." on tree nodes
-  if (msgIdx < totalMsgs - 1) {
-    const splitItem = document.createElement("div");
-    splitItem.className = "ctx-item";
-    splitItem.textContent = "Split...";
-    splitItem.addEventListener("click", (e) => { e.stopPropagation(); _hideMsgContextMenu(); _splitAfterMessage(msgIdx); });
-    menu.appendChild(splitItem);
+  // Cut
+  var cutItem = document.createElement("div");
+  cutItem.className = "ctx-item";
+  cutItem.textContent = "Cut";
+  cutItem.addEventListener("click", function(e) { e.stopPropagation(); _hideMsgContextMenu(); _cutMessage(msgIdx); });
+  menu.appendChild(cutItem);
+
+  // Copy
+  var copyItem = document.createElement("div");
+  copyItem.className = "ctx-item";
+  copyItem.textContent = "Copy";
+  copyItem.addEventListener("click", function(e) { e.stopPropagation(); _hideMsgContextMenu(); _copyMessageContent(msgIdx); });
+  menu.appendChild(copyItem);
+
+  // Paste (only if clipboard has a message)
+  if (_clipboard && _clipboard.type === "msg") {
+    var pasteItem = document.createElement("div");
+    pasteItem.className = "ctx-item";
+    pasteItem.textContent = "Paste";
+    pasteItem.addEventListener("click", function(e) { e.stopPropagation(); _hideMsgContextMenu(); _pasteMessage(msgIdx); });
+    menu.appendChild(pasteItem);
   }
 
+  // Delete
+  var delItem = document.createElement("div");
+  delItem.className = "ctx-item ctx-danger";
+  delItem.textContent = "Delete";
+  delItem.addEventListener("click", function(e) { e.stopPropagation(); _hideMsgContextMenu(); _deleteMessage(msgIdx); });
+  menu.appendChild(delItem);
+
   // Separator
-  const sep = document.createElement("div");
+  var sep = document.createElement("div");
   sep.className = "ctx-sep";
   menu.appendChild(sep);
 
-  // Delete — mirrors tree node delete
-  const delItem = document.createElement("div");
-  delItem.className = "ctx-item ctx-danger";
-  delItem.textContent = "Delete";
-  delItem.addEventListener("click", (e) => { e.stopPropagation(); _hideMsgContextMenu(); _deleteMessage(msgIdx); });
-  menu.appendChild(delItem);
+  // Branch: split after this message, or branch from current conversation if last message
+  var branchItem = document.createElement("div");
+  branchItem.className = "ctx-item";
+  branchItem.textContent = "Branch\u2026";
+  branchItem.addEventListener("click", function(e) {
+    e.stopPropagation(); _hideMsgContextMenu();
+    if (msgIdx < totalMsgs - 1) {
+      _splitAfterMessage(msgIdx);
+    } else if (selectedConvId) {
+      branchFromNode(selectedConvId);
+    }
+  });
+  menu.appendChild(branchItem);
 
   document.body.appendChild(menu);
   _msgCtxMenu = menu;
@@ -652,6 +718,59 @@ function _deleteMessage(msgIdx) {
   }
   renderMessages();
   _persistState();
+}
+
+function _cutMessage(msgIdx) {
+  if (!state || !selectedConvId) return;
+  var conv = findConversation(state.conversations, selectedConvId);
+  if (!conv || !conv.messages || !conv.messages[msgIdx]) return;
+  _clipboard = { type: "msg", action: "cut", convId: selectedConvId, msgIdx: msgIdx };
+  setStatus("Cut message \u2014 select a position and Paste");
+}
+
+function _copyMessageContent(msgIdx) {
+  if (!state || !selectedConvId) return;
+  var conv = findConversation(state.conversations, selectedConvId);
+  if (!conv || !conv.messages || !conv.messages[msgIdx]) return;
+  var msg = conv.messages[msgIdx];
+  // Set internal clipboard for paste-to-duplicate
+  _clipboard = { type: "msg", action: "copy", convId: selectedConvId, msgIdx: msgIdx };
+  // Also copy text to system clipboard
+  var text = stripTags(msg.content || "");
+  navigator.clipboard.writeText(text).then(function() {
+    setStatus("Copied message text \u2014 Paste to duplicate");
+  }).catch(function() {
+    setStatus("Copy failed (clipboard permission denied)");
+  });
+}
+
+function _pasteMessage(targetIdx) {
+  if (!_clipboard || _clipboard.type !== "msg") return;
+  if (!state || !selectedConvId) return;
+  var conv = findConversation(state.conversations, selectedConvId);
+  if (!conv || !conv.messages) return;
+
+  if (_clipboard.action === "cut") {
+    if (_clipboard.convId !== selectedConvId) {
+      setStatus("Cannot paste message across conversations.");
+      _clipboard = null;
+      return;
+    }
+    _moveMessage(_clipboard.msgIdx, targetIdx);
+    _clipboard = null;
+  } else if (_clipboard.action === "copy") {
+    var srcConv = findConversation(state.conversations, _clipboard.convId);
+    if (!srcConv || !srcConv.messages) { _clipboard = null; return; }
+    var srcMsg = srcConv.messages[_clipboard.msgIdx];
+    if (!srcMsg) { _clipboard = null; return; }
+    var clone = JSON.parse(JSON.stringify(srcMsg));
+    clone.id = tempId("msg_");
+    conv.messages.splice(targetIdx, 0, clone);
+    // Don't clear clipboard — copy allows repeated paste
+    renderMessages();
+    _persistState();
+    setStatus("Pasted message copy");
+  }
 }
 
 // ─── Spec defaults (cached after first fetch) ───
@@ -779,10 +898,44 @@ function _toggleOutputEditor() {
 }
 
 
+// ─── Tree statistics (for root summary view) ───
+
+function _computeTreeStats(conversations) {
+  var stats = { convCount: 0, msgCount: 0, qCount: 0, rCount: 0,
+                earliest: null, latest: null };
+  function walk(nodes) {
+    for (var i = 0; i < nodes.length; i++) {
+      stats.convCount++;
+      var msgs = nodes[i].messages || [];
+      for (var j = 0; j < msgs.length; j++) {
+        stats.msgCount++;
+        if (msgs[j].role === "user") stats.qCount++;
+        else stats.rCount++;
+        var t = msgs[j].time;
+        if (t) {
+          if (!stats.earliest || t < stats.earliest) stats.earliest = t;
+          if (!stats.latest   || t > stats.latest)   stats.latest = t;
+        }
+      }
+      walk(nodes[i].children || []);
+    }
+  }
+  walk(conversations);
+  return stats;
+}
+
+function _friendlyDate(iso) {
+  if (!iso) return "—";
+  try {
+    var d = new Date(iso);
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  } catch (e) { return iso; }
+}
+
 // ─── UI rendering ───
 // renderMessages: finds the selected conversation via findConversation(),
 // iterates conv.messages to build .message divs (role-based alignment),
-// attaches context-menu listeners (right-click -> Split/Delete), then
+// attaches context-menu listeners (right-click -> Cut/Copy/Paste/Branch/Delete), then
 // calls conversationsToHierarchy() + renderTree() to sync the tree panel.
 // Auto-scrolls chat container to bottom after render.
 function renderMessages() {
@@ -790,8 +943,9 @@ function renderMessages() {
   const wrapper = document.getElementById("chatWrapper");
   wrapper.innerHTML = "";
 
-  // Click on empty area clears bubble selection
+  // Click on empty area clears bubble selection and dismisses menus
   wrapper.addEventListener("click", () => {
+    _hideAllContextMenus();
     const sel = wrapper.querySelector(".msg-selected");
     if (sel) sel.classList.remove("msg-selected");
   });
@@ -799,7 +953,13 @@ function renderMessages() {
   if (!state) state = {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
 
-  const treeCallbacks = { onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation, onMerge: mergeConversation, onCopy: _copyConversationContent, onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations };
+  const treeCallbacks = {
+    onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation,
+    onCut: _cutConversation, onCopy: _copyConversationContent, onPaste: _pasteConversation,
+    hasClipboard: function() { return _clipboard && _clipboard.type === "conv"; },
+    clipboardLabel: function() { return _clipboard ? _clipboard.title || "" : ""; },
+    onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations
+  };
 
   // Validate selectedConvId: if it points to a missing conversation, reset to root
   if (selectedConvId !== null && !findConversation(state.conversations, selectedConvId)) {
@@ -866,31 +1026,10 @@ function renderMessages() {
     // Click bubble to select (highlight outline, like tree-node selection)
     bubble.addEventListener("click", (e) => {
       e.stopPropagation();
+      _hideAllContextMenus();
       const prev = wrapper.querySelector(".msg-selected");
       if (prev && prev !== bubble) prev.classList.remove("msg-selected");
       bubble.classList.toggle("msg-selected");
-    });
-
-    // Drag-to-reorder messages (desktop only — touch uses tap gestures)
-    if (window.matchMedia("(pointer: fine)").matches) {
-      div.draggable = true;
-    }
-    div.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("text/plain", String(idx));
-      div.classList.add("msg-dragging");
-    });
-    div.addEventListener("dragend", () => { div.classList.remove("msg-dragging"); });
-    div.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      div.classList.add("msg-dragover");
-    });
-    div.addEventListener("dragleave", () => { div.classList.remove("msg-dragover"); });
-    div.addEventListener("drop", (e) => {
-      e.preventDefault();
-      div.classList.remove("msg-dragover");
-      const fromIdx = parseInt(e.dataTransfer.getData("text/plain"), 10);
-      const toIdx = idx;
-      if (!isNaN(fromIdx) && fromIdx !== toIdx) _moveMessage(fromIdx, toIdx);
     });
 
     // Context menu (right-click / long-press) for message actions
@@ -900,17 +1039,115 @@ function renderMessages() {
       _showMsgContextMenu(e, idx, visible.length);
     });
 
-    // Double-click to open context menu (desktop)
-    div.addEventListener("dblclick", (e) => {
+    // Double-click to open context menu (desktop) — on bubble only, not the
+    // full message row, so double-clicking empty space doesn't trigger a menu.
+    bubble.addEventListener("dblclick", (e) => {
       e.preventDefault();
       e.stopPropagation();
       _showMsgContextMenu(e, idx, visible.length);
     });
 
     // Double-tap detection (mobile — dblclick doesn't fire on most touch browsers)
-    onDoubleTap(div, (synth) => { _showMsgContextMenu(synth, idx, visible.length); });
+    onDoubleTap(bubble, (synth) => { _showMsgContextMenu(synth, idx, visible.length); });
 
     wrapper.appendChild(div);
+  }
+
+  // ─── Root summary dashboard (when viewing the root node) ───
+  if (selectedConvId === null && !_pendingBranchParent) {
+    var stats = _computeTreeStats(state.conversations);
+    var trustEntries = (state.truth && state.truth.trust) || [];
+    var contextText = stripTags(state.context || "").trim();
+
+    var summary = document.createElement("div");
+    summary.className = "root-summary";
+
+    // Title
+    var h2 = document.createElement("h2");
+    h2.className = "root-summary-title";
+    h2.textContent = "WikiOracle";
+    summary.appendChild(h2);
+
+    var sub = document.createElement("p");
+    sub.className = "root-summary-subtitle";
+    sub.textContent = "Document overview";
+    summary.appendChild(sub);
+
+    // Stat grid
+    var grid = document.createElement("div");
+    grid.className = "root-summary-grid";
+    var statItems = [
+      [stats.convCount, "Conversations"],
+      [stats.msgCount,  "Messages"],
+      [stats.qCount,    "Questions"],
+      [stats.rCount,    "Responses"]
+    ];
+    for (var si = 0; si < statItems.length; si++) {
+      var cell = document.createElement("div");
+      cell.className = "root-stat";
+      var valSpan = document.createElement("span");
+      valSpan.className = "root-stat-value";
+      valSpan.textContent = String(statItems[si][0]);
+      var lblSpan = document.createElement("span");
+      lblSpan.className = "root-stat-label";
+      lblSpan.textContent = statItems[si][1];
+      cell.appendChild(valSpan);
+      cell.appendChild(lblSpan);
+      grid.appendChild(cell);
+    }
+    summary.appendChild(grid);
+
+    // Date info
+    if (stats.msgCount > 0) {
+      var meta = document.createElement("div");
+      meta.className = "root-summary-meta";
+      if (state.time) {
+        var modSpan = document.createElement("span");
+        modSpan.textContent = "Last modified: " + _friendlyDate(state.time);
+        meta.appendChild(modSpan);
+      }
+      if (stats.earliest && stats.latest) {
+        var rangeSpan = document.createElement("span");
+        rangeSpan.textContent = _friendlyDate(stats.earliest) + " \u2013 " + _friendlyDate(stats.latest);
+        meta.appendChild(rangeSpan);
+      }
+      summary.appendChild(meta);
+    }
+
+    // Context preview
+    if (contextText && contextText !== "" && contextText !== "<div/>") {
+      var ctxSection = document.createElement("div");
+      ctxSection.className = "root-summary-section";
+      var ctxH3 = document.createElement("h3");
+      ctxH3.textContent = "Context";
+      ctxSection.appendChild(ctxH3);
+      var ctxP = document.createElement("p");
+      ctxP.className = "root-summary-context";
+      ctxP.textContent = truncate(contextText, 200);
+      ctxSection.appendChild(ctxP);
+      summary.appendChild(ctxSection);
+    }
+
+    // Trust entries
+    if (trustEntries.length > 0) {
+      var trustSection = document.createElement("div");
+      trustSection.className = "root-summary-section";
+      var trustH3 = document.createElement("h3");
+      trustH3.textContent = "Trust";
+      trustSection.appendChild(trustH3);
+      var trustP = document.createElement("p");
+      trustP.textContent = trustEntries.length + (trustEntries.length === 1 ? " entry" : " entries");
+      trustSection.appendChild(trustP);
+      summary.appendChild(trustSection);
+    }
+
+    // Hint
+    var hint = document.createElement("p");
+    hint.className = "root-summary-hint";
+    hint.textContent = "Type a message to start a new conversation.";
+    summary.appendChild(hint);
+
+    wrapper.appendChild(summary);
   }
 
   // Show child conversations as clickable links (navigate deeper into tree)
@@ -933,24 +1170,27 @@ function renderMessages() {
     }
   }
 
-  // Show placeholder when at root or empty conversation (no children either)
+  // Show placeholder for empty non-root conversations or pending branches
   var hasChildren = typeof childConvs !== "undefined" && childConvs && childConvs.length > 0;
-  if (visible.length === 0 && !hasChildren) {
+  if (visible.length === 0 && !hasChildren && selectedConvId !== null) {
     const placeholder = document.createElement("div");
     placeholder.className = "chat-placeholder";
     if (_pendingBranchParent) {
       placeholder.textContent = "Type a message to create a new branch.";
-    } else if (selectedConvId === null) {
-      placeholder.textContent = "Type a message to start a new conversation.";
     } else {
       placeholder.textContent = "No messages in this conversation.";
     }
     wrapper.appendChild(placeholder);
   }
 
-  // Scroll chat
+  // Scroll chat — direction-aware for continuous scroll-through-tree navigation
   const container = document.getElementById("chatContainer");
-  container.scrollTop = container.scrollHeight;
+  if (_navScrollHint === "top") {
+    container.scrollTop = 0;
+  } else {
+    container.scrollTop = container.scrollHeight;
+  }
+  _navScrollHint = null;
 
   // Render D3 tree
   try {
@@ -966,6 +1206,38 @@ function renderMessages() {
 function setStatus(text) {
   // Status bar removed — log to console for debugging
   console.log("[WikiOracle]", text);
+}
+
+// ─── Progress bar (thin strip at top of page) ───
+// _showProgress(-1) = indeterminate; _showProgress(0..100) = determinate.
+let _progressEl = null;
+
+function _showProgress(pct) {
+  if (!_progressEl) {
+    _progressEl = document.createElement("div");
+    _progressEl.className = "progress-bar";
+    _progressEl.innerHTML = '<div class="progress-fill"></div>';
+    document.body.prepend(_progressEl);
+  }
+  var fill = _progressEl.querySelector(".progress-fill");
+  if (pct < 0) {
+    _progressEl.classList.add("indeterminate");
+    fill.style.width = "";
+  } else {
+    _progressEl.classList.remove("indeterminate");
+    fill.style.width = Math.min(pct, 100) + "%";
+  }
+  _progressEl.style.display = "";
+}
+
+function _hideProgress() {
+  if (!_progressEl) return;
+  var fill = _progressEl.querySelector(".progress-fill");
+  _progressEl.classList.remove("indeterminate");
+  fill.style.width = "100%";
+  setTimeout(function() {
+    if (_progressEl) _progressEl.style.display = "none";
+  }, 350);
 }
 
 function _updatePlaceholder() {
@@ -1988,6 +2260,7 @@ function bindEvents() {
     const file = e.target.files[0];
     if (!file) return;
     try {
+      _showProgress(-1); // indeterminate while reading file
       const text = await file.text();
       const lines = text.trim().split("\n").filter(l => l.trim());
       if (lines.length === 0) throw new Error("Empty file");
@@ -2008,6 +2281,7 @@ function bindEvents() {
           truth: { trust: [], retrieval_prefs: first.retrieval_prefs || {} },
         };
         const convRecords = [];
+        const total = lines.length - 1;
         for (let i = 1; i < lines.length; i++) {
           const rec = JSON.parse(lines[i]);
           if (rec.type === "conversation") {
@@ -2017,7 +2291,13 @@ function bindEvents() {
             const { type, ...rest } = rec;
             importState.truth.trust.push(rest);
           }
+          // Update progress bar during parse (yield every 200 lines for large files)
+          if (total > 200 && i % 200 === 0) {
+            _showProgress((i / total) * 80); // 0-80% for parsing
+            await new Promise(r => setTimeout(r, 0));
+          }
         }
+        _showProgress(80);
         if (convRecords.length > 0) {
           const byId = {};
           const roots = [];
@@ -2037,11 +2317,13 @@ function bindEvents() {
         }
       } else {
         importState = JSON.parse(text);
+        _showProgress(80);
       }
 
       if (!importState.schema || !importState.schema.includes("llm_state")) throw new Error("Not a WikiOracle state file");
 
       // Merge: client-side in stateless mode, server-side otherwise
+      _showProgress(85);
       if (_serverInfo.stateless) {
         _clientMerge(importState);
       } else {
@@ -2050,9 +2332,11 @@ function bindEvents() {
       }
 
       // Persist merged state and redraw all components
+      _showProgress(95);
       _persistState();
       selectedConvId = null;
       renderMessages();
+      _hideProgress();
 
       // User-visible feedback
       const trustCount = (state.truth && state.truth.trust || []).length;
@@ -2068,6 +2352,7 @@ function bindEvents() {
       input.placeholder = msg;
       setTimeout(() => { input.placeholder = savedPH; }, 4000);
     } catch (err) {
+      _hideProgress();
       setStatus("Import error: " + err.message);
       const input = document.getElementById("msgInput");
       const savedPH = input.placeholder;
@@ -2141,6 +2426,7 @@ function bindEvents() {
       case "up": {
         if (selectedConvId === null) return false;
         var parent = findParentConversation(convs, selectedConvId);
+        _navScrollHint = "bottom";
         treeRequestFocus();
         navigateToNode(parent ? parent.id : null);
         return true;
@@ -2152,6 +2438,7 @@ function bindEvents() {
           : (cur && cur.children && cur.children.length > 0);
         if (hasChildren && curIdx >= 0 && curIdx < flat.length - 1) {
           var next = flat[curIdx + 1];
+          _navScrollHint = "top";
           treeRequestFocus();
           navigateToNode(next ? next.id : null);
           return true;
@@ -2161,6 +2448,7 @@ function bindEvents() {
       case "right": {
         if (curIdx >= 0 && curIdx < flat.length - 1) {
           var next = flat[curIdx + 1];
+          _navScrollHint = "top";
           treeRequestFocus();
           navigateToNode(next ? next.id : null);
           return true;
@@ -2170,6 +2458,7 @@ function bindEvents() {
       case "left": {
         if (curIdx > 0) {
           var prev = flat[curIdx - 1];
+          _navScrollHint = "top";
           treeRequestFocus();
           navigateToNode(prev ? prev.id : null);
           return true;
@@ -2213,11 +2502,51 @@ function bindEvents() {
       _treeNav(e.deltaX > 0 ? "right" : "left");
     }
   }, { passive: true });
+
+  // ─── Touch-at-border: swipe past top/bottom/sides navigates tree (mobile) ───
+  (function() {
+    var container = document.getElementById("chatContainer");
+    var startY = null, startX = null;
+    var SWIPE_THRESHOLD = 40;  // minimum px travel to count as directional swipe
+
+    container.addEventListener("touchstart", function(e) {
+      if (e.touches.length === 1) {
+        startY = e.touches[0].clientY;
+        startX = e.touches[0].clientX;
+      }
+    }, { passive: true });
+
+    container.addEventListener("touchend", function(e) {
+      if (startY === null) return;
+      var endTouch = e.changedTouches[0];
+      var dy = endTouch.clientY - startY;
+      var dx = endTouch.clientX - startX;
+      startY = null; startX = null;
+
+      var now = Date.now();
+      if (now - _scrollNavCooldown < 600) return;
+
+      var atTop = container.scrollTop <= 0;
+      var atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+
+      // Finger drags DOWN when at top → "scroll up" → navigate to parent
+      if (atTop && dy > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
+        _scrollNavCooldown = now; _treeNav("up");
+      } else if (atBottom && dy < -SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
+        _scrollNavCooldown = now; _treeNav("down");
+      } else if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
+        // Horizontal swipe: finger left = next, finger right = prev
+        _scrollNavCooldown = now;
+        _treeNav(dx < 0 ? "right" : "left");
+      }
+    }, { passive: true });
+  })();
 }
 
 // ─── Init: load prefs + state from server ───
 async function init() {
   try {
+    _showProgress(-1);
     setStatus("Loading...");
 
     // 0) Load server info (stateless flag, url_prefix)
@@ -2271,8 +2600,10 @@ async function init() {
     const convCount = state.conversations.length;
     console.log("[WikiOracle] init: loaded", convCount, "root conversations");
     renderMessages();
+    _hideProgress();
     setStatus(`Loaded ${convCount} conversation${convCount !== 1 ? "s" : ""}`);
   } catch (e) {
+    _hideProgress();
     console.error("[WikiOracle] init error:", e);
     setStatus("Connection error: " + e.message);
   }
@@ -2512,12 +2843,41 @@ init();
   const chatContainer = document.getElementById("chatContainer");
   const chatWrapper = document.getElementById("chatWrapper");
   if (!chatContainer || !chatWrapper || typeof setupZoom === "undefined") return;
-  setupZoom({
+
+  // setupZoom's built-in resetOnDblclick fails here for two reasons:
+  //   1. Desktop: dblclick event.target is a child element, never chatContainer
+  //   2. Mobile:  the "pinch" filter blocks single-finger touches, so d3's
+  //      internal double-tap detection never fires.
+  // We disable it and handle both paths manually below.
+  var zoom = setupZoom({
     container: d3.select(chatContainer),
     target: chatWrapper,
     mode: "css",
     scaleExtent: [0.5, 3],
     filter: "pinch",
-    resetOnDblclick: true
+    resetOnDblclick: false
+  });
+
+  function _resetChatZoom() {
+    d3.select(chatContainer).transition().duration(300)
+      .call(zoom.transform, d3.zoomIdentity);
+  }
+  function _isBubble(target) {
+    return target && target.closest && target.closest(".msg-bubble");
+  }
+
+  // Desktop: double-click on empty area resets zoom.
+  // Clicks on msg-bubble are handled by their own dblclick handler (with
+  // stopPropagation), so they never reach here.
+  chatContainer.addEventListener("dblclick", function(e) {
+    if (_isBubble(e.target)) return;
+    _resetChatZoom();
+  });
+
+  // Mobile: touchend-based double-tap (dblclick may not fire on all browsers
+  // with touch-action: manipulation).
+  onDoubleTap(chatContainer, function(synth) {
+    if (_isBubble(synth.target)) return;
+    _resetChatZoom();
   });
 })();

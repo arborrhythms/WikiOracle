@@ -1,0 +1,2 @@
+{"type": "trust", "id": "t_remote_01", "title": "Remote fact: Water is wet", "certainty": 1.0, "content": "<p>Water is wet.</p>", "time": "2026-02-27T00:00:01Z"}
+{"type": "trust", "id": "t_remote_02", "title": "Remote fact: Fire is hot", "certainty": 0.9, "content": "<p>Fire is hot.</p>", "time": "2026-02-27T00:00:02Z"}

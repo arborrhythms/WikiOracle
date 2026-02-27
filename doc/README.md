@@ -1,11 +1,50 @@
-# README
-Updated: 2026-02-25
+# WikiOracle Docs
+Updated: 2026-02-27
 
-- `WhatIsTruth.md`: compact note on truth criteria and consistency goals.
-- `WikiOracle.md`: project framing and high-level architecture direction.
-- `HowToEnsureSafety.md`: safety-focused constraints and operational guidance.
-- `ArchitectureOfTruth.md`: HME truth architecture, distributed truth framing, and conceptual-space model.
-- `Implication.md`: typed implication operators (material, strict, relevant) for truth computation.
-- `FutureWork.md`: near-term priorities for trust network structure and dataset design.
-- `Architecture.md`: system-level architecture notes for local shim + training/deploy flow.
-- `Security.md`: security considerations (CSP, CORS, API keys, XSS, file system).
+This directory is the design, governance, and research documentation for WikiOracle.
+
+Recommended reading order:
+1. `Constitution.md` (project invariants)
+2. `WhatIsTruth.md` (plural truth, POVs, and certainty semantics)
+3. `ArchitectureOfTruth.md` (distributed truth vs consensus, conceptual spaces)
+4. `Authority.md` (transitive trust and the authority import format)
+5. `Implication.md` (typed implication operators and derived truth)
+6. `HowToEnsureSafety.md` (Freedom/Love/Wisdom safety frame)
+7. `Architecture.md` (current local-first software architecture)
+8. `Security.md` (concrete security considerations)
+9. `FutureWork.md` (roadmap)
+10. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
+
+## Core Documents (doc/)
+
+- [`README.md`](./README.md): this index.
+- [`Constitution.md`](./Constitution.md): the non-negotiable invariants for WikiOracle's truth system and governance.
+- [`WhatIsTruth.md`](./WhatIsTruth.md): plural truth model, POVs, empathy as procedural constraint, HME fan-out, Kleene-style certainty.
+- [`ArchitectureOfTruth.md`](./ArchitectureOfTruth.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
+- [`Authority.md`](./Authority.md): authority blocks (`<authority>`), transitive trust, certainty scaling, namespacing, and fetch/security constraints.
+- [`Implication.md`](./Implication.md): material/strict/relevant implication operators; derived truth engine notes and limitations.
+- [`HowToEnsureSafety.md`](./HowToEnsureSafety.md): safety principles organized as Freedom (agency), Love (relational integrity), Wisdom (truth).
+- [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).
+- [`Architecture.md`](./Architecture.md): implementation architecture (Flask shim + UI + `llm.jsonl` state model).
+- [`FutureWork.md`](./FutureWork.md): future directions (trust network, sentence-level prediction, conceptual-space operations).
+- [`WikiOracle.md`](./WikiOracle.md): a consistency-first design note (historically labeled "OpenMind" in the text).
+
+Project build/deploy details live in the repository root `README.md`.
+
+## Research Notes (doc/research/)
+
+- [`research/CONTENTS.md`](./research/CONTENTS.md): research index and suggested reading order.
+- [`research/Huang2023_HallucinationSurvey.md`](./research/Huang2023_HallucinationSurvey.md): hallucination landscape and taxonomy.
+- [`research/Alansari2025_HallucinationSurvey.md`](./research/Alansari2025_HallucinationSurvey.md): hallucination survey (comprehensive).
+- [`research/Wang2023_FactualitySurvey.md`](./research/Wang2023_FactualitySurvey.md): factuality in LLMs survey.
+- [`research/Wang2024_FactualitySurvey.md`](./research/Wang2024_FactualitySurvey.md): updated factuality survey.
+- [`research/Gao2023_RAGSurvey.md`](./research/Gao2023_RAGSurvey.md): retrieval-augmented generation survey.
+- [`research/Dhuliawala2023_CoVe.md`](./research/Dhuliawala2023_CoVe.md): Chain-of-Verification methods.
+- [`research/Ghafouri2024_EpistemicIntegrity.md`](./research/Ghafouri2024_EpistemicIntegrity.md): epistemic integrity, calibration, assertiveness.
+- [`research/Li2024_HonestySurvey.md`](./research/Li2024_HonestySurvey.md): honesty in LLMs survey.
+- [`research/Li2024_KnowledgeBoundary.md`](./research/Li2024_KnowledgeBoundary.md): knowledge boundaries and limitations survey.
+- [`research/Concept_Note_AlecRogers.md`](./research/Concept_Note_AlecRogers.md): project-specific concept note.
+- [`research/Apertus_Small_Compute_Request.md`](./research/Apertus_Small_Compute_Request.md): small-compute access request draft.
+- [`research/1711.00937.md`](./research/1711.00937.md): converted paper (Neural Discrete Representation Learning).
+- [`research/2601.15714.md`](./research/2601.15714.md): converted paper (Even GPT-5.2 Can't Count to Five).
+- [`research/2602.03442.md`](./research/2602.03442.md): converted paper (A-RAG: Agentic Retrieval-Augmented Generation).

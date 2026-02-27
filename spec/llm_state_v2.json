@@ -111,7 +111,7 @@
         "title": { "type": "string" },
         "time": { "type": "string", "format": "date-time" },
         "certainty": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
-        "content": { "type": "string" }
+        "content": { "type": "string", "description": "XHTML fragment, or a typed XML block: <provider> for LLM provider config, <src> for file-backed content, <implication> for if-then relationships, or <authority> for external trust table references (DID/ORCID + URL to remote llm.jsonl)." }
       }
     }
   }

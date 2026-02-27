@@ -22,8 +22,10 @@ _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project))
 sys.path.insert(0, str(_project / "bin"))
 
-import WikiOracle as wo
-from wikioracle_state import SCHEMA_URL, STATE_VERSION, ensure_minimal_state
+import config as config_mod
+from config import Config
+from wikioracle import create_app
+from state import SCHEMA_URL, STATE_VERSION, ensure_minimal_state
 
 
 def _make_state(**overrides):
@@ -61,27 +63,27 @@ class StatelessContractBase(unittest.TestCase):
     """Base class that creates a Flask test client in stateless mode."""
 
     def setUp(self):
-        self._orig_stateless = wo.STATELESS_MODE
-        self._orig_debug = wo.DEBUG_MODE
-        wo.STATELESS_MODE = True
-        wo.DEBUG_MODE = False
+        self._orig_stateless = config_mod.STATELESS_MODE
+        self._orig_debug = config_mod.DEBUG_MODE
+        config_mod.STATELESS_MODE = True
+        config_mod.DEBUG_MODE = False
 
         # Use a temp dir for state file (should never be written in stateless)
         self._tmpdir = tempfile.mkdtemp()
         self._state_path = Path(self._tmpdir) / "llm.jsonl"
         # Write initial seed state so _load_state doesn't fail for /bootstrap
         initial = ensure_minimal_state({}, strict=False)
-        from wikioracle_state import atomic_write_jsonl
+        from state import atomic_write_jsonl
         atomic_write_jsonl(self._state_path, initial, reject_symlinks=False)
 
-        self.cfg = wo.Config(state_file=self._state_path)
-        self.app = wo.create_app(self.cfg, url_prefix="")
+        self.cfg = Config(state_file=self._state_path)
+        self.app = create_app(self.cfg, url_prefix="")
         self.app.testing = True
         self.client = self.app.test_client()
 
     def tearDown(self):
-        wo.STATELESS_MODE = self._orig_stateless
-        wo.DEBUG_MODE = self._orig_debug
+        config_mod.STATELESS_MODE = self._orig_stateless
+        config_mod.DEBUG_MODE = self._orig_debug
         import shutil
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
@@ -148,7 +150,7 @@ class TestStatelessChatNoDiskWrites(StatelessContractBase):
         mtime_before = self._state_path.stat().st_mtime
 
         # Mock _call_nanochat to avoid network call
-        with patch.object(wo, "_call_nanochat", return_value="test reply"):
+        with patch("response._call_nanochat", return_value="test reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
                 "state": _make_state(),
@@ -165,11 +167,12 @@ class TestStatelessChatNoDiskWrites(StatelessContractBase):
 
     def test_no_config_yaml_write(self):
         """Stateless chat must not write config.yaml to disk."""
-        cfg_path = Path(wo.__file__).resolve().parent / "config.yaml"
+        project_root = Path(__file__).resolve().parent.parent
+        cfg_path = project_root / "config.yaml"
         had_config = cfg_path.exists()
         mtime_before = cfg_path.stat().st_mtime if had_config else None
 
-        with patch.object(wo, "_call_nanochat", return_value="test reply"):
+        with patch("response._call_nanochat", return_value="test reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
                 "state": _make_state(),
@@ -190,7 +193,7 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
         """The returned state reflects client-supplied state, not server memory."""
         client_state = _make_state(context="<div>From Client</div>")
 
-        with patch.object(wo, "_call_nanochat", return_value="reply"):
+        with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hi",
                 "state": client_state,
@@ -211,7 +214,7 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
         rt = _make_runtime_config()
         rt["user"]["name"] = "RuntimeUser"
 
-        with patch.object(wo, "_call_nanochat", return_value="reply"):
+        with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hi",
                 "state": _make_state(),
@@ -272,31 +275,31 @@ class TestStatefulChatUnaffected(unittest.TestCase):
     """Verify stateful mode is not broken by the stateless refactor."""
 
     def setUp(self):
-        self._orig_stateless = wo.STATELESS_MODE
-        self._orig_debug = wo.DEBUG_MODE
-        wo.STATELESS_MODE = False
-        wo.DEBUG_MODE = False
+        self._orig_stateless = config_mod.STATELESS_MODE
+        self._orig_debug = config_mod.DEBUG_MODE
+        config_mod.STATELESS_MODE = False
+        config_mod.DEBUG_MODE = False
 
         self._tmpdir = tempfile.mkdtemp()
         self._state_path = Path(self._tmpdir) / "llm.jsonl"
         initial = ensure_minimal_state({}, strict=False)
-        from wikioracle_state import atomic_write_jsonl
+        from state import atomic_write_jsonl
         atomic_write_jsonl(self._state_path, initial, reject_symlinks=False)
 
-        self.cfg = wo.Config(state_file=self._state_path)
-        self.app = wo.create_app(self.cfg, url_prefix="")
+        self.cfg = Config(state_file=self._state_path)
+        self.app = create_app(self.cfg, url_prefix="")
         self.app.testing = True
         self.client = self.app.test_client()
 
     def tearDown(self):
-        wo.STATELESS_MODE = self._orig_stateless
-        wo.DEBUG_MODE = self._orig_debug
+        config_mod.STATELESS_MODE = self._orig_stateless
+        config_mod.DEBUG_MODE = self._orig_debug
         import shutil
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_stateful_chat_does_not_require_state_in_body(self):
         """In stateful mode, /chat should NOT require body.state (reads from disk)."""
-        with patch.object(wo, "_call_nanochat", return_value="reply"):
+        with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
                 "prefs": {"provider": "wikioracle"},
@@ -311,7 +314,7 @@ class TestStatefulChatUnaffected(unittest.TestCase):
         import time
         time.sleep(0.05)  # ensure mtime granularity
 
-        with patch.object(wo, "_call_nanochat", return_value="reply"):
+        with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
                 "prefs": {"provider": "wikioracle"},

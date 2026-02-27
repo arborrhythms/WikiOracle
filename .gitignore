@@ -12,3 +12,4 @@ __pycache__/
 *.merged
 /config.yaml
 /conversations/*.json
+/bin/__pycache__/

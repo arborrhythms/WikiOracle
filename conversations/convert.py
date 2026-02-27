@@ -23,13 +23,8 @@ from pathlib import Path
 # Import WikiOracle utilities from bin/
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
-from wikioracle_state import (  # noqa: E402
-    SCHEMA_URL,
-    STATE_VERSION,
-    WIKIORACLE_UUID_NS,
-    ensure_xhtml,
-    utc_now_iso,
-)
+from state import SCHEMA_URL, STATE_VERSION  # noqa: E402
+from truth import WIKIORACLE_UUID_NS, ensure_xhtml, utc_now_iso  # noqa: E402
 
 # Sentinel root parent used by Claude exports.
 _CLAUDE_SENTINEL = "00000000-0000-4000-8000-000000000000"
@@ -267,7 +262,7 @@ def convert_conversation(source: dict, user_name: str) -> list[dict]:
         branch_title = title
         first_user = next((m for m in branch_msgs if m["role"] == "user"), None)
         if first_user:
-            from wikioracle_state import strip_xhtml
+            from truth import strip_xhtml
             branch_title = strip_xhtml(first_user["content"])[:50] or title
 
         records.append({

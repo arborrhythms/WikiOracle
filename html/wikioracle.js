@@ -1,9 +1,9 @@
-// wikioracle.js — WikiOracle client (conversation-based hierarchy)
+// wikioracle.js — WikiOracle client UI (rendering, events, settings)
 // Preferences: served by config.yaml when writable; sessionStorage when stateless.
 //
 // Rendering pipeline:
 //   llm.jsonl on disk
-//     -> [jsonl_to_state] (bin/wikioracle_state.py)
+//     -> [jsonl_to_state] (bin/state.py)
 //     -> GET /state -> client receives state JSON
 //     -> [renderMessages] renders chat panel (selected conversation's messages)
 //     -> [conversationsToHierarchy + renderTree] (d3tree.js) renders SVG tree
@@ -100,6 +100,8 @@ function _derivePrefs(cfg) {
     },
     theme: ui.theme || "system",
     splitter_pct: ui.splitter_pct != null ? ui.splitter_pct : null,
+    swipe_nav_horizontal: ui.swipe_nav_horizontal !== false,
+    swipe_nav_vertical: !!ui.swipe_nav_vertical,
   };
 }
 
@@ -120,6 +122,8 @@ function _persistPrefs() {
       theme: prefs.theme,
       chat: prefs.chat,
       splitter_pct: prefs.splitter_pct,
+      swipe_nav_horizontal: prefs.swipe_nav_horizontal,
+      swipe_nav_vertical: prefs.swipe_nav_vertical,
     }).catch(function() {});
   }
 }
@@ -191,63 +195,6 @@ function _saveLocalState() {
   try { sessionStorage.setItem(_STATE_KEY, JSON.stringify(state)); } catch {}
 }
 
-// Client-side merge: fold importState data into the live `state` object.
-// Merges trust entries (by id, import wins), conversations (appended),
-// and context (kept from current state — import context is not overwritten).
-function _clientMerge(importState) {
-  // Trust entries: merge by id (import overwrites duplicates)
-  if (!state.truth) state.truth = {};
-  if (!Array.isArray(state.truth.trust)) state.truth.trust = [];
-  const incoming = (importState.truth && importState.truth.trust) || [];
-  const byId = {};
-  for (const e of state.truth.trust) { if (e.id) byId[e.id] = e; }
-  for (const e of incoming) {
-    if (e.id && byId[e.id]) {
-      // Replace existing entry
-      const idx = state.truth.trust.indexOf(byId[e.id]);
-      if (idx >= 0) state.truth.trust[idx] = e;
-    } else {
-      state.truth.trust.push(e);
-    }
-  }
-
-  // Conversations: merge by ID at every level of the tree.
-  // Import wins for message content; children are recursively merged.
-  if (!Array.isArray(state.conversations)) state.conversations = [];
-  const importConvs = importState.conversations || [];
-
-  function mergeConvLists(base, incoming) {
-    const baseById = {};
-    for (const c of base) { if (c.id) baseById[c.id] = c; }
-    for (const inc of incoming) {
-      const existing = inc.id ? baseById[inc.id] : null;
-      if (existing) {
-        // Merge messages by id: import wins for duplicates, appends new
-        const msgById = {};
-        for (const m of (existing.messages || [])) { if (m.id) msgById[m.id] = m; }
-        for (const m of (inc.messages || [])) {
-          if (m.id && msgById[m.id]) {
-            const idx = existing.messages.indexOf(msgById[m.id]);
-            if (idx >= 0) existing.messages[idx] = m;
-          } else {
-            existing.messages.push(m);
-          }
-        }
-        // Update title if import has one
-        if (inc.title) existing.title = inc.title;
-        // Recursively merge children
-        if (!existing.children) existing.children = [];
-        mergeConvLists(existing.children, inc.children || []);
-      } else {
-        base.push(inc);
-        if (inc.id) baseById[inc.id] = inc;
-      }
-    }
-  }
-  mergeConvLists(state.conversations, importConvs);
-
-  // Context: keep current state context (don't overwrite)
-}
 
 // Persist state: sessionStorage is authoritative in stateless mode;
 // disk-backed POST /state is used in stateful mode.
@@ -259,13 +206,6 @@ function _persistState() {
   }
 }
 
-// Build the runtime_config dict from the current config bundle (stateless).
-// This is the parsed config.yaml content that the server needs for
-// provider resolution, chat settings, and user display name.
-function _buildRuntimeConfig() {
-  const bundle = _loadLocalConfig();
-  return (bundle && bundle.parsed) ? bundle.parsed : {};
-}
 
 function applyLayout(layout) {
   const tree = document.getElementById("treeContainer");
@@ -311,118 +251,6 @@ let _pendingBranchParent = null;
 function confirmAction(msg) {
   if (prefs.chat && prefs.chat.confirm_actions) return confirm(msg);
   return true;
-}
-
-// ─── API helpers ───
-function _apiPath(path) {
-  return (_serverInfo.url_prefix || "") + path;
-}
-
-async function api(method, path, body) {
-  const headers = { "Content-Type": "application/json" };
-  const opts = { method, headers };
-  if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(_apiPath(path), opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
-  }
-  return resp.json();
-}
-
-// ─── Conversation tree helpers (findInTree, removeFromTree, countTreeMessages, tempId in util.js) ───
-
-function findConversation(conversations, convId) {
-  return findInTree(conversations, convId);
-}
-
-// Return the parent conversation object of convId, or null if convId is a root.
-function findParentConversation(conversations, convId) {
-  if (!convId || !conversations) return null;
-  for (var i = 0; i < conversations.length; i++) {
-    var ch = conversations[i].children || [];
-    for (var k = 0; k < ch.length; k++) {
-      if (ch[k].id === convId) return conversations[i];
-    }
-    var deeper = findParentConversation(ch, convId);
-    if (deeper) return deeper;
-  }
-  return null;
-}
-
-// Build a pruned conversation tree containing only the ancestor path to convId.
-// Each node on the path keeps only the child that leads to the target.
-// Returns a new array (does not mutate the original).
-function _buildAncestorPath(conversations, convId) {
-  if (!convId || !conversations) return [];
-  function _search(convs, target) {
-    for (var i = 0; i < convs.length; i++) {
-      var c = convs[i];
-      if (c.id === target) {
-        // Found target — return it with its children intact (includes optimistic conv)
-        return [{ id: c.id, title: c.title, messages: c.messages || [], children: c.children || [] }];
-      }
-      var deeper = _search(c.children || [], target);
-      if (deeper) {
-        // This node is on the path — keep only the child that leads to target
-        return [{ id: c.id, title: c.title, messages: c.messages || [], children: deeper }];
-      }
-    }
-    return null;
-  }
-  return _search(conversations, convId) || [];
-}
-
-// Merge a response-state's conversation tree back into the full local state.
-// Finds the selected conversation in respState and updates/inserts it in localConvs.
-function _mergeResponseConversation(localConvs, respState) {
-  var selId = respState.selected_conversation;
-  if (!selId) return;
-  // Find the conversation in the response
-  var respConv = findInTree(respState.conversations || [], selId);
-  if (!respConv) return;
-  // Try to find and update in the local tree
-  var localConv = findInTree(localConvs, selId);
-  if (localConv) {
-    localConv.messages = respConv.messages || [];
-    localConv.title = respConv.title || localConv.title;
-    // Merge children (response may have added a new child)
-    if (respConv.children) {
-      if (!localConv.children) localConv.children = [];
-      for (var i = 0; i < respConv.children.length; i++) {
-        var rc = respConv.children[i];
-        if (!findInTree(localConv.children, rc.id)) {
-          localConv.children.push(rc);
-        }
-      }
-    }
-  } else {
-    // New conversation — find its parent in the response path and insert there
-    // Walk the response tree to find the parent
-    function _findParent(convs, childId) {
-      for (var j = 0; j < convs.length; j++) {
-        var ch = convs[j].children || [];
-        for (var k = 0; k < ch.length; k++) {
-          if (ch[k].id === childId) return convs[j].id;
-        }
-        var deeper = _findParent(ch, childId);
-        if (deeper) return deeper;
-      }
-      return null;
-    }
-    var parentId = _findParent(respState.conversations || [], selId);
-    if (parentId) {
-      var localParent = findInTree(localConvs, parentId);
-      if (localParent) {
-        if (!localParent.children) localParent.children = [];
-        localParent.children.push(respConv);
-      } else {
-        localConvs.push(respConv);
-      }
-    } else {
-      localConvs.push(respConv);
-    }
-  }
 }
 
 // ─── Tree navigation ───
@@ -773,129 +601,6 @@ function _pasteMessage(targetIdx) {
   }
 }
 
-// ─── Spec defaults (cached after first fetch) ───
-let _specDefaults = null;
-async function _getSpecDefaults() {
-  if (!_specDefaults) {
-    try { _specDefaults = await api("GET", "/spec_defaults"); }
-    catch (e) { _specDefaults = { context: "<div/>", output: "", config_yaml: "" }; }
-  }
-  return _specDefaults;
-}
-
-
-// ─── Shared dialog factory ───
-// Creates a modal overlay with title bar and close button.
-// Returns { overlay, close } where close() hides the dialog.
-// bodyHTML is injected into the panel; panelClass adds extra CSS classes.
-// onClose is an optional callback invoked after hiding.
-function _createDialog(id, title, bodyHTML, panelClass, onClose) {
-  const overlay = document.createElement("div");
-  overlay.id = id;
-  overlay.className = "context-overlay";
-  const cls = panelClass ? `context-panel ${panelClass}` : "context-panel";
-  overlay.innerHTML =
-    `<div class="${cls}">` +
-    `<div class="dialog-title-bar"><h2>${title}</h2><button class="dialog-close" data-dialog-close>&times;</button></div>` +
-    bodyHTML +
-    `</div>`;
-  document.body.appendChild(overlay);
-  const closeBtn = overlay.querySelector("[data-dialog-close]");
-  function close() { overlay.classList.remove("active"); if (onClose) onClose(); }
-  closeBtn.addEventListener("click", close);
-  return { overlay, close };
-}
-
-// ─── Context editor (floating modal, triggered from root node) ───
-function _toggleContextEditor() {
-  let overlay = document.getElementById("contextOverlay");
-
-  // Toggle off if already open
-  if (overlay && overlay.classList.contains("active")) {
-    overlay.classList.remove("active");
-    return;
-  }
-
-  // Create overlay on first use
-  if (!overlay) {
-    const body = `
-        <p>Injected into every LLM call as background information.</p>
-        <textarea id="contextTextarea" placeholder="Describe the project, key facts, instructions..."></textarea>
-        <div class="settings-actions">
-          <button class="btn" id="ctxReset">Reset</button>
-          <button class="btn" id="ctxCancel">Cancel</button>
-          <button class="btn btn-primary" id="ctxSave">Save</button>
-        </div>`;
-    var dlg = _createDialog("contextOverlay", "Context", body);
-    overlay = dlg.overlay;
-
-    document.getElementById("ctxReset").addEventListener("click", async function() {
-      const defaults = await _getSpecDefaults();
-      document.getElementById("contextTextarea").value = stripTags(defaults.context).trim();
-    });
-    document.getElementById("ctxCancel").addEventListener("click", dlg.close);
-    document.getElementById("ctxSave").addEventListener("click", function() {
-      const newText = document.getElementById("contextTextarea").value.trim();
-      const currentPlain = stripTags(state?.context || "").trim();
-      if (state && newText !== currentPlain) {
-        state.context = newText;
-        _persistState();
-        setStatus("Context saved");
-      }
-      dlg.close();
-    });
-  }
-
-  // Populate and show
-  const rawCtx = state?.context || "";
-  document.getElementById("contextTextarea").value = stripTags(rawCtx).trim();
-  overlay.classList.add("active");
-  document.getElementById("contextTextarea").focus();
-}
-
-// ─── Output editor (floating modal, triggered from root context menu) ───
-function _toggleOutputEditor() {
-  let overlay = document.getElementById("outputOverlay");
-
-  if (overlay && overlay.classList.contains("active")) {
-    overlay.classList.remove("active");
-    return;
-  }
-
-  if (!overlay) {
-    const body = `
-        <p>Instructions appended to every LLM call describing the desired response format.</p>
-        <textarea id="outputTextarea" placeholder="Describe the desired output format..."></textarea>
-        <div class="settings-actions">
-          <button class="btn" id="outReset">Reset</button>
-          <button class="btn" id="outCancel">Cancel</button>
-          <button class="btn btn-primary" id="outSave">Save</button>
-        </div>`;
-    var dlg = _createDialog("outputOverlay", "Output", body);
-    overlay = dlg.overlay;
-
-    document.getElementById("outCancel").addEventListener("click", dlg.close);
-    document.getElementById("outReset").addEventListener("click", async function() {
-      const defaults = await _getSpecDefaults();
-      document.getElementById("outputTextarea").value = defaults.output ?? "";
-    });
-    document.getElementById("outSave").addEventListener("click", function() {
-      const newText = document.getElementById("outputTextarea").value.trim();
-      if (state) {
-        state.output = newText;
-        _persistState();
-        setStatus("Output saved");
-      }
-      dlg.close();
-    });
-  }
-
-  // Populate from state (always present after server normalization)
-  const current = state?.output ?? "";
-  document.getElementById("outputTextarea").value = current;
-  overlay.classList.add("active");
-  document.getElementById("outputTextarea").focus();
-}
 
 
 // ─── Tree statistics (for root summary view) ───
@@ -1208,35 +913,44 @@ function setStatus(text) {
   console.log("[WikiOracle]", text);
 }
 
-// ─── Progress bar (thin strip at top of page) ───
+// ─── Loading modal (blocks interaction until state loads) ───
 // _showProgress(-1) = indeterminate; _showProgress(0..100) = determinate.
-let _progressEl = null;
+// _showProgress(pct, label) sets optional label text.
+let _progressOverlay = null;
 
-function _showProgress(pct) {
-  if (!_progressEl) {
-    _progressEl = document.createElement("div");
-    _progressEl.className = "progress-bar";
-    _progressEl.innerHTML = '<div class="progress-fill"></div>';
-    document.body.prepend(_progressEl);
+function _showProgress(pct, label) {
+  if (!_progressOverlay) {
+    _progressOverlay = document.createElement("div");
+    _progressOverlay.className = "loading-overlay";
+    _progressOverlay.innerHTML =
+      '<div class="loading-box">' +
+        '<div class="loading-label">Loading\u2026</div>' +
+        '<div class="loading-track"><div class="loading-fill"></div></div>' +
+      '</div>';
+    document.body.appendChild(_progressOverlay);
   }
-  var fill = _progressEl.querySelector(".progress-fill");
+  var track = _progressOverlay.querySelector(".loading-track");
+  var fill = _progressOverlay.querySelector(".loading-fill");
+  var lbl = _progressOverlay.querySelector(".loading-label");
+  if (label !== undefined) lbl.textContent = label;
   if (pct < 0) {
-    _progressEl.classList.add("indeterminate");
+    track.classList.add("indeterminate");
     fill.style.width = "";
   } else {
-    _progressEl.classList.remove("indeterminate");
+    track.classList.remove("indeterminate");
     fill.style.width = Math.min(pct, 100) + "%";
   }
-  _progressEl.style.display = "";
+  _progressOverlay.style.display = "";
 }
 
 function _hideProgress() {
-  if (!_progressEl) return;
-  var fill = _progressEl.querySelector(".progress-fill");
-  _progressEl.classList.remove("indeterminate");
+  if (!_progressOverlay) return;
+  var fill = _progressOverlay.querySelector(".loading-fill");
+  var track = _progressOverlay.querySelector(".loading-track");
+  track.classList.remove("indeterminate");
   fill.style.width = "100%";
   setTimeout(function() {
-    if (_progressEl) _progressEl.style.display = "none";
+    if (_progressOverlay) _progressOverlay.style.display = "none";
   }, 350);
 }
 
@@ -1394,806 +1108,10 @@ async function sendMessage() {
   }
 }
 
-// ─── Settings panel ───
-function openSettings() {
-  document.getElementById("setUsername").value = prefs.username || "User";
-  document.getElementById("setProvider").value = prefs.provider || "wikioracle";
-  _populateModelDropdown(prefs.provider);
-  var currentModel = prefs.model || (_providerMeta[prefs.provider] || {}).model || "";
-  if (currentModel) document.getElementById("setModel").value = currentModel;
-  document.getElementById("setLayout").value = prefs.layout || "flat";
-  document.getElementById("setTheme").value = prefs.theme || "system";
 
-  // Chat settings
-  const chat = prefs.chat || {};
-  const tempSlider = document.getElementById("setTemp");
-  tempSlider.value = chat.temperature ?? 0.7;
-  document.getElementById("setTempVal").textContent = tempSlider.value;
-  const winSlider = document.getElementById("setWindow");
-  winSlider.value = chat.message_window ?? 40;
-  document.getElementById("setWindowVal").textContent = winSlider.value;
-  document.getElementById("setRag").checked = chat.rag !== false;
-  document.getElementById("setUrlFetch").checked = !!chat.url_fetch;
-  document.getElementById("setConfirm").checked = !!chat.confirm_actions;
 
-  document.getElementById("settingsOverlay").classList.add("active");
-}
-function closeSettings() {
-  document.getElementById("settingsOverlay").classList.remove("active");
-}
-async function saveSettings() {
-  const newProvider = document.getElementById("setProvider").value;
-  const meta = _providerMeta[newProvider];
-  if (meta && meta.needs_key && !meta.has_key) {
-    setStatus(`${meta.name} requires an API key. Add it to config.yaml (Settings \u2192 Edit Config).`);
-    // Still save — user might add the key later — but warn them
-  }
 
-  prefs.provider = newProvider;
-  prefs.model = document.getElementById("setModel").value || "";
-  prefs.username = document.getElementById("setUsername").value.trim() || "User";
-  prefs.layout = document.getElementById("setLayout").value;
-  prefs.theme = document.getElementById("setTheme").value || "system";
 
-  // Chat settings
-  prefs.chat = {
-    ...(prefs.chat || {}),
-    temperature: parseFloat(document.getElementById("setTemp").value),
-    message_window: parseInt(document.getElementById("setWindow").value, 10),
-    rag: document.getElementById("setRag").checked,
-    url_fetch: document.getElementById("setUrlFetch").checked,
-    confirm_actions: document.getElementById("setConfirm").checked,
-  };
-
-  applyLayout(prefs.layout);
-  applyTheme(prefs.theme);
-  _updatePlaceholder();
-  closeSettings();
-
-  // Persist: patch config bundle in stateless mode, server otherwise
-  if (_serverInfo.stateless) {
-    const bundle = _loadLocalConfig() || { yaml: "", parsed: {}, prefs: {} };
-    // Patch parsed config to reflect the settings changes
-    bundle.parsed = bundle.parsed || {};
-    bundle.parsed.user = bundle.parsed.user || {};
-    bundle.parsed.user.name = prefs.username;
-    bundle.parsed.ui = bundle.parsed.ui || {};
-    bundle.parsed.ui.default_provider = prefs.provider;
-    bundle.parsed.ui.layout = prefs.layout;
-    bundle.parsed.ui.theme = prefs.theme;
-    if (prefs.splitter_pct != null) bundle.parsed.ui.splitter_pct = prefs.splitter_pct;
-    bundle.parsed.chat = bundle.parsed.chat || {};
-    Object.assign(bundle.parsed.chat, {
-      temperature: prefs.chat.temperature,
-      message_window: prefs.chat.message_window,
-      rag: prefs.chat.rag,
-      url_fetch: prefs.chat.url_fetch,
-      confirm_actions: prefs.chat.confirm_actions,
-    });
-    bundle.prefs = { ...prefs };
-    _saveLocalConfig(bundle);
-    setStatus("Settings saved (local)");
-  } else {
-    try {
-      await api("POST", "/prefs", {
-        provider: prefs.provider,
-        username: prefs.username,
-        layout: prefs.layout,
-        theme: prefs.theme,
-        chat: prefs.chat,
-      });
-      // Refresh provider metadata (has_key may have changed via config.yaml)
-      await _refreshProviderMeta();
-      setStatus("Settings saved");
-    } catch (e) {
-      setStatus("Error saving settings: " + e.message);
-    }
-  }
-}
-
-// ─── Config editor (edit config.yaml) ───
-async function _openConfigEditor() {
-  // Close the settings panel first
-  closeSettings();
-
-  let overlay = document.getElementById("configOverlay");
-  if (!overlay) {
-    const body = `
-        <textarea id="configEditorTextarea" class="config-textarea"></textarea>
-        <div id="configEditorError" class="config-error"></div>
-        <div class="settings-actions settings-actions-md">
-          <button class="btn" id="cfgReset">Reset</button>
-          <button class="btn" id="cfgCancel">Cancel</button>
-          <button class="btn btn-primary" id="cfgOk">OK</button>
-        </div>`;
-    var dlg = _createDialog("configOverlay", "config.yaml", body, "config-panel");
-    overlay = dlg.overlay;
-
-    document.getElementById("cfgReset").addEventListener("click", async function() {
-      const defaults = await _getSpecDefaults();
-      if (defaults.config_yaml) {
-        document.getElementById("configEditorTextarea").value = defaults.config_yaml;
-      } else {
-        setStatus("spec/config.yaml not found");
-      }
-    });
-    document.getElementById("cfgCancel").addEventListener("click", dlg.close);
-    document.getElementById("cfgOk").addEventListener("click", async function() {
-      const textarea = document.getElementById("configEditorTextarea");
-      const errEl = document.getElementById("configEditorError");
-      errEl.style.display = "none";
-
-      // Parse YAML via server → get parsed dict + derived prefs
-      let parsed, derivedPrefs;
-      try {
-        const resp = await api("POST", "/parse_config", { yaml: textarea.value });
-        if (!resp.ok) {
-          errEl.textContent = resp.error || "Unknown error";
-          errEl.style.display = "block";
-          return;
-        }
-        parsed = resp.parsed;
-        derivedPrefs = resp.prefs;
-      } catch (e) {
-        errEl.textContent = "Parse error: " + e.message;
-        errEl.style.display = "block";
-        return;
-      }
-
-      // Save config bundle to sessionStorage (single source of truth)
-      _saveLocalConfig({ yaml: textarea.value, parsed: parsed, prefs: derivedPrefs });
-
-      // Update in-memory prefs and apply UI changes
-      prefs = derivedPrefs;
-      applyLayout(prefs.layout);
-      _updatePlaceholder();
-
-      // Disk write in non-stateless mode
-      if (!_serverInfo.stateless) {
-        try {
-          await api("POST", "/config", { yaml: textarea.value });
-        } catch (e) {
-          errEl.textContent = "Disk write failed: " + e.message + " (saved to sessionStorage)";
-          errEl.style.display = "block";
-          return;
-        }
-      }
-
-      dlg.close();
-      // Refresh prefs + provider metadata (keys may have changed)
-      try {
-        var prefsData = await api("GET", "/prefs");
-        if (prefsData.prefs) Object.assign(prefs, prefsData.prefs);
-        applyTheme(prefs.theme);
-      } catch (e) { /* best effort */ }
-      await _refreshProviderMeta();
-      setStatus("config.yaml saved");
-    });
-  }
-
-  // Load current config
-  const textarea = document.getElementById("configEditorTextarea");
-  const errEl = document.getElementById("configEditorError");
-  errEl.style.display = "none";
-  textarea.value = "Loading...";
-  overlay.classList.add("active");
-
-  // Load YAML text: config bundle (stateless) or server
-  const bundle = _serverInfo.stateless ? _loadLocalConfig() : null;
-  if (bundle && bundle.yaml) {
-    textarea.value = bundle.yaml;
-  } else {
-    try {
-      const data = await api("GET", "/config");
-      textarea.value = data.yaml || "";
-    } catch (e) {
-      textarea.value = "# Error loading config: " + e.message;
-    }
-  }
-  textarea.focus();
-}
-
-// ─── Truth editor ───
-
-let _truthEditing = null; // index into state.truth.trust being edited, or "new"
-
-function _openTruthEditor() {
-  closeSettings();
-
-  if (!state.truth) state.truth = {};
-  if (!Array.isArray(state.truth.trust)) state.truth.trust = [];
-
-  let overlay = document.getElementById("truthOverlay");
-  if (!overlay) {
-    const body = `
-        <div id="truthListView">
-          <div id="truthEntries" class="trust-entries-scroll"></div>
-          <div class="settings-actions settings-actions-xs">
-            <button class="btn" id="truthAdd">Add Entry</button>
-            <button class="btn" id="truthAddImpl">Add Implication</button>
-            <button class="btn" id="truthClose">Close</button>
-          </div>
-        </div>
-        <div id="truthEditView" class="hidden">
-          <label class="trust-label">Title</label>
-          <input id="truthTitle" type="text" class="trust-input">
-          <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = false, 0 = unknown, +1 = true)</span></label>
-          <input id="truthCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
-          <label class="trust-label">Content <span class="trust-label-hint">(XHTML: &lt;p&gt; facts, &lt;a href&gt; sources, &lt;provider&gt; LLMs, &lt;implication&gt; rules)</span></label>
-          <textarea id="truthContent" class="trust-textarea"></textarea>
-          <div class="settings-actions settings-actions-sm">
-            <button class="btn" id="truthEditCancel">Cancel</button>
-            <button class="btn btn-primary" id="truthEditSave">Save</button>
-          </div>
-        </div>
-        <div id="truthImplView" class="hidden">
-          <label class="trust-label">Title</label>
-          <input id="implTitle" type="text" class="trust-input" placeholder="A \u2192 B (derived)">
-          <label class="trust-label">Antecedent <span class="trust-label-hint">(if this entry is believed\u2026)</span></label>
-          <select id="implAntecedent" class="trust-input"></select>
-          <label class="trust-label">Consequent <span class="trust-label-hint">(\u2026then raise certainty of this entry)</span></label>
-          <select id="implConsequent" class="trust-input"></select>
-          <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = false, 0 = unknown, +1 = true)</span></label>
-          <input id="implCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
-          <label class="trust-label">Type</label>
-          <select id="implType" class="trust-input">
-            <option value="material">Material (Strong Kleene)</option>
-            <option value="strict">Strict (modal)</option>
-            <option value="relevant">Relevant (anti-paradox)</option>
-          </select>
-          <div class="settings-actions settings-actions-sm">
-            <button class="btn" id="implEditCancel">Cancel</button>
-            <button class="btn btn-primary" id="implEditSave">Save</button>
-          </div>
-        </div>`;
-    var dlg = _createDialog("truthOverlay", "Trust", body, "trust-panel", function() { _truthEditing = null; });
-    overlay = dlg.overlay;
-
-    document.getElementById("truthClose").addEventListener("click", dlg.close);
-
-    document.getElementById("truthAdd").addEventListener("click", function() {
-      _truthEditing = "new";
-      document.getElementById("truthTitle").value = "";
-      document.getElementById("truthCertainty").value = "0.5";
-      document.getElementById("truthContent").value = "<p></p>";
-      _truthShowEditView();
-    });
-
-    document.getElementById("truthEditCancel").addEventListener("click", function() {
-      _truthEditing = null;
-      _truthShowListView();
-    });
-
-    document.getElementById("truthEditSave").addEventListener("click", function() {
-      const title = document.getElementById("truthTitle").value.trim() || "Untitled";
-      const certainty = Math.min(1, Math.max(-1, parseFloat(document.getElementById("truthCertainty").value) || 0));
-      const content = document.getElementById("truthContent").value.trim() || "<p/>";
-      const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-
-      if (_truthEditing === "new") {
-        const entry = { id: tempId("t_"), title: title, certainty: certainty, content: content, time: now };
-        state.truth.trust.push(entry);
-      } else if (typeof _truthEditing === "number") {
-        const entry = state.truth.trust[_truthEditing];
-        if (entry) {
-          entry.title = title;
-          entry.certainty = certainty;
-          entry.content = content;
-          entry.time = now;
-        }
-      }
-      _truthEditing = null;
-      _persistState();
-      _truthRenderList();
-      _truthShowListView();
-    });
-
-    // ─── Implication editor handlers ───
-    document.getElementById("truthAddImpl").addEventListener("click", function() {
-      _truthEditing = "new_impl";
-      document.getElementById("implTitle").value = "";
-      document.getElementById("implCertainty").value = "0.5";
-      document.getElementById("implType").value = "material";
-      _populateImplDropdowns();
-      _truthShowImplView();
-    });
-
-    document.getElementById("implEditCancel").addEventListener("click", function() {
-      _truthEditing = null;
-      _truthShowListView();
-    });
-
-    document.getElementById("implEditSave").addEventListener("click", function() {
-      const title = document.getElementById("implTitle").value.trim() || "Untitled implication";
-      const ant = document.getElementById("implAntecedent").value;
-      const con = document.getElementById("implConsequent").value;
-      const certainty = Math.min(1, Math.max(-1, parseFloat(document.getElementById("implCertainty").value) || 0));
-      const implType = document.getElementById("implType").value;
-      const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-
-      if (!ant || !con) {
-        const input = document.getElementById("msgInput");
-        const savedPH = input.placeholder;
-        input.placeholder = "Select both antecedent and consequent";
-        setTimeout(() => { input.placeholder = savedPH; }, 3000);
-        return;
-      }
-
-      const content = "<implication><antecedent>" + ant + "</antecedent><consequent>" + con + "</consequent><type>" + implType + "</type></implication>";
-
-      if (_truthEditing === "new_impl") {
-        const entry = { id: tempId("i_"), title: title, certainty: certainty, content: content, time: now };
-        state.truth.trust.push(entry);
-      } else if (typeof _truthEditing === "number") {
-        const entry = state.truth.trust[_truthEditing];
-        if (entry) {
-          entry.title = title;
-          entry.certainty = certainty;
-          entry.content = content;
-          entry.time = now;
-        }
-      }
-      _truthEditing = null;
-      _persistState();
-      _truthRenderList();
-      _truthShowListView();
-    });
-  }
-
-  _truthEditing = null;
-  _truthRenderList();
-  _truthShowListView();
-  overlay.classList.add("active");
-}
-
-function _truthShowListView() {
-  document.getElementById("truthListView").style.display = "";
-  document.getElementById("truthEditView").style.display = "none";
-  document.getElementById("truthImplView").style.display = "none";
-}
-
-function _truthShowEditView() {
-  document.getElementById("truthListView").style.display = "none";
-  document.getElementById("truthEditView").style.display = "";
-  document.getElementById("truthImplView").style.display = "none";
-  document.getElementById("truthTitle").focus();
-}
-
-function _truthShowImplView() {
-  document.getElementById("truthListView").style.display = "none";
-  document.getElementById("truthEditView").style.display = "none";
-  document.getElementById("truthImplView").style.display = "";
-  document.getElementById("implTitle").focus();
-}
-
-function _isImplication(entry) {
-  return entry && typeof entry.content === "string" && entry.content.indexOf("<implication") !== -1;
-}
-
-function _parseImplContent(content) {
-  try {
-    var parser = new DOMParser();
-    var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
-    var impl = doc.querySelector("implication");
-    if (!impl) return null;
-    var ant = impl.querySelector("antecedent");
-    var con = impl.querySelector("consequent");
-    var typ = impl.querySelector("type");
-    return {
-      antecedent: ant ? ant.textContent.trim() : "",
-      consequent: con ? con.textContent.trim() : "",
-      type: typ ? typ.textContent.trim() : "material"
-    };
-  } catch (e) { return null; }
-}
-
-function _populateImplDropdowns(selectedAnt, selectedCon) {
-  var entries = (state.truth && state.truth.trust) || [];
-  var antSel = document.getElementById("implAntecedent");
-  var conSel = document.getElementById("implConsequent");
-  antSel.innerHTML = "";
-  conSel.innerHTML = "";
-  var blankA = document.createElement("option");
-  blankA.value = ""; blankA.textContent = "\u2014 select \u2014";
-  antSel.appendChild(blankA);
-  var blankC = document.createElement("option");
-  blankC.value = ""; blankC.textContent = "\u2014 select \u2014";
-  conSel.appendChild(blankC);
-  for (var i = 0; i < entries.length; i++) {
-    var e = entries[i];
-    if (_isImplication(e)) continue; // skip implication entries themselves
-    var opt1 = document.createElement("option");
-    opt1.value = e.id;
-    opt1.textContent = e.id + " — " + truncate(e.title || "(untitled)", 30);
-    if (e.id === selectedAnt) opt1.selected = true;
-    antSel.appendChild(opt1);
-    var opt2 = document.createElement("option");
-    opt2.value = e.id;
-    opt2.textContent = e.id + " — " + truncate(e.title || "(untitled)", 30);
-    if (e.id === selectedCon) opt2.selected = true;
-    conSel.appendChild(opt2);
-  }
-}
-
-function _truthRenderList() {
-  const container = document.getElementById("truthEntries");
-  container.innerHTML = "";
-  const entries = (state.truth && state.truth.trust) || [];
-
-  if (entries.length === 0) {
-    container.innerHTML = '<div class="trust-empty">No trust entries. Use <b>Add Entry</b> or <b>Open</b> a .jsonl file.</div>';
-    return;
-  }
-
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    const isImpl = _isImplication(entry);
-    const row = document.createElement("div");
-    row.style.cssText = "display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0; border-bottom:1px solid var(--border); font-size:0.82rem;";
-
-    if (isImpl) {
-      // Implication entry: show → icon and antecedent/consequent
-      const implData = _parseImplContent(entry.content);
-      const badge = document.createElement("span");
-      badge.textContent = "\u2192";
-      badge.title = "Implication (" + (implData ? implData.type : "material") + ")";
-      badge.style.cssText = "min-width:3.2em; text-align:center; font-size:1rem; color:var(--accent);";
-      row.appendChild(badge);
-
-      const label = document.createElement("span");
-      label.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-      if (implData) {
-        label.textContent = implData.antecedent + " \u2192 " + implData.consequent;
-        label.title = entry.title || "";
-      } else {
-        label.textContent = truncate(entry.title || "(implication)", 36);
-      }
-      row.appendChild(label);
-
-      // Show derived certainty of consequent if available
-      if (implData) {
-        const derivedSpan = document.createElement("span");
-        var conEntry = entries.find(function(e) { return e.id === implData.consequent; });
-        if (conEntry) {
-          var dc = conEntry._derived_certainty != null ? conEntry._derived_certainty : conEntry.certainty;
-          derivedSpan.textContent = "c=" + (dc >= 0 ? "+" : "") + dc.toFixed(2);
-          derivedSpan.style.cssText = "font-family:ui-monospace,monospace; font-size:0.72rem; color:var(--fg-muted);";
-        }
-        row.appendChild(derivedSpan);
-      }
-    } else {
-      // Regular trust entry
-      const cert = document.createElement("span");
-      const c = entry.certainty || 0;
-      const dc = entry._derived_certainty;
-      var certText = (c >= 0 ? "+" : "") + c.toFixed(2);
-      if (dc != null && Math.abs(dc - c) > 1e-9) {
-        certText += "\u2192" + (dc >= 0 ? "+" : "") + dc.toFixed(2);
-      }
-      cert.textContent = certText;
-      cert.style.cssText = "min-width:3.2em; text-align:right; font-family:ui-monospace,monospace; font-size:0.78rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
-      if (dc != null && Math.abs(dc - c) > 1e-9) cert.title = "Stored: " + c.toFixed(2) + ", Derived: " + dc.toFixed(2);
-      row.appendChild(cert);
-
-      const title = document.createElement("span");
-      title.textContent = truncate(entry.title || "(untitled)", 36);
-      title.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-      row.appendChild(title);
-    }
-
-    const editBtn = document.createElement("button");
-    editBtn.textContent = "Edit";
-    editBtn.className = "btn";
-    editBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem;";
-    editBtn.addEventListener("click", (function(idx, isImplication) {
-      return function() {
-        _truthEditing = idx;
-        const e = state.truth.trust[idx];
-        if (isImplication) {
-          const implData = _parseImplContent(e.content);
-          document.getElementById("implTitle").value = e.title || "";
-          document.getElementById("implCertainty").value = e.certainty || 0;
-          document.getElementById("implType").value = (implData && implData.type) || "material";
-          _populateImplDropdowns(implData && implData.antecedent, implData && implData.consequent);
-          _truthShowImplView();
-        } else {
-          document.getElementById("truthTitle").value = e.title || "";
-          document.getElementById("truthCertainty").value = e.certainty || 0;
-          document.getElementById("truthContent").value = stripTags(e.content || "").trim() ? (e.content || "") : "<p></p>";
-          _truthShowEditView();
-        }
-      };
-    })(i, isImpl));
-    row.appendChild(editBtn);
-
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "Del";
-    delBtn.className = "btn";
-    delBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem; color:#dc2626;";
-    delBtn.addEventListener("click", (function(idx) {
-      return function() {
-        const e = state.truth.trust[idx];
-        if (confirmAction("Delete " + (_isImplication(e) ? "implication" : "trust entry") + " \"" + (e.title || "untitled") + "\"?")) {
-          state.truth.trust.splice(idx, 1);
-          _persistState();
-          _truthRenderList();
-        }
-      };
-    })(i));
-    row.appendChild(delBtn);
-
-    container.appendChild(row);
-  }
-}
-
-// ─── Read view (XHTML export to new window) ───
-
-function _serializeConversations(conversations, depth, prefix) {
-  if (!conversations || !conversations.length) return "";
-  if (depth === undefined) depth = 0;
-  if (prefix === undefined) prefix = "";
-  let html = "";
-  for (let i = 0; i < conversations.length; i++) {
-    const conv = conversations[i];
-    const number = prefix ? prefix + "." + (i + 1) : String(i + 1);
-    const title = escapeHtml(conv.title || "Untitled");
-    const msgs = conv.messages || [];
-    const qCount = msgs.filter(function(m) { return m.role === "user"; }).length;
-    const rCount = msgs.length - qCount;
-    let dateStr = "";
-    if (msgs.length > 0 && msgs[0].time) {
-      try { dateStr = new Date(msgs[0].time).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch(e) {}
-    }
-    const isRoot = depth === 0;
-    const depthClass = isRoot ? " conv-root" : "";
-    // HR between root-level conversations
-    if (isRoot && i > 0) html += `<hr class="conv-rule">\n`;
-    html += `<div class="conversation${depthClass}" data-id="${conv.id || ''}" data-depth="${depth}">\n`;
-    html += `  <div class="conv-title">${escapeHtml(number)}. ${title}</div>\n`;
-    if (dateStr || msgs.length > 0) {
-      html += `  <div class="conv-meta">${qCount}Q ${rCount}R${dateStr ? " \u2022 " + escapeHtml(dateStr) : ""}</div>\n`;
-    }
-    for (const msg of msgs) {
-      const role = msg.role || "user";
-      const username = escapeHtml(msg.username || role);
-      const escaped = escapeHtml(stripTags(msg.content).trim());
-      html += `  <p class="message ${role}" data-role="${role}"><strong>${username}:</strong> ${escaped}</p>\n`;
-    }
-    if (conv.children && conv.children.length) {
-      html += _serializeConversations(conv.children, depth + 1, number);
-    }
-    html += `</div>\n`;
-  }
-  return html;
-}
-
-// Build an ordered ancestor path (root → ... → target) for the selected conversation.
-function _getAncestorPath(conversations, convId) {
-  if (!convId) return null;
-  function _search(convs, target) {
-    for (var i = 0; i < convs.length; i++) {
-      if (convs[i].id === target) return [convs[i]];
-      var deeper = _search(convs[i].children || [], target);
-      if (deeper) { deeper.unshift(convs[i]); return deeper; }
-    }
-    return null;
-  }
-  return _search(conversations, convId);
-}
-
-// Serialize the ancestor path as nested conversation divs with correct hierarchical numbers.
-// `allConversations` is the full tree (needed to compute sibling indices).
-// `path` is an array [root, ..., target] of conversation objects on the path.
-function _serializeAncestorPath(allConversations, path) {
-  if (!path || !path.length) return "";
-  let html = "";
-  let closeTags = "";
-  // Walk each node on the path, computing its 1-based sibling index
-  let siblings = allConversations; // siblings at current level
-  let numberParts = [];
-  for (let d = 0; d < path.length; d++) {
-    const conv = path[d];
-    // Find sibling index
-    let idx = 0;
-    for (let s = 0; s < siblings.length; s++) {
-      if (siblings[s].id === conv.id) { idx = s; break; }
-    }
-    numberParts.push(idx + 1);
-    const number = numberParts.join(".");
-    const title = escapeHtml(conv.title || "Untitled");
-    const msgs = conv.messages || [];
-    const qCount = msgs.filter(function(m) { return m.role === "user"; }).length;
-    const rCount = msgs.length - qCount;
-    let dateStr = "";
-    if (msgs.length > 0 && msgs[0].time) {
-      try { dateStr = new Date(msgs[0].time).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch(e) {}
-    }
-    const depthClass = d === 0 ? " conv-root" : "";
-    html += `<div class="conversation${depthClass}" data-id="${conv.id || ''}" data-depth="${d}">\n`;
-    html += `  <div class="conv-title">${escapeHtml(number)}. ${title}</div>\n`;
-    if (dateStr || msgs.length > 0) {
-      html += `  <div class="conv-meta">${qCount}Q ${rCount}R${dateStr ? " \u2022 " + escapeHtml(dateStr) : ""}</div>\n`;
-    }
-    for (const msg of msgs) {
-      const role = msg.role || "user";
-      const username = escapeHtml(msg.username || role);
-      const escaped = escapeHtml(stripTags(msg.content).trim());
-      html += `  <p class="message ${role}" data-role="${role}"><strong>${username}:</strong> ${escaped}</p>\n`;
-    }
-    closeTags += `</div>\n`;
-    // Next level: siblings are this node's children
-    siblings = conv.children || [];
-  }
-  html += closeTags;
-  return html;
-}
-
-async function _openReadView() {
-  if (!state || !state.conversations || !state.conversations.length) {
-    setStatus("No conversations to display.");
-    return;
-  }
-
-  // Base URL for referencing server-hosted assets (CSS, JS)
-  const baseUrl = window.location.origin + (_serverInfo.url_prefix || "");
-
-  // Default: serialize only the ancestor path (root → selected node).
-  // If nothing is selected, show all root conversations.
-  let body = "";
-  let pathDesc = "";
-  const ancestorPath = selectedConvId ? _getAncestorPath(state.conversations, selectedConvId) : null;
-  let pathLine = "";
-  if (ancestorPath && ancestorPath.length > 0) {
-    body = _serializeAncestorPath(state.conversations, ancestorPath);
-    pathLine = ancestorPath.map(function(c) { return c.title || "Untitled"; }).join(" \u2192 ");
-  } else {
-    body = _serializeConversations(state.conversations);
-    pathLine = state.conversations.length + " root conversation" + (state.conversations.length !== 1 ? "s" : "");
-  }
-  const now = new Date().toLocaleString();
-  const doc = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-<title>WikiOracle — Read View</title>
-<link rel="stylesheet" href="${baseUrl}/reading.css">
-</head>
-<body>
-<article id="reading-content">
-<h1>WikiOracle</h1>
-<div class="meta"><span class="meta-label">Date:</span> ${escapeHtml(now)}<br><span class="meta-label">Path:</span> ${escapeHtml(pathLine)}</div>
-<hr class="meta-rule">
-${body}
-</article>
-</body>
-</html>`;
-
-  const blob = new Blob([doc], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, "_blank");
-  if (!win) {
-    // Fallback for aggressive popup blockers: navigate in current tab
-    window.location.href = url;
-    return;
-  }
-  // Revoke after a delay so the new tab has time to load
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
-// ─── Search ───
-
-function _openSearch() {
-  var overlay = document.getElementById("searchOverlay");
-
-  if (overlay && overlay.classList.contains("active")) {
-    overlay.classList.remove("active");
-    return;
-  }
-
-  if (!overlay) {
-    var body = '<div class="search-bar">' +
-      '<input id="searchInput" type="text" placeholder="Regex search through conversations...">' +
-      '<button class="btn btn-primary" id="searchGo">Search</button>' +
-      '</div>' +
-      '<div id="searchInfo" class="search-info"></div>' +
-      '<div id="searchResults" class="search-results"></div>';
-    var dlg = _createDialog("searchOverlay", "Search", body, "search-panel");
-    overlay = dlg.overlay;
-
-    var searchInput = document.getElementById("searchInput");
-    var searchGo = document.getElementById("searchGo");
-
-    function doSearch() {
-      var query = searchInput.value.trim();
-      if (!query || !state) return;
-      var results = [];
-      var re;
-      try { re = new RegExp(query, "gi"); } catch (e) {
-        document.getElementById("searchInfo").textContent = "Invalid regex: " + e.message;
-        return;
-      }
-
-      // Walk entire conversation tree
-      function walkConvs(convs, path) {
-        for (var i = 0; i < convs.length; i++) {
-          var conv = convs[i];
-          var convPath = path.concat(conv.title || "(untitled)");
-          var msgs = conv.messages || [];
-          for (var j = 0; j < msgs.length; j++) {
-            var text = stripTags(msgs[j].content || "");
-            re.lastIndex = 0;
-            var match = re.exec(text);
-            if (match) {
-              // Build snippet around match
-              var start = Math.max(0, match.index - 30);
-              var end = Math.min(text.length, match.index + match[0].length + 30);
-              var snippet = (start > 0 ? "..." : "") +
-                escapeHtml(text.slice(start, match.index)) +
-                "<mark>" + escapeHtml(match[0]) + "</mark>" +
-                escapeHtml(text.slice(match.index + match[0].length, end)) +
-                (end < text.length ? "..." : "");
-              results.push({
-                convId: conv.id,
-                convTitle: conv.title || "(untitled)",
-                msgIdx: j,
-                msgId: msgs[j].id,
-                role: msgs[j].role || "user",
-                snippet: snippet,
-                path: convPath.join(" > ")
-              });
-            }
-          }
-          walkConvs(conv.children || [], convPath);
-        }
-      }
-      walkConvs(state.conversations || [], []);
-
-      document.getElementById("searchInfo").textContent = results.length + " match" + (results.length !== 1 ? "es" : "") + " found";
-      var container = document.getElementById("searchResults");
-      container.innerHTML = "";
-
-      for (var k = 0; k < results.length; k++) {
-        (function(r) {
-          var div = document.createElement("div");
-          div.className = "search-result";
-          div.innerHTML = '<div class="search-result-title">' + escapeHtml(r.convTitle) + ' <span style="color:var(--fg-muted);font-weight:normal">(' + r.role + ')</span></div>' +
-            '<div class="search-result-snippet">' + r.snippet + '</div>';
-          div.addEventListener("click", function() {
-            dlg.close();
-            navigateToNode(r.convId);
-            // Scroll to the matching message after render
-            setTimeout(function() {
-              var msgEl = document.querySelector('[data-msg-id="' + r.msgId + '"]') ||
-                          document.querySelector('[data-msg-idx="' + r.msgIdx + '"]');
-              if (msgEl) {
-                msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
-                var bubble = msgEl.querySelector(".msg-bubble");
-                if (bubble) {
-                  bubble.classList.add("msg-selected");
-                  setTimeout(function() { bubble.classList.remove("msg-selected"); }, 2000);
-                }
-              }
-            }, 100);
-          });
-          container.appendChild(div);
-        })(results[k]);
-      }
-    }
-
-    searchGo.addEventListener("click", doSearch);
-    searchInput.addEventListener("keydown", function(e) {
-      if (e.key === "Enter") { e.preventDefault(); doSearch(); }
-    });
-  }
-
-  // Clear and show
-  document.getElementById("searchInput").value = "";
-  document.getElementById("searchInfo").textContent = "";
-  document.getElementById("searchResults").innerHTML = "";
-  overlay.classList.add("active");
-  document.getElementById("searchInput").focus();
-}
 
 // ─── Bind UI events ───
 function bindEvents() {
@@ -2260,7 +1178,7 @@ function bindEvents() {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      _showProgress(-1); // indeterminate while reading file
+      _showProgress(-1, "Reading file\u2026");
       const text = await file.text();
       const lines = text.trim().split("\n").filter(l => l.trim());
       if (lines.length === 0) throw new Error("Empty file");
@@ -2293,7 +1211,7 @@ function bindEvents() {
           }
           // Update progress bar during parse (yield every 200 lines for large files)
           if (total > 200 && i % 200 === 0) {
-            _showProgress((i / total) * 80); // 0-80% for parsing
+            _showProgress((i / total) * 80, "Parsing\u2026 " + i + " / " + total + " lines");
             await new Promise(r => setTimeout(r, 0));
           }
         }
@@ -2323,7 +1241,7 @@ function bindEvents() {
       if (!importState.schema || !importState.schema.includes("llm_state")) throw new Error("Not a WikiOracle state file");
 
       // Merge: client-side in stateless mode, server-side otherwise
-      _showProgress(85);
+      _showProgress(85, "Merging\u2026");
       if (_serverInfo.stateless) {
         _clientMerge(importState);
       } else {
@@ -2332,7 +1250,7 @@ function bindEvents() {
       }
 
       // Persist merged state and redraw all components
-      _showProgress(95);
+      _showProgress(95, "Saving\u2026");
       _persistState();
       selectedConvId = null;
       renderMessages();
@@ -2482,6 +1400,7 @@ function bindEvents() {
   });
 
   // ─── Scroll-at-border: wheel past top/bottom/left/right navigates tree ───
+  // Desktop only (trackpad/mouse wheel) — not gated by mobile check
   var _scrollNavCooldown = 0;
   document.getElementById("chatContainer").addEventListener("wheel", function(e) {
     var now = Date.now();
@@ -2490,63 +1409,75 @@ function bindEvents() {
     var atTop = el.scrollTop <= 0;
     var atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
 
-    if (atTop && e.deltaY < -5) {
+    if (atTop && e.deltaY < -30) {
       _scrollNavCooldown = now;
       _treeNav("up");
-    } else if (atBottom && e.deltaY > 5) {
+    } else if (atBottom && e.deltaY > 30) {
       _scrollNavCooldown = now;
       _treeNav("down");
-    } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 20) {
+    } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 50) {
       // Horizontal scroll (trackpad swipe)
       _scrollNavCooldown = now;
       _treeNav(e.deltaX > 0 ? "right" : "left");
     }
   }, { passive: true });
 
-  // ─── Touch-at-border: swipe past top/bottom/sides navigates tree (mobile) ───
-  (function() {
-    var container = document.getElementById("chatContainer");
-    var startY = null, startX = null;
-    var SWIPE_THRESHOLD = 40;  // minimum px travel to count as directional swipe
+  // ─── Touch swipe: mobile-only tree navigation via swipe gestures ───
+  // Governed by prefs.swipe_nav_horizontal (default true) and
+  // prefs.swipe_nav_vertical (default false).  Vertical is off because
+  // vertical scrolling is used to read content; horizontal swipes
+  // navigate siblings.  Both are stored in config.yaml (ui section).
+  if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
+    (function() {
+      var container = document.getElementById("chatContainer");
+      var startY = null, startX = null;
+      var SWIPE_THRESHOLD = 80;  // minimum px travel to count as directional swipe
 
-    container.addEventListener("touchstart", function(e) {
-      if (e.touches.length === 1) {
-        startY = e.touches[0].clientY;
-        startX = e.touches[0].clientX;
-      }
-    }, { passive: true });
+      container.addEventListener("touchstart", function(e) {
+        if (e.touches.length === 1) {
+          startY = e.touches[0].clientY;
+          startX = e.touches[0].clientX;
+        }
+      }, { passive: true });
 
-    container.addEventListener("touchend", function(e) {
-      if (startY === null) return;
-      var endTouch = e.changedTouches[0];
-      var dy = endTouch.clientY - startY;
-      var dx = endTouch.clientX - startX;
-      startY = null; startX = null;
+      container.addEventListener("touchend", function(e) {
+        if (startY === null) return;
+        var endTouch = e.changedTouches[0];
+        var dy = endTouch.clientY - startY;
+        var dx = endTouch.clientX - startX;
+        startY = null; startX = null;
 
-      var now = Date.now();
-      if (now - _scrollNavCooldown < 600) return;
+        var now = Date.now();
+        if (now - _scrollNavCooldown < 600) return;
 
-      var atTop = container.scrollTop <= 0;
-      var atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+        var atTop = container.scrollTop <= 0;
+        var atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
 
-      // Finger drags DOWN when at top → "scroll up" → navigate to parent
-      if (atTop && dy > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
-        _scrollNavCooldown = now; _treeNav("up");
-      } else if (atBottom && dy < -SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
-        _scrollNavCooldown = now; _treeNav("down");
-      } else if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
-        // Horizontal swipe: finger left = next, finger right = prev
-        _scrollNavCooldown = now;
-        _treeNav(dx < 0 ? "right" : "left");
-      }
-    }, { passive: true });
-  })();
+        if (prefs.swipe_nav_vertical) {
+          // Finger drags DOWN when at top → navigate to parent
+          if (atTop && dy > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
+            _scrollNavCooldown = now; _treeNav("up");
+            return;
+          } else if (atBottom && dy < -SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
+            _scrollNavCooldown = now; _treeNav("down");
+            return;
+          }
+        }
+
+        if (prefs.swipe_nav_horizontal !== false && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
+          // Horizontal swipe: finger left = next sibling, finger right = prev
+          _scrollNavCooldown = now;
+          _treeNav(dx < 0 ? "right" : "left");
+        }
+      }, { passive: true });
+    })();
+  }
 }
 
 // ─── Init: load prefs + state from server ───
 async function init() {
   try {
-    _showProgress(-1);
+    _showProgress(-1, "Connecting\u2026");
     setStatus("Loading...");
 
     // 0) Load server info (stateless flag, url_prefix)
@@ -2693,10 +1624,59 @@ async function _initStateful() {
     _populateProviderDropdown();
   } catch {}
 
-  // Load state from server (disk)
-  const data = await api("GET", "/state");
+  // Get state file size for determinate progress bar
+  var expectedSize = 0;
+  try {
+    const sizeData = await api("GET", "/state_size");
+    expectedSize = sizeData.size || 0;
+  } catch {}
+
+  if (expectedSize > 0) {
+    _showProgress(0, "Loading state\u2026");
+  }
+
+  // Load state with XHR for progress tracking
+  const data = await _fetchStateWithProgress(expectedSize);
   state = data.state || {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
+}
+
+// Fetch /state using XHR so we can track download progress via onprogress.
+function _fetchStateWithProgress(expectedSize) {
+  return new Promise(function(resolve, reject) {
+    var prefix = (_serverInfo && _serverInfo.url_prefix) || "";
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", prefix + "/state");
+    xhr.responseType = "text";
+
+    if (expectedSize > 0) {
+      xhr.onprogress = function(e) {
+        // Use expectedSize from /state_size (more reliable than e.total
+        // which depends on Content-Length header and compression).
+        var total = expectedSize || e.total || 0;
+        if (total > 0 && e.loaded > 0) {
+          var pct = Math.min((e.loaded / total) * 100, 99);
+          var loadedKB = (e.loaded / 1024).toFixed(0);
+          var totalKB = (total / 1024).toFixed(0);
+          _showProgress(pct, "Loading state\u2026 " + loadedKB + " / " + totalKB + " KB");
+        }
+      };
+    }
+
+    xhr.onload = function() {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (err) {
+          reject(new Error("Invalid JSON from /state"));
+        }
+      } else {
+        reject(new Error("HTTP " + xhr.status));
+      }
+    };
+    xhr.onerror = function() { reject(new Error("Network error loading /state")); };
+    xhr.send();
+  });
 }
 
 // Refresh provider metadata from server (updates has_key flags)

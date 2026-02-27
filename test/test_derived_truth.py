@@ -12,7 +12,7 @@ import sys
 # Add bin/ to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
-from wikioracle_state import (
+from truth import (
     compute_derived_truth,
     ensure_implication_id,
     parse_implication_block,
@@ -171,9 +171,11 @@ def test_cycle_terminates():
         _make_impl("t_b", "t_a"),
     ]
     derived = compute_derived_truth(entries)
-    # Both should settle at 0.5 (the max of the two)
+    # Neither is derivable (both have non-zero initial certainty),
+    # so both should remain unchanged. The engine only modifies
+    # entries that start at 0.0 (ignorance).
     assert derived["t_a"] == 0.5
-    assert derived["t_b"] == 0.5
+    assert derived["t_b"] == 0.3
 
 
 def test_cycle_both_zero():

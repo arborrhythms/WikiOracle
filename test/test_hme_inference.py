@@ -31,8 +31,8 @@ _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project))
 sys.path.insert(0, str(_project / "bin"))
 
-from wikioracle_state import jsonl_to_state, load_state_file
-from prompt_bundle import (
+from state import jsonl_to_state, load_state_file
+from response import (
     PromptBundle,
     Source,
     build_prompt_bundle,
@@ -290,9 +290,9 @@ class TestPromptStructure(unittest.TestCase):
         self.assertIn("t_axiom_01", user_msg)
 
     def test_all_trust_entries_loaded(self):
-        """hme.jsonl has 16 trust entries (9 facts + 4 implications + 3 meta); all should be in state."""
+        """hme.jsonl has 17 trust entries (9 facts + 4 implications + 3 meta + 1 authority); all should be in state."""
         trust = self.state.get("truth", {}).get("trust", [])
-        self.assertEqual(len(trust), 16)
+        self.assertEqual(len(trust), 17)
 
     def test_provider_entries_excluded_from_rag(self):
         """<provider> entries should be excluded from normal RAG sources."""

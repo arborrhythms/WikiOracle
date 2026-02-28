@@ -9,7 +9,7 @@ Recommended reading order:
 3. `HierarchicalMixtureOfExperts.md` (HME logic, distributed truth vs consensus, conceptual spaces)
 4. `Authority.md` (transitive trust and the authority import format)
 5. `Implication.md` (logical operators: and/or/not under Strong Kleene semantics)
-6. `HowToEnsureSafety.md` (safety principles and architectural commitments)
+6. `FreedomEmpathyTruth.md` (Freedom, Empathy, and Truth — safety principles)
 7. `Architecture.md` (current local-first software architecture)
 8. `Security.md` (concrete security considerations)
 9. `Installation.md` (build, deploy, and runtime instructions)
@@ -24,7 +24,7 @@ Recommended reading order:
 - [`HierarchicalMixtureOfExperts.md`](./HierarchicalMixtureOfExperts.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
 - [`Authority.md`](./Authority.md): authority blocks (`<authority>`), transitive trust, certainty scaling, namespacing, and fetch/security constraints.
 - [`Implication.md`](./Implication.md): logical operators (and/or/not); Strong Kleene evaluation; derived truth engine.
-- [`HowToEnsureSafety.md`](./HowToEnsureSafety.md): safety principles and architectural commitments.
+- [`FreedomEmpathyTruth.md`](./FreedomEmpathyTruth.md): Freedom, Empathy, and Truth — safety principles and architectural commitments.
 - [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).
 - [`Architecture.md`](./Architecture.md): implementation architecture (Flask shim + UI + `llm.jsonl` state model).
 - [`Installation.md`](./Installation.md): build, deploy, and runtime instructions.

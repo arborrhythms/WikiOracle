@@ -105,7 +105,7 @@ The full design and governance documentation lives in [`doc/`](doc/README.md):
 | [HierarchicalMixtureOfExperts](doc/HierarchicalMixtureOfExperts.md) | HME logic, distributed truth, conceptual spaces |
 | [Authority](doc/Authority.md) | Transitive trust and authority import format |
 | [Implication](doc/Implication.md) | Logical operators under Strong Kleene semantics |
-| [HowToEnsureSafety](doc/HowToEnsureSafety.md) | Safety principles and architectural commitments |
+| [FreedomEmpathyTruth](doc/FreedomEmpathyTruth.md) | Freedom, Empathy, and Truth — safety principles |
 | [Architecture](doc/Architecture.md) | Local-first software architecture |
 | [Security](doc/Security.md) | Security considerations |
 | [Installation](doc/Installation.md) | Build, deploy, and runtime instructions |

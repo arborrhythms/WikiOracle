@@ -79,13 +79,13 @@ WikiOracle's constitution is enforced by process:
 2. **No hidden central memory.** A shared hosted service must not quietly accumulate private state as a control point for truth.
 3. **Provenance over secrecy.** When possible, store the "why" (citations, trust entries, authority sources) alongside the "what" (answers).
 
-## VIII. Safety as Freedom, Love, and Wisdom
+## VIII. Safety as Freedom, Empathy, and Truth
 
 WikiOracle's truthfulness effort must not trade away human welfare or agency:
 
-1. **Freedom (agency):** increase distributed agency, not centralized leverage.
-2. **Love (relational integrity):** preserve dignity, minimize harm, and make uncertainty explicit.
-3. **Wisdom (truth):** keep truth auditable and non-proprietary; do not convert epistemic advantage into coercive control.
+1. **Freedom:** increase distributed agency, not centralized leverage. AI must not be used to transgress the freedom of others. Data sovereignty and freedom to use the platform are non-negotiable.
+2. **Empathy:** represent the concerns of all creatures, not just the operator. Preserve dignity, minimize harm, and make uncertainty explicit. De-emphasize egocentric optimization that externalizes costs.
+3. **Truth:** keep truth auditable and non-proprietary; do not convert epistemic advantage into coercive control.
 
 ## IX. Forking as a Constitutional Right
 
@@ -99,7 +99,7 @@ This constitution is intentionally compact. For the rest of the system design:
 - `HierarchicalMixtureOfExperts.md`: HME logic, distributed truth vs consensus, conceptual spaces framing.
 - `Authority.md`: transitive trust and authority import format/security.
 - `Implication.md`: logical operators (and/or/not) and derived truth computation.
-- `HowToEnsureSafety.md`: the Freedom/Love/Wisdom safety frame.
+- `FreedomEmpathyTruth.md`: the Freedom/Empathy/Truth safety frame.
 - `Security.md`: concrete security considerations for the local-first implementation.
 - `Architecture.md`: the current software architecture (Flask shim + UI + `llm.jsonl`).
 - `FutureWork.md`: roadmap items (trust network, sentence-level prediction, conceptual-space operations).

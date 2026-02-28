@@ -5,6 +5,24 @@ Local-first Flask server that owns one llm.jsonl file, proxies chat to an
 upstream stateless endpoint (NanoChat, OpenAI, Anthropic), and supports
 deterministic merge/import of exported llm_*.jsonl files.
 
+REST API Endpoints:
+
+| Route            | Methods      | Purpose                                                      |
+|------------------|--------------|--------------------------------------------------------------|
+| /health          | GET          | Liveness check                                               |
+| /server_info     | GET          | Stateless flag + url_prefix                                  |
+| /bootstrap       | GET          | One-shot seed for stateless clients (state + config + providers) |
+| /info            | GET          | State/schema/provider metadata for diagnostics               |
+| /state           | GET, POST    | Read or replace local state                                  |
+| /state_size      | GET          | State file size in bytes (progress bar)                      |
+| /chat            | POST         | Process chat turn (QueryBundle → ResponseBundle)             |
+| /merge           | POST         | Merge imported state payloads/files                          |
+| /spec_defaults   | GET          | Spec defaults for reset buttons (context, output, config)    |
+| /providers       | GET          | Non-secret provider metadata for UI dropdowns                |
+| /config          | GET, POST    | GET: normalized config. POST: full config dict               |
+| /                | GET          | Serve index.html                                             |
+| /<path>          | GET          | Serve whitelisted static assets                              |
+
 Usage:
     # Server mode (default)
     export WIKIORACLE_STATE_FILE="/abs/path/to/llm.jsonl"
@@ -39,10 +57,11 @@ from config import (
     _CONFIG_YAML_STATUS,
     _PROVIDER_MODELS,
     _build_providers,
-    _derive_prefs,
+    _normalize_config,
     _env_bool,
     _ensure_self_signed_cert,
     _load_config_yaml,
+    config_to_yaml,
     load_config,
     parse_args,
 )
@@ -76,6 +95,16 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     app = Flask(__name__, static_folder=None)
     startup_merge_report = _scan_and_merge_imports(cfg) if not config_mod.STATELESS_MODE else {}
 
+    # Store url_prefix in module-level config so all modules can read it
+    config_mod.URL_PREFIX = url_prefix
+
+    # Write CLI-supplied runtime values into _CONFIG_YAML so they
+    # round-trip through config like everything else — no per-response
+    # patching needed.
+    config_mod._CONFIG_YAML.setdefault("server", {})
+    config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
+    config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+
     # Security headers (CORS + CSP)
     @app.after_request
     def add_security_headers(response):
@@ -89,7 +118,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         # Content Security Policy (enforcing)
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' https://d3js.org; "
+            "script-src 'self' https://d3js.org https://cdnjs.cloudflare.com; "
             "style-src 'self'; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
@@ -115,7 +144,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/bootstrap", methods=["GET"])
     def bootstrap():
-        """One-shot seed for stateless clients: state + config from disk."""
+        """One-shot seed for stateless clients: state + config + providers."""
         result: Dict[str, Any] = {}
 
         # Seed state from disk (or empty minimal state)
@@ -125,25 +154,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             seed_state = ensure_minimal_state({}, strict=False)
         result["state"] = seed_state
 
-        # Config YAML text + parsed + prefs
-        project_root = Path(__file__).resolve().parent.parent
-        cfg_path = project_root / "config.yaml"
-        config_yaml = ""
-        if cfg_path.exists():
-            try:
-                config_yaml = cfg_path.read_text(encoding="utf-8")
-            except Exception:
-                pass
-        result["config_yaml"] = config_yaml
-
-        parsed: Dict[str, Any] = {}
-        try:
-            import yaml
-            parsed = yaml.safe_load(config_yaml) or {}
-        except Exception:
-            pass
-        result["parsed"] = parsed
-        result["prefs"] = _derive_prefs(parsed)
+        # Normalized config (YAML-shaped with defaults + runtime server fields)
+        fresh = _load_config_yaml()
+        if fresh:
+            config_mod._CONFIG_YAML = fresh
+        result["config"] = _normalize_config(config_mod._CONFIG_YAML)
 
         # Provider metadata (non-secret)
         prov_meta = {}
@@ -332,86 +347,22 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             _save_state(cfg, base)
         return jsonify({"ok": True, "merged": merged_count, "files": merged_names})
 
-    @app.route(url_prefix + "/parse_config", methods=["POST", "OPTIONS"])
-    def parse_config_endpoint():
-        """Parse raw YAML text and return parsed dict + derived prefs.  No disk writes."""
-        if flask_request.method == "OPTIONS":
-            return ("", 204)
-        try:
-            import yaml
-        except ImportError:
-            return jsonify({"ok": False, "error": "pyyaml not installed"}), 500
-        body = flask_request.get_json(force=True, silent=True) or {}
-        raw = body.get("yaml", "")
-        if not isinstance(raw, str):
-            return jsonify({"ok": False, "error": "yaml must be a string"}), 400
-        try:
-            parsed = yaml.safe_load(raw)
-            if parsed is not None and not isinstance(parsed, dict):
-                return jsonify({"ok": False, "error": "config.yaml must be a YAML mapping"}), 400
-            parsed = parsed or {}
-        except yaml.YAMLError as exc:
-            return jsonify({"ok": False, "error": f"YAML parse error: {exc}"}), 400
-        return jsonify({"ok": True, "parsed": parsed, "prefs": _derive_prefs(parsed)})
-
-    @app.route(url_prefix + "/config", methods=["GET", "POST"])
-    def config_endpoint():
-        """GET: serve raw config.yaml text + parsed + prefs.  POST: overwrite config.yaml."""
-        try:
-            import yaml
-        except ImportError:
-            return jsonify({"ok": False, "error": "pyyaml not installed"}), 500
-        project_root = Path(__file__).resolve().parent.parent
-        cfg_path = project_root / "config.yaml"
-
-        if flask_request.method == "GET":
-            if not cfg_path.exists():
-                return jsonify({"ok": True, "yaml": "", "parsed": {}, "prefs": _derive_prefs({})})
-            try:
-                raw_text = cfg_path.read_text(encoding="utf-8")
-                parsed = yaml.safe_load(raw_text) or {}
-                return jsonify({"ok": True, "yaml": raw_text, "parsed": parsed, "prefs": _derive_prefs(parsed)})
-            except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 500
-        else:
-            if config_mod.STATELESS_MODE:
-                return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
-            # POST: save new YAML content
-            body = flask_request.get_json(force=True, silent=True) or {}
-            new_yaml = body.get("yaml", "")
-            if not isinstance(new_yaml, str):
-                return jsonify({"ok": False, "error": "yaml must be a string"}), 400
-            # Validate it parses
-            try:
-                parsed = yaml.safe_load(new_yaml)
-                if parsed is not None and not isinstance(parsed, dict):
-                    return jsonify({"ok": False, "error": "config.yaml must be a YAML mapping"}), 400
-                parsed = parsed or {}
-            except yaml.YAMLError as exc:
-                return jsonify({"ok": False, "error": f"YAML parse error: {exc}"}), 400
-            try:
-                cfg_path.write_text(new_yaml, encoding="utf-8")
-                # Hot-reload the in-memory config AND rebuild providers
-                config_mod._CONFIG_YAML = _load_config_yaml()
-                PROVIDERS.clear()
-                PROVIDERS.update(_build_providers())
-                return jsonify({"ok": True, "parsed": parsed, "prefs": _derive_prefs(parsed)})
-            except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 500
-
     @app.route(url_prefix + "/spec_defaults", methods=["GET"])
     def spec_defaults_endpoint():
-        """Serve spec defaults for reset buttons (context, output, config.yaml)."""
-        result: Dict[str, str] = {
+        """Serve spec defaults for reset buttons (context, output, config_parsed)."""
+        result: Dict[str, Any] = {
             "context": "<div/>",
             "output": DEFAULT_OUTPUT,
-            "config_yaml": "",
+            "config_parsed": {},
         }
         project_root = Path(__file__).resolve().parent.parent
         spec_cfg = project_root / "spec" / "config.yaml"
         if spec_cfg.exists():
             try:
-                result["config_yaml"] = spec_cfg.read_text(encoding="utf-8")
+                import yaml
+                result["config_parsed"] = yaml.safe_load(
+                    spec_cfg.read_text(encoding="utf-8")
+                ) or {}
             except Exception:
                 pass
         return jsonify(result)
@@ -432,56 +383,39 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             }
         return jsonify({"providers": result})
 
-    @app.route(url_prefix + "/prefs", methods=["GET", "POST"])
-    def prefs_endpoint():
-        """Serve UI preferences from config.yaml (all prefs live in YAML now)."""
+    @app.route(url_prefix + "/config", methods=["GET", "POST"])
+    def config_endpoint():
+        """GET: normalized config (YAML-shaped).
+        POST: accept full config dict; write config.yaml to disk.
+        """
         # Re-read config.yaml to pick up hot-reloads
         fresh = _load_config_yaml()
         if fresh:
             config_mod._CONFIG_YAML = fresh
 
         if flask_request.method == "GET":
-            return jsonify({"prefs": _derive_prefs(config_mod._CONFIG_YAML)})
+            return jsonify({"config": _normalize_config(config_mod._CONFIG_YAML)})
         else:
             if config_mod.STATELESS_MODE:
                 return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
-            # POST: update config.yaml with new pref values
+
             body = flask_request.get_json(force=True, silent=True) or {}
+
             try:
-                import yaml
                 project_root = Path(__file__).resolve().parent.parent
                 cfg_path = project_root / "config.yaml"
-                raw = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
-                data = yaml.safe_load(raw) or {}
 
-                if "username" in body:
-                    data.setdefault("user", {})["name"] = body["username"]
-                if "provider" in body:
-                    data.setdefault("ui", {})["default_provider"] = body["provider"]
-                if "layout" in body:
-                    data.setdefault("ui", {})["layout"] = body["layout"]
-                if "theme" in body:
-                    data.setdefault("ui", {})["theme"] = body["theme"]
-                    # Remove legacy css key if present
-                    if "css" in data.get("ui", {}):
-                        del data["ui"]["css"]
-                if "splitter_pct" in body:
-                    data.setdefault("ui", {})["splitter_pct"] = body["splitter_pct"]
-                if "swipe_nav_horizontal" in body:
-                    data.setdefault("ui", {})["swipe_nav_horizontal"] = body["swipe_nav_horizontal"]
-                if "swipe_nav_vertical" in body:
-                    data.setdefault("ui", {})["swipe_nav_vertical"] = body["swipe_nav_vertical"]
-                if "chat" in body and isinstance(body["chat"], dict):
-                    chat_sec = data.setdefault("chat", {})
-                    for key in ("temperature", "message_window", "rag", "url_fetch", "confirm_actions"):
-                        if key in body["chat"]:
-                            chat_sec[key] = body["chat"][key]
+                # Client sends { config: {...} } — the full YAML-shaped config dict
+                if "config" not in body or not isinstance(body["config"], dict):
+                    return jsonify({"ok": False, "error": "missing config dict"}), 400
 
-                cfg_path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+                data = body["config"]
+                cfg_path.write_text(config_to_yaml(data), encoding="utf-8")
                 config_mod._CONFIG_YAML = _load_config_yaml()
                 PROVIDERS.clear()
                 PROVIDERS.update(_build_providers())
-                return jsonify({"ok": True})
+                normalized = _normalize_config(config_mod._CONFIG_YAML)
+                return jsonify({"ok": True, "config": normalized})
             except Exception as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
 
@@ -528,6 +462,7 @@ def main() -> int:
 
     # Default: serve
     url_prefix = (args.url_prefix or os.environ.get("WIKIORACLE_URL_PREFIX", "")).strip().rstrip("/")
+    config_mod.URL_PREFIX = url_prefix
 
     if not config_mod.STATELESS_MODE:
         cfg.state_file.parent.mkdir(parents=True, exist_ok=True)

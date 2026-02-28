@@ -96,7 +96,7 @@ class TestStatelessChatValidation(StatelessContractBase):
         resp = self.client.post("/chat", json={
             "message": "hello",
             "runtime_config": _make_runtime_config(),
-            "prefs": {"provider": "wikioracle"},
+            "config": {"provider": "wikioracle"},
         })
         self.assertEqual(resp.status_code, 400)
         data = resp.get_json()
@@ -107,7 +107,7 @@ class TestStatelessChatValidation(StatelessContractBase):
         resp = self.client.post("/chat", json={
             "message": "hello",
             "state": _make_state(),
-            "prefs": {"provider": "wikioracle"},
+            "config": {"provider": "wikioracle"},
         })
         self.assertEqual(resp.status_code, 400)
         data = resp.get_json()
@@ -117,7 +117,7 @@ class TestStatelessChatValidation(StatelessContractBase):
         """POST /chat without state or runtime_config → 400."""
         resp = self.client.post("/chat", json={
             "message": "hello",
-            "prefs": {"provider": "wikioracle"},
+            "config": {"provider": "wikioracle"},
         })
         self.assertEqual(resp.status_code, 400)
 
@@ -127,7 +127,7 @@ class TestStatelessChatValidation(StatelessContractBase):
             "message": "hello",
             "state": "not a dict",
             "runtime_config": _make_runtime_config(),
-            "prefs": {"provider": "wikioracle"},
+            "config": {"provider": "wikioracle"},
         })
         self.assertEqual(resp.status_code, 400)
 
@@ -137,7 +137,7 @@ class TestStatelessChatValidation(StatelessContractBase):
             "message": "hello",
             "state": _make_state(),
             "runtime_config": "not a dict",
-            "prefs": {"provider": "wikioracle"},
+            "config": {"provider": "wikioracle"},
         })
         self.assertEqual(resp.status_code, 400)
 
@@ -155,7 +155,7 @@ class TestStatelessChatNoDiskWrites(StatelessContractBase):
                 "message": "hello",
                 "state": _make_state(),
                 "runtime_config": _make_runtime_config(),
-                "prefs": {"provider": "wikioracle"},
+                "config": {"provider": "wikioracle"},
             })
 
         # Should succeed (502 means provider error which is OK to catch separately)
@@ -177,7 +177,7 @@ class TestStatelessChatNoDiskWrites(StatelessContractBase):
                 "message": "hello",
                 "state": _make_state(),
                 "runtime_config": _make_runtime_config(),
-                "prefs": {"provider": "wikioracle"},
+                "config": {"provider": "wikioracle"},
             })
 
         if had_config:
@@ -198,7 +198,7 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
                 "message": "hi",
                 "state": client_state,
                 "runtime_config": _make_runtime_config(),
-                "prefs": {"provider": "wikioracle"},
+                "config": {"provider": "wikioracle"},
             })
 
         if resp.status_code == 200:
@@ -219,7 +219,7 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
                 "message": "hi",
                 "state": _make_state(),
                 "runtime_config": rt,
-                "prefs": {"provider": "wikioracle"},
+                "config": {"provider": "wikioracle"},
             })
 
         if resp.status_code == 200:
@@ -246,12 +246,10 @@ class TestBootstrapEndpoint(StatelessContractBase):
     def test_bootstrap_returns_config(self):
         resp = self.client.get("/bootstrap")
         data = resp.get_json()
-        self.assertIn("config_yaml", data)
-        self.assertIsInstance(data["config_yaml"], str)
-        self.assertIn("parsed", data)
-        self.assertIsInstance(data["parsed"], dict)
-        self.assertIn("prefs", data)
-        self.assertIsInstance(data["prefs"], dict)
+        self.assertNotIn("config_yaml", data)  # raw YAML no longer sent
+        self.assertNotIn("parsed", data)        # no more parsed/config split
+        self.assertIn("config", data)
+        self.assertIsInstance(data["config"], dict)
 
     def test_bootstrap_returns_providers(self):
         resp = self.client.get("/bootstrap")
@@ -261,14 +259,22 @@ class TestBootstrapEndpoint(StatelessContractBase):
         self.assertIn("wikioracle", provs)
         self.assertIn("name", provs["wikioracle"])
 
-    def test_bootstrap_prefs_has_expected_keys(self):
+    def test_bootstrap_config_has_expected_keys(self):
+        """Config in bootstrap response has YAML-shaped keys."""
         resp = self.client.get("/bootstrap")
         data = resp.get_json()
-        p = data["prefs"]
-        self.assertIn("provider", p)
-        self.assertIn("layout", p)
-        self.assertIn("username", p)
-        self.assertIn("chat", p)
+        c = data["config"]
+        # Top-level sections
+        self.assertIn("user", c)
+        self.assertIn("ui", c)
+        self.assertIn("chat", c)
+        self.assertIn("server", c)
+        # YAML-shaped sub-keys (not flat)
+        self.assertIn("name", c["user"])
+        self.assertIn("default_provider", c["ui"])
+        self.assertIn("layout", c["ui"])
+        self.assertIn("stateless", c["server"])
+        self.assertIn("url_prefix", c["server"])
 
 
 class TestStatefulChatUnaffected(unittest.TestCase):
@@ -302,7 +308,7 @@ class TestStatefulChatUnaffected(unittest.TestCase):
         with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
-                "prefs": {"provider": "wikioracle"},
+                "config": {"provider": "wikioracle"},
             })
         # Should not return 400 for missing state/runtime_config
         self.assertNotEqual(resp.status_code, 400)
@@ -317,7 +323,7 @@ class TestStatefulChatUnaffected(unittest.TestCase):
         with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
-                "prefs": {"provider": "wikioracle"},
+                "config": {"provider": "wikioracle"},
             })
 
         if resp.status_code == 200:
@@ -337,8 +343,8 @@ class TestStatelessExistingEndpoints(StatelessContractBase):
         resp = self.client.post("/config", json={"yaml": ""})
         self.assertEqual(resp.status_code, 403)
 
-    def test_prefs_post_returns_403(self):
-        resp = self.client.post("/prefs", json={"provider": "wikioracle"})
+    def test_config_post_returns_403(self):
+        resp = self.client.post("/config", json={"provider": "wikioracle"})
         self.assertEqual(resp.status_code, 403)
 
 

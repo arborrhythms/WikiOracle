@@ -13,7 +13,7 @@
  *   .ctx-danger        — Delete items (red text)
  *   .chat-placeholder  — Empty-state prompt (centred, muted)
  *
- * CSS custom properties (--accent, --border, --fg, etc.) are read by d3tree.js
+ * CSS custom properties (--accent, --border, --fg, etc.) are read by tree.js
  * at render time via cssVar() from util.js.
  */
 

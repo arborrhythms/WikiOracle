@@ -33,7 +33,7 @@ sys.path.insert(0, str(_project / "bin"))
 
 from state import jsonl_to_state, load_state_file
 from response import (
-    PromptBundle,
+    ProviderBundle,
     Source,
     build_prompt_bundle,
     rank_retrieval_entries,
@@ -47,7 +47,7 @@ def _load_hme_state() -> dict:
     return load_state_file(hme_path, strict=True)
 
 
-def _build_bundle_for_query(state: dict, query: str) -> PromptBundle:
+def _build_bundle_for_query(state: dict, query: str) -> ProviderBundle:
     """Build a prompt bundle with RAG enabled, default prefs."""
     prefs = {
         "provider": "wikioracle",
@@ -58,12 +58,12 @@ def _build_bundle_for_query(state: dict, query: str) -> PromptBundle:
     return build_prompt_bundle(state, query, prefs)
 
 
-def _source_ids(bundle: PromptBundle) -> set:
+def _source_ids(bundle: ProviderBundle) -> set:
     """Return the set of source IDs included in the bundle."""
     return {s.source_id for s in bundle.sources}
 
 
-def _source_by_id(bundle: PromptBundle, source_id: str) -> Source | None:
+def _source_by_id(bundle: ProviderBundle, source_id: str) -> Source | None:
     """Find a source by its ID in the bundle."""
     for s in bundle.sources:
         if s.source_id == source_id:

@@ -50,6 +50,13 @@ ui:
   default_provider: wikioracle
   layout: flat                             # flat | horizontal | vertical
 
+# --- Server ------------------------------------------------------------------
+# Runtime parameters — usually set via CLI flags; YAML values are defaults.
+
+server:
+  stateless: false
+  url_prefix: ""
+
 # --- SSH keys ----------------------------------------------------------------
 # Referenced by the Makefile for remote operations.
 

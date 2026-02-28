@@ -1,25 +1,5 @@
-// d3tree.js — D3.js top-down branching hierarchy for WikiOracle
-// State IS the tree (conversations with children).
-// Supports: click (navigate), double-click/double-tap (context menu), right-click.
-// Tree operations (cut/copy/paste, branch, delete) via context menu.
-//
-// Data flow:
-//   conversationsToHierarchy(conversations, selectedId) -> D3 hierarchy data
-//   renderTree(hierarchyData, callbacks) -> SVG in #treeContainer
-//
-// Layout: d3.tree(), top-down (root at top). Separation 1.2x siblings, 1.8x cousins.
-// Colours from CSS custom properties: --accent, --accent-light, --border, --fg,
-//   --fg-muted, --bg.
-//
-// Node shapes:
-//   Root       -> circle r=14
-//   Selected   -> rounded rect, two-line label (title + "N Qs, M msgs")
-//   Default    -> pill (fully rounded rect), single-line truncated title
-//
-// Interactions:
-//   Click -> callbacks.onNavigate(id)
-//   Double-click / double-tap / right-click -> context menu (Cut, Copy, Paste, Branch, Delete)
-//   Ctrl/meta-click -> context menu
+// tree.js — D3.js conversation tree renderer for WikiOracle front-end.
+// Loaded after query.js; depends on state, config globals from util.js.
 
 // Internal state
 let _doubleTapHandled = false; // suppresses click after double-tap fires context menu

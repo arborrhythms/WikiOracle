@@ -1,27 +1,20 @@
-// wikioracle.js — WikiOracle client UI (rendering, events, settings)
-// Preferences: served by config.yaml when writable; sessionStorage when stateless.
+// wikioracle.js — Main WikiOracle front-end application.
+// Loaded last; depends on config.js, state.js, util.js, query.js, tree.js.
 //
-// Rendering pipeline:
-//   llm.jsonl on disk
-//     -> [jsonl_to_state] (bin/state.py)
-//     -> GET /state -> client receives state JSON
-//     -> [renderMessages] renders chat panel (selected conversation's messages)
-//     -> [conversationsToHierarchy + renderTree] (d3tree.js) renders SVG tree
-//
-// State shape: { version, schema, time, context, conversations: [...tree...],
-//                selected_conversation, truth: { trust: [...] } }
-//
-// Optimistic UI (sendMessage):
-//   1. Client adds query entry with _pending:true (rendered at 0.6 opacity)
-//   2. For new conversations, creates a temp conversation with tempId("c_")
-//   3. Re-renders immediately via renderMessages()
-//   4. Sends state to server; server adds only the response entry
-//   5. On success: replaces state with server's authoritative response, re-renders
-//   6. On error: reloads state from sessionStorage (stateless) or GET /state (stateful)
-//
-// State persistence:
-//   Stateful:  POST /state after every mutation -> llm.jsonl on disk
-//   Stateless: sessionStorage is authoritative; state sent with each /chat request
+// Sections:
+//   XHTML validation       — validateXhtml, repairXhtml, ensureXhtml
+//   Config/state persist   — _persistConfig, _persistState (call api(); deps live in config.js/state.js)
+//   Layout + theme         — applyLayout, applyTheme
+//   Provider metadata      — _refreshProviderMeta, _populateModelDropdown, _providerReady
+//   Tree navigation        — navigateToNode, branchFromNode, _navigateChild/Sibling
+//   Conversation actions   — deleteConversation, _deleteAllConversations, _splitAfterMessage
+//   Clipboard              — _cutConversation, _pasteConversation, _copyConversationContent
+//   Message rendering      — renderMessages, setStatus, _showProgress/_hideProgress
+//   Chat                   — sendMessage (QueryBundle → ResponseBundle)
+//   Events + init          — bindEvents, init, _initStateless, _initStateful
+//   Draggable divider      — mouse/touch resize between tree and chat
+//   Pinch zoom             — two-finger zoom on mobile
+//   Swipe navigation       — horizontal/vertical swipe to navigate siblings
 
 // ─── XHTML validation and repair ───
 function validateXhtml(content) {
@@ -57,149 +50,23 @@ function ensureXhtml(content) {
   return `<p>${escapeHtml(content)}</p>`;
 }
 
-// ─── Server info (loaded on init) ───
-let _serverInfo = { stateless: false, url_prefix: "" };
+// config, state — declared in config.js and state.js
 
-// ─── Preferences (derived in memory from config bundle) ───
-let prefs = { provider: "wikioracle", layout: "flat", username: "User" };
+// ─── Persistence bridges (call api() from query.js) ───
 
-const _STATE_KEY = "wikioracle_state";
-const _CONFIG_KEY = "wikioracle_config";
-
-// Config bundle in sessionStorage: { yaml: "<raw text>", parsed: {...}, prefs: {...} }
-function _loadLocalConfig() {
-  try {
-    const raw = sessionStorage.getItem(_CONFIG_KEY);
-    if (!raw) return null;
-    const bundle = JSON.parse(raw);
-    // Handle legacy format (raw YAML string, not a bundle)
-    if (typeof bundle === "string") return null;
-    return bundle;
-  } catch { return null; }
-}
-
-function _saveLocalConfig(bundle) {
-  try { sessionStorage.setItem(_CONFIG_KEY, JSON.stringify(bundle)); } catch {}
-}
-
-// Derive prefs from a parsed config dict — mirrors server's _derive_prefs()
-function _derivePrefs(cfg) {
-  const ui = (cfg && cfg.ui) || {};
-  const chat = (cfg && cfg.chat) || {};
-  const user = (cfg && cfg.user) || {};
-  return {
-    provider: ui.default_provider || "wikioracle",
-    layout: ui.layout || "flat",
-    username: user.name || "User",
-    chat: {
-      temperature: chat.temperature !== undefined ? chat.temperature : 0.7,
-      message_window: chat.message_window !== undefined ? chat.message_window : 40,
-      rag: chat.rag !== false,
-      url_fetch: !!chat.url_fetch,
-      confirm_actions: !!chat.confirm_actions,
-    },
-    theme: ui.theme || "system",
-    splitter_pct: ui.splitter_pct != null ? ui.splitter_pct : null,
-    swipe_nav_horizontal: ui.swipe_nav_horizontal !== false,
-    swipe_nav_vertical: !!ui.swipe_nav_vertical,
-  };
-}
-
-// Persist current prefs to config bundle (stateless) or server (stateful).
-function _persistPrefs() {
-  if (_serverInfo.stateless) {
-    const bundle = _loadLocalConfig() || { yaml: "", parsed: {}, prefs: {} };
-    bundle.parsed = bundle.parsed || {};
-    bundle.parsed.ui = bundle.parsed.ui || {};
-    bundle.parsed.ui.splitter_pct = prefs.splitter_pct;
-    bundle.prefs = { ...prefs };
-    _saveLocalConfig(bundle);
+// Persist current config (stateless → sessionStorage, stateful → server).
+function _persistConfig() {
+  if (config.server.stateless) {
+    _saveLocalConfig(config);
   } else {
-    api("POST", "/prefs", {
-      provider: prefs.provider,
-      username: prefs.username,
-      layout: prefs.layout,
-      theme: prefs.theme,
-      chat: prefs.chat,
-      splitter_pct: prefs.splitter_pct,
-      swipe_nav_horizontal: prefs.swipe_nav_horizontal,
-      swipe_nav_vertical: prefs.swipe_nav_vertical,
-    }).catch(function() {});
+    api("POST", "/config", { config: config }).catch(function() {});
   }
 }
-
-// One-time migration: wikioracle_prefs → config bundle
-async function _migratePrefsToConfig() {
-  const _OLD_PREFS_KEY = "wikioracle_prefs";
-  let oldPrefs;
-  try {
-    const raw = sessionStorage.getItem(_OLD_PREFS_KEY);
-    if (!raw) return; // nothing to migrate
-    oldPrefs = JSON.parse(raw);
-  } catch { return; }
-
-  const existing = _loadLocalConfig();
-  if (existing && existing.prefs) {
-    // Config bundle already exists — just clean up
-    sessionStorage.removeItem(_OLD_PREFS_KEY);
-    return;
-  }
-
-  // Build parsed config from old prefs
-  const parsed = {
-    user: { name: oldPrefs.username || "User" },
-    ui: {
-      default_provider: oldPrefs.provider || "wikioracle",
-      layout: oldPrefs.layout || "flat",
-    },
-    chat: { ...(oldPrefs.chat || {}) },
-  };
-  if (oldPrefs.theme) parsed.ui.theme = oldPrefs.theme;
-
-  // Fetch YAML text from server as seed (best-effort)
-  let yamlText = "";
-  // Check if legacy wikioracle_config had raw YAML text
-  try {
-    const raw = sessionStorage.getItem(_CONFIG_KEY);
-    if (raw && typeof raw === "string") {
-      const test = JSON.parse(raw);
-      // If it parsed as a string (not object), it was raw YAML stored directly
-      if (typeof test === "string") yamlText = test;
-    }
-  } catch {
-    // Not JSON — might be raw YAML text stored directly
-    try {
-      const raw = sessionStorage.getItem(_CONFIG_KEY);
-      if (raw) yamlText = raw;
-    } catch {}
-  }
-  if (!yamlText) {
-    try {
-      const data = await api("GET", "/config");
-      yamlText = data.yaml || "";
-    } catch {}
-  }
-
-  _saveLocalConfig({ yaml: yamlText, parsed: parsed, prefs: _derivePrefs(parsed) });
-  sessionStorage.removeItem(_OLD_PREFS_KEY);
-}
-
-function _loadLocalState() {
-  try {
-    const raw = sessionStorage.getItem(_STATE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-function _saveLocalState() {
-  try { sessionStorage.setItem(_STATE_KEY, JSON.stringify(state)); } catch {}
-}
-
 
 // Persist state: sessionStorage is authoritative in stateless mode;
 // disk-backed POST /state is used in stateful mode.
 function _persistState() {
-  if (_serverInfo.stateless) {
+  if (config.server.stateless) {
     _saveLocalState();
   } else {
     api("POST", "/state", state).catch(e => setStatus("Error: " + e.message));
@@ -230,18 +97,7 @@ function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", t);
 }
 
-// ─── Provider metadata (populated from /providers on init) ───
-let _providerMeta = {};  // { "openai": { model: "gpt-4o", ... }, ... }
-
-// ─── State (in-memory, synced from server) ───
-// Shape: { version, schema, date, context, conversations: [...tree...],
-//             selected_conversation, truth: { trust, retrieval_prefs } }
-let state = null;
-
-// ─── Selected conversation ───
-// null = root selected (empty chat, typing creates new root conversation)
-// string = conversation ID in the tree
-let selectedConvId = null;
+// state — declared in util.js
 var _navScrollHint = null;  // "top" | "bottom" | null — set by _treeNav for continuous scrolling
 
 // Pending branch: when set, the next send creates a child of this conversation
@@ -249,7 +105,7 @@ let _pendingBranchParent = null;
 
 // ─── Confirmation helper (skips dialog when confirm_actions is off) ───
 function confirmAction(msg) {
-  if (prefs.chat && prefs.chat.confirm_actions) return confirm(msg);
+  if (config.chat && config.chat.confirm_actions) return confirm(msg);
   return true;
 }
 
@@ -257,8 +113,7 @@ function confirmAction(msg) {
 
 function navigateToNode(nodeId) {
   if (!state) return;
-  if (selectedConvId === nodeId) return; // already on this node (dedup)
-  selectedConvId = nodeId;
+  if (state.selected_conversation === nodeId) return; // already on this node (dedup)
   _pendingBranchParent = null; // cancel any pending branch
   state.selected_conversation = nodeId;
   renderMessages();
@@ -270,7 +125,7 @@ function branchFromNode(convId) {
   // Double-click a node → show empty chat, highlight the branch-from node
   if (!state || !convId) return;
   _pendingBranchParent = convId;
-  selectedConvId = convId; // keep branch-from node highlighted in tree
+  state.selected_conversation = convId; // keep branch-from node highlighted in tree
   renderMessages();
   const conv = findConversation(state.conversations || [], convId);
   const label = conv ? conv.title.slice(0, 40) : convId.slice(0, 12);
@@ -287,7 +142,6 @@ function deleteConversation(convId) {
   if (!confirmAction(`Delete "${conv.title}" and all its branches? (${count} message${count !== 1 ? "s" : ""})`)) return;
 
   removeFromTree(state.conversations, convId);
-  selectedConvId = null;
   state.selected_conversation = null;
   renderMessages();
   _persistState();
@@ -394,7 +248,6 @@ function _deleteAllConversations() {
   for (const c of state.conversations) total += countTreeMessages(c);
   if (!confirmAction(`Delete ALL conversations? (${state.conversations.length} root conversations, ${total} total messages)`)) return;
   state.conversations = [];
-  selectedConvId = null;
   state.selected_conversation = null;
   renderMessages();
   _persistState();
@@ -402,8 +255,8 @@ function _deleteAllConversations() {
 }
 
 function _splitAfterMessage(msgIdx) {
-  if (!state || !selectedConvId) return;
-  const conv = findConversation(state.conversations, selectedConvId);
+  if (!state || !state.selected_conversation) return;
+  const conv = findConversation(state.conversations, state.selected_conversation);
   if (!conv || !conv.messages) return;
   if (msgIdx < 0 || msgIdx >= conv.messages.length - 1) return; // nothing to split
 
@@ -420,7 +273,6 @@ function _splitAfterMessage(msgIdx) {
   };
   conv.children = [newConv];
 
-  selectedConvId = newConv.id;
   state.selected_conversation = newConv.id;
   renderMessages();
   _persistState();
@@ -498,8 +350,8 @@ function _showMsgContextMenu(event, msgIdx, totalMsgs) {
     e.stopPropagation(); _hideMsgContextMenu();
     if (msgIdx < totalMsgs - 1) {
       _splitAfterMessage(msgIdx);
-    } else if (selectedConvId) {
-      branchFromNode(selectedConvId);
+    } else if (state.selected_conversation) {
+      branchFromNode(state.selected_conversation);
     }
   });
   menu.appendChild(branchItem);
@@ -518,8 +370,8 @@ function _showMsgContextMenu(event, msgIdx, totalMsgs) {
 }
 
 function _moveMessage(fromIdx, toIdx) {
-  if (!state || !selectedConvId) return;
-  const conv = findConversation(state.conversations, selectedConvId);
+  if (!state || !state.selected_conversation) return;
+  const conv = findConversation(state.conversations, state.selected_conversation);
   if (!conv || !conv.messages) return;
   if (fromIdx < 0 || fromIdx >= conv.messages.length) return;
   if (toIdx < 0 || toIdx >= conv.messages.length) return;
@@ -530,8 +382,8 @@ function _moveMessage(fromIdx, toIdx) {
 }
 
 function _deleteMessage(msgIdx) {
-  if (!state || !selectedConvId) return;
-  const conv = findConversation(state.conversations, selectedConvId);
+  if (!state || !state.selected_conversation) return;
+  const conv = findConversation(state.conversations, state.selected_conversation);
   if (!conv || !conv.messages) return;
   const msg = conv.messages[msgIdx];
   if (!msg) return;
@@ -540,8 +392,7 @@ function _deleteMessage(msgIdx) {
   conv.messages.splice(msgIdx, 1);
   // If conversation is now empty, remove it too
   if (conv.messages.length === 0 && (!conv.children || conv.children.length === 0)) {
-    removeFromTree(state.conversations, selectedConvId);
-    selectedConvId = null;
+    removeFromTree(state.conversations, state.selected_conversation);
     state.selected_conversation = null;
   }
   renderMessages();
@@ -549,20 +400,20 @@ function _deleteMessage(msgIdx) {
 }
 
 function _cutMessage(msgIdx) {
-  if (!state || !selectedConvId) return;
-  var conv = findConversation(state.conversations, selectedConvId);
+  if (!state || !state.selected_conversation) return;
+  var conv = findConversation(state.conversations, state.selected_conversation);
   if (!conv || !conv.messages || !conv.messages[msgIdx]) return;
-  _clipboard = { type: "msg", action: "cut", convId: selectedConvId, msgIdx: msgIdx };
+  _clipboard = { type: "msg", action: "cut", convId: state.selected_conversation, msgIdx: msgIdx };
   setStatus("Cut message \u2014 select a position and Paste");
 }
 
 function _copyMessageContent(msgIdx) {
-  if (!state || !selectedConvId) return;
-  var conv = findConversation(state.conversations, selectedConvId);
+  if (!state || !state.selected_conversation) return;
+  var conv = findConversation(state.conversations, state.selected_conversation);
   if (!conv || !conv.messages || !conv.messages[msgIdx]) return;
   var msg = conv.messages[msgIdx];
   // Set internal clipboard for paste-to-duplicate
-  _clipboard = { type: "msg", action: "copy", convId: selectedConvId, msgIdx: msgIdx };
+  _clipboard = { type: "msg", action: "copy", convId: state.selected_conversation, msgIdx: msgIdx };
   // Also copy text to system clipboard
   var text = stripTags(msg.content || "");
   navigator.clipboard.writeText(text).then(function() {
@@ -574,12 +425,12 @@ function _copyMessageContent(msgIdx) {
 
 function _pasteMessage(targetIdx) {
   if (!_clipboard || _clipboard.type !== "msg") return;
-  if (!state || !selectedConvId) return;
-  var conv = findConversation(state.conversations, selectedConvId);
+  if (!state || !state.selected_conversation) return;
+  var conv = findConversation(state.conversations, state.selected_conversation);
   if (!conv || !conv.messages) return;
 
   if (_clipboard.action === "cut") {
-    if (_clipboard.convId !== selectedConvId) {
+    if (_clipboard.convId !== state.selected_conversation) {
       setStatus("Cannot paste message across conversations.");
       _clipboard = null;
       return;
@@ -666,9 +517,8 @@ function renderMessages() {
     onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations
   };
 
-  // Validate selectedConvId: if it points to a missing conversation, reset to root
-  if (selectedConvId !== null && !findConversation(state.conversations, selectedConvId)) {
-    selectedConvId = null;
+  // Validate state.selected_conversation: if it points to a missing conversation, reset to root
+  if (state.selected_conversation !== null && !findConversation(state.conversations, state.selected_conversation)) {
     state.selected_conversation = null;
   }
 
@@ -677,20 +527,20 @@ function renderMessages() {
   let visible = [];
   if (_pendingBranchParent) {
     // Empty chat — user is about to type a new branch message
-  } else if (selectedConvId !== null) {
-    const conv = findConversation(state.conversations, selectedConvId);
+  } else if (state.selected_conversation !== null) {
+    const conv = findConversation(state.conversations, state.selected_conversation);
     if (conv) {
       visible = conv.messages || [];
     }
   }
   // else: root selected → empty chat
 
-  console.log("[WikiOracle] renderMessages: selectedConv=", selectedConvId,
+  console.log("[WikiOracle] renderMessages: selectedConv=", state.selected_conversation,
               "visible=", visible.length, "conversations=", state.conversations.length);
 
   // Show parent navigation link at top of chat
-  if (!_pendingBranchParent && selectedConvId !== null) {
-    var parentConv = findParentConversation(state.conversations, selectedConvId);
+  if (!_pendingBranchParent && state.selected_conversation !== null) {
+    var parentConv = findParentConversation(state.conversations, state.selected_conversation);
     var parentNav = document.createElement("div");
     parentNav.className = "conv-parent-nav";
     var parentLink = document.createElement("button");
@@ -759,7 +609,7 @@ function renderMessages() {
   }
 
   // ─── Root summary dashboard (when viewing the root node) ───
-  if (selectedConvId === null && !_pendingBranchParent) {
+  if (state.selected_conversation === null && !_pendingBranchParent) {
     var stats = _computeTreeStats(state.conversations);
     var trustEntries = (state.truth && state.truth.trust) || [];
     var contextText = stripTags(state.context || "").trim();
@@ -857,7 +707,7 @@ function renderMessages() {
 
   // Show child conversations as clickable links (navigate deeper into tree)
   if (!_pendingBranchParent) {
-    var currentConv = selectedConvId ? findConversation(state.conversations, selectedConvId) : null;
+    var currentConv = state.selected_conversation ? findConversation(state.conversations, state.selected_conversation) : null;
     var childConvs = currentConv ? (currentConv.children || []) : state.conversations;
     if (childConvs.length > 0) {
       const childNav = document.createElement("div");
@@ -877,7 +727,7 @@ function renderMessages() {
 
   // Show placeholder for empty non-root conversations or pending branches
   var hasChildren = typeof childConvs !== "undefined" && childConvs && childConvs.length > 0;
-  if (visible.length === 0 && !hasChildren && selectedConvId !== null) {
+  if (visible.length === 0 && !hasChildren && state.selected_conversation !== null) {
     const placeholder = document.createElement("div");
     placeholder.className = "chat-placeholder";
     if (_pendingBranchParent) {
@@ -900,7 +750,7 @@ function renderMessages() {
   // Render D3 tree
   try {
     if (typeof conversationsToHierarchy === "function" && typeof renderTree === "function") {
-      const treeData = conversationsToHierarchy(state.conversations, selectedConvId);
+      const treeData = conversationsToHierarchy(state.conversations, state.selected_conversation);
       renderTree(treeData, treeCallbacks);
     }
   } catch (e) {
@@ -956,9 +806,9 @@ function _hideProgress() {
 
 function _updatePlaceholder() {
   const input = document.getElementById("msgInput");
-  const meta = _providerMeta[prefs.provider];
-  const name = meta ? meta.name : prefs.provider;
-  const model = prefs.model || (meta ? meta.model : "");
+  const meta = config.server.providers[config.ui.default_provider];
+  const name = meta ? meta.name : config.ui.default_provider;
+  const model = config.ui.model || (meta ? meta.model : "");
   input.placeholder = model ? `Message ${name} (${model})...` : `Message ${name}...`;
 }
 
@@ -970,8 +820,8 @@ async function sendMessage() {
 
   // Check provider readiness before sending
   if (!_providerReady()) {
-    const meta = _providerMeta[prefs.provider] || {};
-    setStatus(`${meta.name || prefs.provider} requires an API key. Add it in Settings \u2192 config.yaml.`);
+    const meta = config.server.providers[config.ui.default_provider] || {};
+    setStatus(`${meta.name || config.ui.default_provider} requires an API key. Add it in Settings \u2192 config.yaml.`);
     return;
   }
 
@@ -982,8 +832,8 @@ async function sendMessage() {
 
   // Determine how to route this message:
   //   _pendingBranchParent set → create child of that conversation (branch_from)
-  //   selectedConvId !== null → append to that conversation (conversation_id)
-  //   selectedConvId === null → new root conversation (neither)
+  //   state.selected_conversation !== null → append to that conversation (conversation_id)
+  //   state.selected_conversation === null → new root conversation (neither)
   let conversationId = null;
   let branchFrom = null;
   let isNewRoot = false;
@@ -991,8 +841,8 @@ async function sendMessage() {
   if (_pendingBranchParent) {
     branchFrom = _pendingBranchParent;
     _pendingBranchParent = null;
-  } else if (selectedConvId !== null) {
-    conversationId = selectedConvId;
+  } else if (state.selected_conversation !== null) {
+    conversationId = state.selected_conversation;
   } else {
     isNewRoot = true;
   }
@@ -1006,7 +856,7 @@ async function sendMessage() {
   const userEntry = {
     id: optimisticMsgId,
     role: "user",
-    username: prefs.username || "User",
+    username: config.user.name || "User",
     time: now,
     content: `<p>${escapeHtml(text)}</p>`,
     _pending: true,
@@ -1036,24 +886,25 @@ async function sendMessage() {
     } else {
       state.conversations.push(optConv);
     }
-    selectedConvId = optConvId;
+    state.selected_conversation = optConvId;
   }
   renderMessages();
 
   try {
-    const chatBody = {
+    const queryBundle = {
+    // QueryBundle: sent to POST /chat
       message: text,
       conversation_id: conversationId || undefined,
       branch_from: branchFrom || undefined,
-      prefs: {
-        provider: prefs.provider,
-        model: prefs.model || (_providerMeta[prefs.provider] || {}).model || "",
-        username: prefs.username,
-        chat: prefs.chat || {},
+      config: {
+        provider: config.ui.default_provider,
+        model: config.ui.model || (config.server.providers[config.ui.default_provider] || {}).model || "",
+        username: config.user.name,
+        chat: config.chat || {},
       },
     };
     // Include pruned state (ancestor path only) + runtime_config
-    const targetConvId = conversationId || branchFrom || selectedConvId;
+    const targetConvId = conversationId || branchFrom || state.selected_conversation;
     const prunedState = {
       version: state.version, schema: state.schema, time: state.time,
       context: state.context, output: state.output, truth: state.truth,
@@ -1065,25 +916,22 @@ async function sendMessage() {
     if (!targetConvId && state.conversations.length > 0) {
       prunedState.conversations = [state.conversations[state.conversations.length - 1]];
     }
-    if (_serverInfo.stateless) {
-      chatBody.state = prunedState;
-      chatBody.runtime_config = _buildRuntimeConfig();
+    if (config.server.stateless) {
+      queryBundle.state = prunedState;
+      queryBundle.runtime_config = _buildRuntimeConfig();
     } else {
-      chatBody.state = prunedState;
+      queryBundle.state = prunedState;
     }
-    const data = await api("POST", "/chat", chatBody);
-    const respState = data.state || {};
+    const data = await api("POST", "/chat", queryBundle);
+    const responseBundle = data.state || {};
+    // ResponseBundle: returned from POST /chat
 
     // Merge response into local full state (path_only means response has pruned tree)
     if (!Array.isArray(state.conversations)) state.conversations = [];
-    _mergeResponseConversation(state.conversations, respState);
-    state.selected_conversation = respState.selected_conversation || state.selected_conversation;
+    _mergeResponseConversation(state.conversations, responseBundle);
+    state.selected_conversation = responseBundle.selected_conversation || state.selected_conversation;
     // Update truth (derived certainty may have changed)
-    if (respState.truth) state.truth = respState.truth;
-
-    if (state.selected_conversation) {
-      selectedConvId = state.selected_conversation;
-    }
+    if (responseBundle.truth) state.truth = responseBundle.truth;
 
     _persistState();
     renderMessages();
@@ -1091,7 +939,7 @@ async function sendMessage() {
   } catch (e) {
     // Rollback: reload state from sessionStorage (stateless) or server (stateful)
     try {
-      if (_serverInfo.stateless) {
+      if (config.server.stateless) {
         const localState = _loadLocalState();
         if (localState) state = localState;
       } else {
@@ -1099,7 +947,7 @@ async function sendMessage() {
         state = data.state || state;
       }
     } catch {}
-    if (isNewRoot || branchFrom) selectedConvId = null;
+    if (isNewRoot || branchFrom) state.selected_conversation = null;
     renderMessages();
     setStatus("Error: " + e.message);
   } finally {
@@ -1242,7 +1090,7 @@ function bindEvents() {
 
       // Merge: client-side in stateless mode, server-side otherwise
       _showProgress(85, "Merging\u2026");
-      if (_serverInfo.stateless) {
+      if (config.server.stateless) {
         _clientMerge(importState);
       } else {
         const result = await api("POST", "/merge", { state: importState });
@@ -1252,7 +1100,7 @@ function bindEvents() {
       // Persist merged state and redraw all components
       _showProgress(95, "Saving\u2026");
       _persistState();
-      selectedConvId = null;
+      state.selected_conversation = null;
       renderMessages();
       _hideProgress();
 
@@ -1337,21 +1185,21 @@ function bindEvents() {
 
     var flat = buildPreorder(convs);
     var curIdx = flat.findIndex(function(c) {
-      return c === null ? selectedConvId === null : c.id === selectedConvId;
+      return c === null ? state.selected_conversation === null : c.id === state.selected_conversation;
     });
 
     switch (direction) {
       case "up": {
-        if (selectedConvId === null) return false;
-        var parent = findParentConversation(convs, selectedConvId);
+        if (state.selected_conversation === null) return false;
+        var parent = findParentConversation(convs, state.selected_conversation);
         _navScrollHint = "bottom";
         treeRequestFocus();
         navigateToNode(parent ? parent.id : null);
         return true;
       }
       case "down": {
-        var cur = selectedConvId === null ? null : findConversation(convs, selectedConvId);
-        var hasChildren = selectedConvId === null
+        var cur = state.selected_conversation === null ? null : findConversation(convs, state.selected_conversation);
+        var hasChildren = state.selected_conversation === null
           ? convs.length > 0
           : (cur && cur.children && cur.children.length > 0);
         if (hasChildren && curIdx >= 0 && curIdx < flat.length - 1) {
@@ -1423,8 +1271,8 @@ function bindEvents() {
   }, { passive: true });
 
   // ─── Touch swipe: mobile-only tree navigation via swipe gestures ───
-  // Governed by prefs.swipe_nav_horizontal (default true) and
-  // prefs.swipe_nav_vertical (default false).  Vertical is off because
+  // Governed by config.ui.swipe_nav_horizontal (default true) and
+  // config.ui.swipe_nav_vertical (default false).  Vertical is off because
   // vertical scrolling is used to read content; horizontal swipes
   // navigate siblings.  Both are stored in config.yaml (ui section).
   if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
@@ -1453,7 +1301,7 @@ function bindEvents() {
         var atTop = container.scrollTop <= 0;
         var atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
 
-        if (prefs.swipe_nav_vertical) {
+        if (config.ui.swipe_nav_vertical) {
           // Finger drags DOWN when at top → navigate to parent
           if (atTop && dy > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
             _scrollNavCooldown = now; _treeNav("up");
@@ -1464,7 +1312,7 @@ function bindEvents() {
           }
         }
 
-        if (prefs.swipe_nav_horizontal !== false && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
+        if (config.ui.swipe_nav_horizontal !== false && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
           // Horizontal swipe: finger left = next sibling, finger right = prev
           _scrollNavCooldown = now;
           _treeNav(dx < 0 ? "right" : "left");
@@ -1474,7 +1322,7 @@ function bindEvents() {
   }
 }
 
-// ─── Init: load prefs + state from server ───
+// ─── Init: load config + state from server ───
 async function init() {
   try {
     _showProgress(-1, "Connecting\u2026");
@@ -1485,33 +1333,33 @@ async function init() {
     //    API calls go to /chat/state etc.  Fallback: ask the server.
     const pagePath = window.location.pathname.replace(/\/+$/, "");
     if (pagePath && pagePath !== "/") {
-      _serverInfo.url_prefix = pagePath;
+      config.server.url_prefix = pagePath;
     }
     try {
       const info = await api("GET", "/server_info");
-      _serverInfo = info;
+      config.server.stateless = !!info.stateless;
       // If server tells us a prefix and we didn't already detect one, use it
-      if (info.url_prefix && !pagePath) _serverInfo.url_prefix = info.url_prefix;
+      if (info.url_prefix && !pagePath) config.server.url_prefix = info.url_prefix;
     } catch (e) {
       console.warn("[WikiOracle] Failed to load server_info:", e);
     }
 
-    if (_serverInfo.stateless) {
+    if (config.server.stateless) {
       await _initStateless();
     } else {
       await _initStateful();
     }
 
-    // Apply layout, theme, and update placeholder from prefs
-    applyLayout(prefs.layout);
-    applyTheme(prefs.theme);
+    // Apply layout, theme, and update placeholder from config
+    applyLayout(config.ui.layout);
+    applyTheme(config.ui.theme);
     _updatePlaceholder();
 
-    // Restore splitter position from prefs (percentage of viewport)
-    if (prefs.splitter_pct != null) {
+    // Restore splitter position from config (percentage of viewport)
+    if (config.ui.splitter_pct != null) {
       const tree = document.getElementById("treeContainer");
       if (tree) {
-        const pct = prefs.splitter_pct;
+        const pct = config.ui.splitter_pct;
         if (document.body.classList.contains("layout-vertical")) {
           tree.style.width = pct === 0 ? "0px" : (pct / 100 * window.innerWidth) + "px";
         } else {
@@ -1522,10 +1370,8 @@ async function init() {
     }
 
     // Restore selected conversation from state
-    if (state.selected_conversation && findConversation(state.conversations, state.selected_conversation)) {
-      selectedConvId = state.selected_conversation;
-    } else {
-      selectedConvId = null; // root
+    if (!state.selected_conversation || !findConversation(state.conversations, state.selected_conversation)) {
+      state.selected_conversation = null; // root
     }
 
     const convCount = state.conversations.length;
@@ -1544,8 +1390,8 @@ async function init() {
 // If sessionStorage has data, use it directly — no server calls needed for
 // state or config.  If sessionStorage is empty, call /bootstrap once to seed.
 async function _initStateless() {
-  // Migrate legacy prefs → config bundle (one-time)
-  await _migratePrefsToConfig();
+  // Migrate legacy config (one-time)
+  await _migrateOldPrefs();
 
   const localConfig = _loadLocalConfig();
   const localState = _loadLocalState();
@@ -1556,17 +1402,12 @@ async function _initStateless() {
     try {
       const boot = await api("GET", "/bootstrap");
 
-      // Seed config bundle
+      // Seed config
       if (!localConfig) {
-        const seedPrefs = boot.prefs || _derivePrefs(boot.parsed || {});
-        _saveLocalConfig({
-          yaml: boot.config_yaml || "",
-          parsed: boot.parsed || {},
-          prefs: seedPrefs,
-        });
-        prefs = seedPrefs;
+        config = _normalizeConfig(boot.config || {});
+        _saveLocalConfig(config);
       } else {
-        prefs = localConfig.prefs;
+        config = _normalizeConfig(localConfig);
       }
 
       // Seed state
@@ -1581,27 +1422,26 @@ async function _initStateless() {
 
       // Provider metadata
       if (boot.providers) {
-        _providerMeta = boot.providers;
+        config.server.providers = boot.providers;
         _populateProviderDropdown();
       }
     } catch (e) {
       console.warn("[WikiOracle] bootstrap failed:", e);
-      // Fall back to defaults
-      if (localConfig && localConfig.prefs) prefs = localConfig.prefs;
+      if (localConfig) config = _normalizeConfig(localConfig);
       state = localState || {};
       if (!Array.isArray(state.conversations)) state.conversations = [];
     }
   } else {
     // Both sessionStorage keys present — use them directly, no server calls
     console.log("[WikiOracle] stateless: using sessionStorage (no server calls)");
-    prefs = localConfig.prefs;
+    config = _normalizeConfig(localConfig);
     state = localState;
     if (!Array.isArray(state.conversations)) state.conversations = [];
 
     // Provider metadata: try server, but don't block
     try {
       const provData = await api("GET", "/providers");
-      _providerMeta = provData.providers || {};
+      config.server.providers = provData.providers || {};
     } catch {}
     _populateProviderDropdown();
   }
@@ -1609,18 +1449,18 @@ async function _initStateless() {
 
 // Stateful init: server disk is authoritative.
 async function _initStateful() {
-  // Load prefs from server
+  // Load config from server (YAML-shaped with defaults)
   try {
-    const prefData = await api("GET", "/prefs");
-    prefs = prefData.prefs || prefs;
+    const configData = await api("GET", "/config");
+    config = _normalizeConfig(configData.config || {});
   } catch (e) {
-    console.warn("[WikiOracle] Failed to load prefs:", e);
+    console.warn("[WikiOracle] Failed to load config:", e);
   }
 
   // Load provider metadata
   try {
     const provData = await api("GET", "/providers");
-    _providerMeta = provData.providers || {};
+    config.server.providers = provData.providers || {};
     _populateProviderDropdown();
   } catch {}
 
@@ -1644,7 +1484,7 @@ async function _initStateful() {
 // Fetch /state using XHR so we can track download progress via onprogress.
 function _fetchStateWithProgress(expectedSize) {
   return new Promise(function(resolve, reject) {
-    var prefix = (_serverInfo && _serverInfo.url_prefix) || "";
+    var prefix = config.server.url_prefix || "";
     var xhr = new XMLHttpRequest();
     xhr.open("GET", prefix + "/state");
     xhr.responseType = "text";
@@ -1683,18 +1523,18 @@ function _fetchStateWithProgress(expectedSize) {
 async function _refreshProviderMeta() {
   try {
     var provData = await api("GET", "/providers");
-    _providerMeta = provData.providers || {};
+    config.server.providers =provData.providers || {};
     _populateProviderDropdown();
   } catch (e) {
     console.warn("[WikiOracle] Failed to refresh provider metadata:", e);
   }
 }
 
-// Populate the provider <select> dropdown from _providerMeta
+// Populate the provider <select> dropdown from config.server.providers
 function _populateProviderDropdown() {
   const sel = document.getElementById("setProvider");
   sel.innerHTML = "";
-  for (const [key, info] of Object.entries(_providerMeta)) {
+  for (const [key, info] of Object.entries(config.server.providers)) {
     const opt = document.createElement("option");
     opt.value = key;
     const keyWarning = (info.needs_key && !info.has_key) ? " \u26a0 no key" : "";
@@ -1707,7 +1547,7 @@ function _populateProviderDropdown() {
 function _populateModelDropdown(providerKey) {
   const sel = document.getElementById("setModel");
   sel.innerHTML = "";
-  const meta = _providerMeta[providerKey || prefs.provider];
+  const meta = config.server.providers[providerKey || config.ui.default_provider];
   if (!meta) return;
   const models = meta.models || [];
   if (models.length === 0 && meta.model) {
@@ -1728,15 +1568,13 @@ function _populateModelDropdown(providerKey) {
 
 // Check if the currently selected provider can accept messages
 function _providerReady() {
-  var meta = _providerMeta[prefs.provider];
+  var meta = config.server.providers[config.ui.default_provider];
   if (!meta) return true;  // unknown provider — let server decide
   if (!meta.needs_key) return true;
   if (meta.has_key) return true;
   // In stateless mode, check local config for client-supplied key
-  if (_serverInfo.stateless) {
-    var bundle = _loadLocalConfig();
-    var rc = (bundle && bundle.parsed) || {};
-    var rcKey = ((rc.providers || {})[prefs.provider] || {}).api_key;
+  if (config.server.stateless) {
+    var rcKey = ((config.providers || {})[config.ui.default_provider] || {}).api_key;
     if (rcKey) return true;
   }
   return false;
@@ -1784,15 +1622,15 @@ init();
     divider.classList.remove("active");
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
-    // Persist splitter position as percentage into prefs/config
+    // Persist splitter position as percentage into config
     // Use clientHeight/clientWidth (excludes borders) and snap small values to 0
     var size = isVertical() ? tree.clientWidth : tree.clientHeight;
     var viewport = isVertical() ? window.innerWidth : window.innerHeight;
     var pct = size < 4 ? 0 : Math.round(size / viewport * 1000) / 10;
-    prefs.splitter_pct = pct;
+    config.ui.splitter_pct = pct;
     // Toggle collapsed state for border hiding
     tree.classList.toggle("tree-collapsed", pct === 0);
-    _persistPrefs();
+    _persistConfig();
     if (typeof renderMessages === "function") renderMessages();
   }
 

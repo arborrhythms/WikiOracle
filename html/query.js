@@ -1,9 +1,13 @@
-// query.js — Query building, server communication, and response merging for WikiOracle
-// Loaded before wikioracle.js. Depends on util.js (findInTree).
+// query.js — Server communication layer for WikiOracle front-end.
+// Loaded after util.js; depends on config global (config.js) for url_prefix.
+//
+// Exports: api, _apiPath, findConversation, findParentConversation,
+//          _buildAncestorPath, _mergeResponseConversation,
+//          _buildRuntimeConfig, _clientMerge
 
 // ─── API helpers ───
 function _apiPath(path) {
-  return (_serverInfo.url_prefix || "") + path;
+  return (config.server.url_prefix || "") + path;
 }
 
 async function api(method, path, body) {
@@ -61,12 +65,12 @@ function _buildAncestorPath(conversations, convId) {
 }
 
 // Merge a response-state's conversation tree back into the full local state.
-// Finds the selected conversation in respState and updates/inserts it in localConvs.
-function _mergeResponseConversation(localConvs, respState) {
-  var selId = respState.selected_conversation;
+// Finds the selected conversation in responseBundle and updates/inserts it in localConvs.
+function _mergeResponseConversation(localConvs, responseBundle) {
+  var selId = responseBundle.selected_conversation;
   if (!selId) return;
   // Find the conversation in the response
-  var respConv = findInTree(respState.conversations || [], selId);
+  var respConv = findInTree(responseBundle.conversations || [], selId);
   if (!respConv) return;
   // Try to find and update in the local tree
   var localConv = findInTree(localConvs, selId);
@@ -97,7 +101,7 @@ function _mergeResponseConversation(localConvs, respState) {
       }
       return null;
     }
-    var parentId = _findParent(respState.conversations || [], selId);
+    var parentId = _findParent(responseBundle.conversations || [], selId);
     if (parentId) {
       var localParent = findInTree(localConvs, parentId);
       if (localParent) {
@@ -112,12 +116,11 @@ function _mergeResponseConversation(localConvs, respState) {
   }
 }
 
-// Build the runtime_config dict from the current config bundle (stateless).
-// This is the parsed config.yaml content that the server needs for
+// Build the runtime_config dict from the current config (stateless).
+// This is the YAML-shaped config that the server needs for
 // provider resolution, chat settings, and user display name.
 function _buildRuntimeConfig() {
-  const bundle = _loadLocalConfig();
-  return (bundle && bundle.parsed) ? bundle.parsed : {};
+  return config || {};
 }
 
 // Client-side merge: fold importState data into the live `state` object.

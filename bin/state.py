@@ -1,6 +1,10 @@
-"""WikiOracle state management: I/O, conversation tree, merge logic.
+"""WikiOracle state management: data model, I/O, conversation tree, merge logic.
 
-State I/O: JSONL serialization, conversation tree, merge logic.
+State data model and persistence:
+  - JSONL serialization and deserialization of conversation state
+  - Conversation tree structure and traversal
+  - State merging logic for multi-branch conversations
+  - Snapshot and session management utilities
 """
 
 from __future__ import annotations

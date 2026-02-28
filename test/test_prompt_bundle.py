@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for prompt_bundle module: PromptBundle, adapters, and RAG ranking."""
+"""Tests for prompt_bundle module: ProviderBundle, adapters, and RAG ranking."""
 
 import sys
 import unittest
@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 from state import DEFAULT_OUTPUT, SCHEMA_URL
 from response import (
-    PromptBundle,
+    ProviderBundle,
     Source,
     _build_provider_query_bundle,
     build_prompt_bundle,
@@ -51,15 +51,15 @@ def _make_trust_entry(title, certainty, content="Some fact", entry_id="", time="
 
 
 # ---------------------------------------------------------------------------
-# PromptBundle construction
+# ProviderBundle construction
 # ---------------------------------------------------------------------------
-class TestBuildPromptBundle(unittest.TestCase):
+class TestBuildProviderBundle(unittest.TestCase):
     """Test build_prompt_bundle() produces correct bundles."""
 
     def test_basic_bundle(self):
         state = _make_state()
         bundle = build_prompt_bundle(state, "Hello!", {})
-        self.assertIsInstance(bundle, PromptBundle)
+        self.assertIsInstance(bundle, ProviderBundle)
         self.assertEqual(bundle.query, "Hello!")
         # System now includes mandatory XHTML instruction
         self.assertIn("You are a helpful assistant.", bundle.system)
@@ -230,20 +230,20 @@ class TestToOpenAIMessages(unittest.TestCase):
     """Test to_openai_messages() output."""
 
     def test_system_message_present(self):
-        bundle = PromptBundle(system="You are helpful.", query="Hi")
+        bundle = ProviderBundle(system="You are helpful.", query="Hi")
         msgs = to_openai_messages(bundle)
         self.assertEqual(msgs[0]["role"], "system")
         self.assertIn("You are helpful.", msgs[0]["content"])
 
     def test_no_system_when_empty(self):
-        bundle = PromptBundle(system="", query="Hi", output="")
+        bundle = ProviderBundle(system="", query="Hi", output="")
         msgs = to_openai_messages(bundle)
         # First message should be user, not system
         self.assertEqual(msgs[0]["role"], "user")
 
     def test_context_in_system_not_fake_turns(self):
         """Context must be in system message, NOT as fake user/assistant exchange."""
-        bundle = PromptBundle(system="Project rules here.", query="Hi")
+        bundle = ProviderBundle(system="Project rules here.", query="Hi")
         msgs = to_openai_messages(bundle)
         # Check no "[Context]" fake turn exists
         for m in msgs:
@@ -255,7 +255,7 @@ class TestToOpenAIMessages(unittest.TestCase):
         self.assertIn("Project rules here.", system_msgs[0]["content"])
 
     def test_history_preserved(self):
-        bundle = PromptBundle(
+        bundle = ProviderBundle(
             query="latest?",
             history=[
                 {"role": "user", "content": "First"},
@@ -272,7 +272,7 @@ class TestToOpenAIMessages(unittest.TestCase):
         self.assertEqual(user_msgs[-1]["content"], "latest?")
 
     def test_sources_in_final_user_message(self):
-        bundle = PromptBundle(
+        bundle = ProviderBundle(
             query="What?",
             sources=[Source("t1", "Doc A", 0.9, "fact content")],
             output="",
@@ -284,7 +284,7 @@ class TestToOpenAIMessages(unittest.TestCase):
         self.assertIn("What?", final_user["content"])
 
     def test_output_format_in_system(self):
-        bundle = PromptBundle(system="ctx", query="q", output="Format: answer + evidence")
+        bundle = ProviderBundle(system="ctx", query="q", output="Format: answer + evidence")
         msgs = to_openai_messages(bundle)
         system = msgs[0]
         self.assertIn("Format: answer + evidence", system["content"])
@@ -297,19 +297,19 @@ class TestToAnthropicPayload(unittest.TestCase):
     """Test to_anthropic_payload() output."""
 
     def test_system_field(self):
-        bundle = PromptBundle(system="You are helpful.", query="Hi")
+        bundle = ProviderBundle(system="You are helpful.", query="Hi")
         payload = to_anthropic_payload(bundle)
         self.assertIn("system", payload)
         self.assertIn("You are helpful.", payload["system"])
 
     def test_no_system_when_empty(self):
-        bundle = PromptBundle(system="", query="Hi", output="")
+        bundle = ProviderBundle(system="", query="Hi", output="")
         payload = to_anthropic_payload(bundle)
         self.assertNotIn("system", payload)
 
     def test_messages_alternate(self):
         """Anthropic requires strict user/assistant alternation."""
-        bundle = PromptBundle(
+        bundle = ProviderBundle(
             query="end",
             history=[
                 {"role": "user", "content": "A"},
@@ -324,7 +324,7 @@ class TestToAnthropicPayload(unittest.TestCase):
                                 f"Consecutive same role at index {i}: {msgs[i-1]['role']}")
 
     def test_first_message_is_user(self):
-        bundle = PromptBundle(
+        bundle = ProviderBundle(
             query="end",
             history=[{"role": "assistant", "content": "first"}],
         )
@@ -332,14 +332,14 @@ class TestToAnthropicPayload(unittest.TestCase):
         self.assertEqual(payload["messages"][0]["role"], "user")
 
     def test_model_and_temperature(self):
-        bundle = PromptBundle(query="q")
+        bundle = ProviderBundle(query="q")
         payload = to_anthropic_payload(bundle, model="claude-test", temperature=0.5)
         self.assertEqual(payload["model"], "claude-test")
         self.assertEqual(payload["temperature"], 0.5)
 
     def test_context_in_system_not_messages(self):
         """Context should be in system field, not in messages."""
-        bundle = PromptBundle(system="Project context", query="q")
+        bundle = ProviderBundle(system="Project context", query="q")
         payload = to_anthropic_payload(bundle)
         # System field should have context
         self.assertIn("Project context", payload["system"])
@@ -355,21 +355,21 @@ class TestToNanochatMessages(unittest.TestCase):
     """Test to_nanochat_messages() output."""
 
     def test_context_as_first_user_message(self):
-        bundle = PromptBundle(system="Rules", query="Hi")
+        bundle = ProviderBundle(system="Rules", query="Hi")
         msgs = to_nanochat_messages(bundle)
         self.assertEqual(msgs[0]["role"], "user")
         self.assertIn("[Context] Rules", msgs[0]["content"])
         self.assertEqual(msgs[1]["role"], "assistant")
 
     def test_no_context_no_preamble(self):
-        bundle = PromptBundle(system="", query="Hi", output="", sources=[])
+        bundle = ProviderBundle(system="", query="Hi", output="", sources=[])
         msgs = to_nanochat_messages(bundle)
         # Should just be the query with no preamble pair
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["content"], "Hi")
 
     def test_history_after_preamble(self):
-        bundle = PromptBundle(
+        bundle = ProviderBundle(
             system="ctx",
             query="end",
             history=[
@@ -385,7 +385,7 @@ class TestToNanochatMessages(unittest.TestCase):
         self.assertEqual(msgs[4]["content"], "end")
 
     def test_sources_in_preamble(self):
-        bundle = PromptBundle(
+        bundle = ProviderBundle(
             system="ctx",
             query="q",
             sources=[Source("t1", "Doc", 0.9, "content")],
@@ -403,7 +403,7 @@ class TestAdapterParity(unittest.TestCase):
     """Verify semantic parity across provider adapters."""
 
     def _make_full_bundle(self):
-        return PromptBundle(
+        return ProviderBundle(
             system="Project rules",
             history=[
                 {"role": "user", "content": "First question"},
@@ -634,7 +634,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
             content='<div class="provider-response">Answer: 42</div>',
             kind="provider",
         )
-        bundle = PromptBundle(
+        bundle = ProviderBundle(
             system="ctx", query="q",
             sources=[provider_src],
         )

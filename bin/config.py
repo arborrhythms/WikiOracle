@@ -1,4 +1,15 @@
-"""WikiOracle configuration: config.yaml loading, provider registry, TLS certs, CLI args."""
+"""WikiOracle configuration.
+
+Sections:
+  - TLS certificate helpers     (_ensure_self_signed_cert)
+  - Config dataclass + loader   (Config, load_config)
+  - config.yaml loader          (_load_config_yaml, _CONFIG_YAML)
+  - Provider registry           (_build_providers, PROVIDERS, _PROVIDER_MODELS)
+  - Config schema + YAML writer (CONFIG_SCHEMA, config_to_yaml)
+  - Config normalization         (_normalize_config)
+  - Module-level mode flags     (DEBUG_MODE, STATELESS_MODE, URL_PREFIX)
+  - CLI argument parsing        (parse_args)
+"""
 
 from __future__ import annotations
 
@@ -257,29 +268,217 @@ _PROVIDER_MODELS: Dict[str, list] = {
 
 
 # ---------------------------------------------------------------------------
-# Preferences
+# Config schema + YAML writer
 # ---------------------------------------------------------------------------
-def _derive_prefs(cfg_yaml: dict) -> dict:
-    """Derive the flat UI prefs dict from a parsed config.yaml dict."""
-    ui = cfg_yaml.get("ui", {}) if isinstance(cfg_yaml, dict) else {}
-    chat = cfg_yaml.get("chat", {}) if isinstance(cfg_yaml, dict) else {}
-    user = cfg_yaml.get("user", {}) if isinstance(cfg_yaml, dict) else {}
-    return {
-        "provider": ui.get("default_provider", "wikioracle"),
-        "layout": ui.get("layout", "flat"),
-        "username": user.get("name", "User"),
-        "chat": {
-            "temperature": chat.get("temperature", 0.7),
-            "message_window": chat.get("message_window", 40),
-            "rag": chat.get("rag", True),
-            "url_fetch": chat.get("url_fetch", False),
-            "confirm_actions": chat.get("confirm_actions", False),
-        },
-        "theme": ui.get("theme", "system"),
-        "splitter_pct": ui.get("splitter_pct"),
-        "swipe_nav_horizontal": ui.get("swipe_nav_horizontal", True),
-        "swipe_nav_vertical": ui.get("swipe_nav_vertical", False),
-    }
+# Ordered mapping of dotted config paths → human-readable descriptions.
+# Drives field ordering and inline comments when writing config.yaml.
+CONFIG_SCHEMA = [
+    ("user.name",                   "Your display name in chat messages"),
+    ("providers",                   "LLM provider configuration"),
+    ("providers.wikioracle.name",   "Display name for NanoChat provider"),
+    ("providers.wikioracle.username", "API login / email"),
+    ("providers.openai.name",       "Display name for OpenAI provider"),
+    ("providers.openai.username",   "API login / email"),
+    ("providers.openai.url",        "API endpoint URL"),
+    ("providers.openai.api_key",    "API key (or set OPENAI_API_KEY env var)"),
+    ("providers.openai.default_model", "Default model"),
+    ("providers.anthropic.name",    "Display name for Anthropic provider"),
+    ("providers.anthropic.username", "API login / email"),
+    ("providers.anthropic.url",     "API endpoint URL"),
+    ("providers.anthropic.api_key", "API key (or set ANTHROPIC_API_KEY env var)"),
+    ("providers.anthropic.default_model", "Default model"),
+    ("chat.temperature",            "Sampling temperature (0.0–2.0)"),
+    ("chat.message_window",         "Recent turns to send upstream"),
+    ("chat.output_format",          'Appended as "output_format: <value>" line'),
+    ("chat.rag",                    "Use truth entries for retrieval"),
+    ("chat.url_fetch",              "Allow URL fetching in responses"),
+    ("chat.confirm_actions",        "Prompt before deletes, merges, etc."),
+    ("chat.retrieval.max_entries",  "Max RAG entries per query"),
+    ("chat.retrieval.min_certainty", "|certainty| threshold (Kleene: 0 = ignorance)"),
+    ("ui.default_provider",         "Provider selected on startup"),
+    ("ui.layout",                   "Layout mode: flat | horizontal | vertical"),
+    ("ui.theme",                    "Color theme: system | light | dark"),
+    ("ui.splitter_pct",             "Tree/chat splitter position (percentage)"),
+    ("ui.swipe_nav_horizontal",     "Swipe left/right to navigate siblings"),
+    ("ui.swipe_nav_vertical",       "Swipe up/down to navigate siblings"),
+    ("server",                      "Runtime parameters (usually set via CLI flags)"),
+    ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
+    ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
+    ("ssh.wikioracle.key_file",     "Web-server deployment key"),
+    ("ssh.wikioracle.user",         "SSH user"),
+    ("ssh.wikioracle.host",         "SSH host"),
+    ("ssh.wikioracle.dest",         "Remote destination path"),
+    ("ssh.ec2.key_file",            "GPU training instance key"),
+    ("ssh.ec2.user",                "SSH user"),
+    ("ssh.ec2.region",              "AWS region"),
+    ("ssh.ec2.key_name",            "AWS key name"),
+]
+
+
+def _get_nested(data: dict, dotted: str):
+    """Walk a dotted path into a nested dict, returning (value, found)."""
+    keys = dotted.split(".")
+    obj = data
+    for k in keys:
+        if not isinstance(obj, dict) or k not in obj:
+            return None, False
+        obj = obj[k]
+    return obj, True
+
+
+def _set_nested(data: dict, dotted: str, value) -> None:
+    """Set a value at a dotted path, creating intermediate dicts as needed."""
+    keys = dotted.split(".")
+    obj = data
+    for k in keys[:-1]:
+        obj = obj.setdefault(k, {})
+    obj[keys[-1]] = value
+
+
+def _yaml_scalar(value) -> str:
+    """Format a single value as a YAML scalar string."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    s = str(value)
+    # Quote strings that could be mis-parsed or are empty
+    if not s or s in ("true", "false", "null", "yes", "no", "on", "off"):
+        return f'"{s}"'
+    if any(c in s for c in ":#{}[]&*?|>!%@`'\""):
+        return f'"{s}"'
+    return s
+
+
+def config_to_yaml(data: dict) -> str:
+    """Serialize a parsed config dict to YAML text with schema-driven comments.
+
+    Walks CONFIG_SCHEMA in order, emitting `# description` comment lines
+    before each key.  Unknown keys in *data* are appended at the end.
+    Handles two levels of nesting (sections and sub-sections).
+    """
+    if not isinstance(data, dict):
+        return ""
+
+    lines: list[str] = []
+    emitted: set[str] = set()  # Track dotted paths already written
+
+    # Group schema entries by top-level section
+    current_section = None
+
+    for dotted, description in CONFIG_SCHEMA:
+        parts = dotted.split(".")
+        top = parts[0]
+        value, found = _get_nested(data, dotted)
+
+        # Skip entries not present in data (don't emit defaults)
+        if not found:
+            continue
+
+        # Top-level section header (1-part path like "server" or "providers")
+        if len(parts) == 1:
+            if current_section is not None:
+                lines.append("")
+            current_section = top
+            lines.append(f"{top}:  # {description}")
+            emitted.add(top)
+            continue
+
+        # Section break
+        if top != current_section:
+            if current_section is not None:
+                lines.append("")  # blank line between sections
+            current_section = top
+
+            # Handle top-level simple keys (e.g. "user.name" → emit "user:" header)
+            if len(parts) == 2 and parts[0] not in ("providers", "ssh"):
+                # Simple section: user, chat, ui
+                section_data, _ = _get_nested(data, top)
+                if isinstance(section_data, dict):
+                    lines.append(f"{top}:")
+                    emitted.add(top)
+
+        # Emit the actual key with comment
+        if len(parts) == 2:
+            # e.g. user.name → "  name: User  # description"
+            key = parts[1]
+            lines.append(f"  {key}: {_yaml_scalar(value)}  # {description}")
+            emitted.add(dotted)
+        elif len(parts) == 3:
+            # e.g. providers.openai.name or chat.retrieval.max_entries
+            section, subsec, key = parts
+            # Ensure section header exists
+            if section not in emitted:
+                lines.append(f"{section}:")
+                emitted.add(section)
+            # Ensure subsection header exists
+            subsec_path = f"{section}.{subsec}"
+            if subsec_path not in emitted:
+                lines.append(f"  {subsec}:")
+                emitted.add(subsec_path)
+            lines.append(f"    {key}: {_yaml_scalar(value)}  # {description}")
+            emitted.add(dotted)
+        elif len(parts) == 4:
+            section, sub1, sub2, key = parts
+            if section not in emitted:
+                lines.append(f"{section}:")
+                emitted.add(section)
+            sub1_path = f"{section}.{sub1}"
+            if sub1_path not in emitted:
+                lines.append(f"  {sub1}:")
+                emitted.add(sub1_path)
+            sub2_path = f"{section}.{sub1}.{sub2}"
+            if sub2_path not in emitted:
+                lines.append(f"    {sub2}:")
+                emitted.add(sub2_path)
+            lines.append(f"      {key}: {_yaml_scalar(value)}  # {description}")
+            emitted.add(dotted)
+
+    # Append any unknown top-level keys not covered by schema
+    for key in data:
+        if key not in emitted and key not in {p.split(".")[0] for p in emitted}:
+            lines.append("")
+            try:
+                import yaml
+                chunk = yaml.dump({key: data[key]}, default_flow_style=False, allow_unicode=True)
+                lines.append(f"# (unrecognized section)")
+                lines.append(chunk.rstrip())
+            except ImportError:
+                lines.append(f"# {key}: (yaml module not available)")
+            emitted.add(key)
+
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Config normalization (fill defaults, keep YAML shape)
+# ---------------------------------------------------------------------------
+def _normalize_config(cfg_yaml: dict) -> dict:
+    """Ensure all expected fields exist with defaults in a config dict.
+
+    The returned dict has the same shape as config.yaml — no flattening or
+    renaming.  Missing sections/keys are filled with sensible defaults.
+    """
+    cfg = dict(cfg_yaml) if isinstance(cfg_yaml, dict) else {}
+    cfg.setdefault("user", {}).setdefault("name", "User")
+    ui = cfg.setdefault("ui", {})
+    ui.setdefault("default_provider", "wikioracle")
+    ui.setdefault("layout", "flat")
+    ui.setdefault("theme", "system")
+    ui.setdefault("swipe_nav_horizontal", True)
+    ui.setdefault("swipe_nav_vertical", False)
+    chat = cfg.setdefault("chat", {})
+    chat.setdefault("temperature", 0.7)
+    chat.setdefault("message_window", 40)
+    chat.setdefault("rag", True)
+    chat.setdefault("url_fetch", False)
+    chat.setdefault("confirm_actions", False)
+    server = cfg.setdefault("server", {})
+    server.setdefault("stateless", False)
+    server.setdefault("url_prefix", "")
+    return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +486,7 @@ def _derive_prefs(cfg_yaml: dict) -> dict:
 # ---------------------------------------------------------------------------
 DEBUG_MODE: bool = False
 STATELESS_MODE: bool = False
+URL_PREFIX: str = ""
 
 
 # ---------------------------------------------------------------------------

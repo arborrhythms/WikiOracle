@@ -1,5 +1,16 @@
-// util.js — Shared utilities for WikiOracle front-end
-// Loaded before d3tree.js and wikioracle.js.
+// util.js — Shared utilities for WikiOracle front-end.
+// Loaded after config.js and state.js.
+//
+// Sections:
+//   Debug tap tracing       — _tapDebug, _tapLog
+//   CSS / HTML helpers      — cssVar, escapeHtml, decodeEntities, stripTags
+//   Text + ID helpers       — truncate, tempId
+//   Tree navigation helpers — findInTree, removeFromTree, countTreeMessages
+//   Double-tap detection    — onDoubleTap
+//   Zoom utility            — setupZoom
+//   Modal dialogs           — _createDialog, context/output/settings/config/truth/read/search editors
+
+// config, state — declared in config.js and state.js
 
 // ─── Debug tap tracing ───
 // Enable from console: _tapDebug = true;   or add ?tapDebug to URL
@@ -298,7 +309,7 @@ let _specDefaults = null;
 async function _getSpecDefaults() {
   if (!_specDefaults) {
     try { _specDefaults = await api("GET", "/spec_defaults"); }
-    catch (e) { _specDefaults = { context: "<div/>", output: "", config_yaml: "" }; }
+    catch (e) { _specDefaults = { context: "<div/>", output: "", config_parsed: {} }; }
   }
   return _specDefaults;
 }
@@ -419,16 +430,16 @@ function _toggleOutputEditor() {
 
 // ─── Settings panel ───
 function openSettings() {
-  document.getElementById("setUsername").value = prefs.username || "User";
-  document.getElementById("setProvider").value = prefs.provider || "wikioracle";
-  _populateModelDropdown(prefs.provider);
-  var currentModel = prefs.model || (_providerMeta[prefs.provider] || {}).model || "";
+  document.getElementById("setUsername").value = config.user.name || "User";
+  document.getElementById("setProvider").value = config.ui.default_provider || "wikioracle";
+  _populateModelDropdown(config.ui.default_provider);
+  var currentModel = config.ui.model || (config.server.providers[config.ui.default_provider] || {}).model || "";
   if (currentModel) document.getElementById("setModel").value = currentModel;
-  document.getElementById("setLayout").value = prefs.layout || "flat";
-  document.getElementById("setTheme").value = prefs.theme || "system";
+  document.getElementById("setLayout").value = config.ui.layout || "flat";
+  document.getElementById("setTheme").value = config.ui.theme || "system";
 
   // Chat settings
-  const chat = prefs.chat || {};
+  const chat = config.chat || {};
   const tempSlider = document.getElementById("setTemp");
   tempSlider.value = chat.temperature ?? 0.7;
   document.getElementById("setTempVal").textContent = tempSlider.value;
@@ -446,21 +457,20 @@ function closeSettings() {
 }
 async function saveSettings() {
   const newProvider = document.getElementById("setProvider").value;
-  const meta = _providerMeta[newProvider];
+  const meta = config.server.providers[newProvider];
   if (meta && meta.needs_key && !meta.has_key) {
     setStatus(`${meta.name} requires an API key. Add it to config.yaml (Settings → Edit Config).`);
-    // Still save — user might add the key later — but warn them
   }
 
-  prefs.provider = newProvider;
-  prefs.model = document.getElementById("setModel").value || "";
-  prefs.username = document.getElementById("setUsername").value.trim() || "User";
-  prefs.layout = document.getElementById("setLayout").value;
-  prefs.theme = document.getElementById("setTheme").value || "system";
+  config.ui.default_provider = newProvider;
+  config.ui.model = document.getElementById("setModel").value || "";
+  config.user.name = document.getElementById("setUsername").value.trim() || "User";
+  config.ui.layout = document.getElementById("setLayout").value;
+  config.ui.theme = document.getElementById("setTheme").value || "system";
 
   // Chat settings
-  prefs.chat = {
-    ...(prefs.chat || {}),
+  config.chat = {
+    ...(config.chat || {}),
     temperature: parseFloat(document.getElementById("setTemp").value),
     message_window: parseInt(document.getElementById("setWindow").value, 10),
     rag: document.getElementById("setRag").checked,
@@ -468,44 +478,18 @@ async function saveSettings() {
     confirm_actions: document.getElementById("setConfirm").checked,
   };
 
-  applyLayout(prefs.layout);
-  applyTheme(prefs.theme);
+  applyLayout(config.ui.layout);
+  applyTheme(config.ui.theme);
   _updatePlaceholder();
   closeSettings();
 
-  // Persist: patch config bundle in stateless mode, server otherwise
-  if (_serverInfo.stateless) {
-    const bundle = _loadLocalConfig() || { yaml: "", parsed: {}, prefs: {} };
-    // Patch parsed config to reflect the settings changes
-    bundle.parsed = bundle.parsed || {};
-    bundle.parsed.user = bundle.parsed.user || {};
-    bundle.parsed.user.name = prefs.username;
-    bundle.parsed.ui = bundle.parsed.ui || {};
-    bundle.parsed.ui.default_provider = prefs.provider;
-    bundle.parsed.ui.layout = prefs.layout;
-    bundle.parsed.ui.theme = prefs.theme;
-    if (prefs.splitter_pct != null) bundle.parsed.ui.splitter_pct = prefs.splitter_pct;
-    bundle.parsed.chat = bundle.parsed.chat || {};
-    Object.assign(bundle.parsed.chat, {
-      temperature: prefs.chat.temperature,
-      message_window: prefs.chat.message_window,
-      rag: prefs.chat.rag,
-      url_fetch: prefs.chat.url_fetch,
-      confirm_actions: prefs.chat.confirm_actions,
-    });
-    bundle.prefs = { ...prefs };
-    _saveLocalConfig(bundle);
+  // Persist: config is the single source of truth
+  if (config.server.stateless) {
+    _saveLocalConfig(config);
     setStatus("Settings saved (local)");
   } else {
     try {
-      await api("POST", "/prefs", {
-        provider: prefs.provider,
-        username: prefs.username,
-        layout: prefs.layout,
-        theme: prefs.theme,
-        chat: prefs.chat,
-      });
-      // Refresh provider metadata (has_key may have changed via config.yaml)
+      await api("POST", "/config", { config: config });
       await _refreshProviderMeta();
       setStatus("Settings saved");
     } catch (e) {
@@ -515,6 +499,8 @@ async function saveSettings() {
 }
 
 // ─── Config editor (edit config.yaml) ───
+// Uses js-yaml (loaded via CDN) for client-side YAML ↔ JSON conversion.
+// Server never sees raw YAML — only parsed dicts via POST /config.
 async function _openConfigEditor() {
   // Close the settings panel first
   closeSettings();
@@ -534,8 +520,9 @@ async function _openConfigEditor() {
 
     document.getElementById("cfgReset").addEventListener("click", async function() {
       const defaults = await _getSpecDefaults();
-      if (defaults.config_yaml) {
-        document.getElementById("configEditorTextarea").value = defaults.config_yaml;
+      var parsed = defaults.config_parsed;
+      if (parsed && Object.keys(parsed).length) {
+        document.getElementById("configEditorTextarea").value = jsyaml.dump(parsed, { lineWidth: -1 });
       } else {
         setStatus("spec/config.yaml not found");
       }
@@ -546,35 +533,39 @@ async function _openConfigEditor() {
       const errEl = document.getElementById("configEditorError");
       errEl.style.display = "none";
 
-      // Parse YAML via server → get parsed dict + derived prefs
-      let parsed, derivedPrefs;
+      // Parse YAML client-side via js-yaml
+      var parsed;
       try {
-        const resp = await api("POST", "/parse_config", { yaml: textarea.value });
-        if (!resp.ok) {
-          errEl.textContent = resp.error || "Unknown error";
+        parsed = jsyaml.load(textarea.value);
+        if (parsed !== null && typeof parsed !== "object") {
+          errEl.textContent = "config.yaml must be a YAML mapping";
           errEl.style.display = "block";
           return;
         }
-        parsed = resp.parsed;
-        derivedPrefs = resp.prefs;
+        parsed = parsed || {};
       } catch (e) {
-        errEl.textContent = "Parse error: " + e.message;
+        errEl.textContent = "YAML parse error: " + e.message;
         errEl.style.display = "block";
         return;
       }
 
-      // Save config bundle to sessionStorage (single source of truth)
-      _saveLocalConfig({ yaml: textarea.value, parsed: parsed, prefs: derivedPrefs });
+      // Normalize and adopt as config (preserve runtime fields)
+      var newConfig = _normalizeConfig(parsed);
+      newConfig.server.providers = config.server.providers;
+      newConfig.server.stateless = config.server.stateless;
+      newConfig.server.url_prefix = config.server.url_prefix;
+      if (config.ui.model) newConfig.ui.model = config.ui.model;
 
-      // Update in-memory prefs and apply UI changes
-      prefs = derivedPrefs;
-      applyLayout(prefs.layout);
+      config = newConfig;
+      _saveLocalConfig(config);
+      applyLayout(config.ui.layout);
       _updatePlaceholder();
 
       // Disk write in non-stateless mode
-      if (!_serverInfo.stateless) {
+      if (!config.server.stateless) {
         try {
-          await api("POST", "/config", { yaml: textarea.value });
+          var resp = await api("POST", "/config", { config: config });
+          if (resp.config) config = resp.config;
         } catch (e) {
           errEl.textContent = "Disk write failed: " + e.message + " (saved to sessionStorage)";
           errEl.style.display = "block";
@@ -583,36 +574,34 @@ async function _openConfigEditor() {
       }
 
       dlg.close();
-      // Refresh prefs + provider metadata (keys may have changed)
-      try {
-        var prefsData = await api("GET", "/prefs");
-        if (prefsData.prefs) Object.assign(prefs, prefsData.prefs);
-        applyTheme(prefs.theme);
-      } catch (e) { /* best effort */ }
+      applyTheme(config.ui.theme);
       await _refreshProviderMeta();
       setStatus("config.yaml saved");
     });
   }
 
-  // Load current config
+  // Load current config as YAML text
   const textarea = document.getElementById("configEditorTextarea");
   const errEl = document.getElementById("configEditorError");
   errEl.style.display = "none";
   textarea.value = "Loading...";
   overlay.classList.add("active");
 
-  // Load YAML text: config bundle (stateless) or server
-  const bundle = _serverInfo.stateless ? _loadLocalConfig() : null;
-  if (bundle && bundle.yaml) {
-    textarea.value = bundle.yaml;
+  // Get config dict: sessionStorage (stateless) or server
+  var parsed = null;
+  if (config.server.stateless) {
+    parsed = _loadLocalConfig() || config;
   } else {
     try {
       const data = await api("GET", "/config");
-      textarea.value = data.yaml || "";
+      parsed = data.config || {};
     } catch (e) {
       textarea.value = "# Error loading config: " + e.message;
+      textarea.focus();
+      return;
     }
   }
+  textarea.value = jsyaml.dump(parsed || {}, { lineWidth: -1 });
   textarea.focus();
 }
 
@@ -1209,13 +1198,13 @@ async function _openReadView() {
   }
 
   // Base URL for referencing server-hosted assets (CSS, JS)
-  const baseUrl = window.location.origin + (_serverInfo.url_prefix || "");
+  const baseUrl = window.location.origin + (config.server.url_prefix || "");
 
   // Default: serialize only the ancestor path (root → selected node).
   // If nothing is selected, show all root conversations.
   let body = "";
   let pathDesc = "";
-  const ancestorPath = selectedConvId ? _getAncestorPath(state.conversations, selectedConvId) : null;
+  const ancestorPath = state.selected_conversation ? _getAncestorPath(state.conversations, state.selected_conversation) : null;
   let pathLine = "";
   if (ancestorPath && ancestorPath.length > 0) {
     body = _serializeAncestorPath(state.conversations, ancestorPath);

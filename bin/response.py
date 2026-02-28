@@ -1,4 +1,11 @@
-"""WikiOracle response pipeline: prompt assembly, provider adapters, and chat processing."""
+"""WikiOracle response pipeline: ProviderBundle, provider adapters, and chat processing.
+
+Response generation and provider coordination:
+  - ProviderBundle data model for managing multiple LLM providers
+  - Provider adapter implementations for various API backends
+  - Prompt assembly and context injection
+  - process_chat orchestration for concurrent provider calls
+"""
 
 from __future__ import annotations
 
@@ -43,7 +50,7 @@ from state import (
 
 
 # ---------------------------------------------------------------------------
-# PromptBundle data model
+# ProviderBundle data model
 # ---------------------------------------------------------------------------
 @dataclass
 class Source:
@@ -57,7 +64,7 @@ class Source:
 
 
 @dataclass
-class PromptBundle:
+class ProviderBundle:
     """Provider-agnostic request object built once per chat request.
 
     Fields:
@@ -131,14 +138,14 @@ def _build_provider_query_bundle(
     history: List[Dict[str, str]],
     query: str,
     output: str,
-) -> PromptBundle:
+) -> ProviderBundle:
     """Build a RAG-free bundle for a secondary provider consultation.
 
     The provider sees system context, history, the query, and the output
     instructions — but NO sources (no RAG).  This keeps the secondary
     providers independent so the mastermind can weigh their opinions.
     """
-    return PromptBundle(
+    return ProviderBundle(
         system=system,
         history=list(history),
         sources=[],
@@ -234,7 +241,7 @@ def evaluate_providers(
 def build_prompt_bundle(
     state: Dict[str, Any],
     user_message: str,
-    prefs: Dict[str, Any],
+    query_config: Dict[str, Any],
     conversation_id: Optional[str] = None,
     transient_snippets: Optional[List[Dict]] = None,
     *,
@@ -243,8 +250,8 @@ def build_prompt_bundle(
     get_src_entries_fn=None,
     resolve_src_content_fn=None,
     provider_sources: Optional[List[Source]] = None,
-) -> PromptBundle:
-    """Build a canonical PromptBundle from state + user message.
+) -> ProviderBundle:
+    """Build a canonical ProviderBundle from state + user message.
 
     This is the single entry point for all providers. The bundle captures:
     - system: cleaned context text (project constraints, formatting rules)
@@ -267,7 +274,7 @@ def build_prompt_bundle(
     if resolve_src_content_fn is None:
         resolve_src_content_fn = resolve_src_content
 
-    bundle = PromptBundle()
+    bundle = ProviderBundle()
 
     # 1) System context (with mandatory XHTML output instruction)
     XHTML_INSTRUCTION = "Return strictly valid XHTML: no Markdown, close all tags, escape entities, one root element."
@@ -278,9 +285,9 @@ def build_prompt_bundle(
         bundle.system = XHTML_INSTRUCTION
 
     # 2) Certainty-aware source retrieval (RAG)
-    if prefs.get("tools", {}).get("rag", True):
+    if query_config.get("tools", {}).get("rag", True):
         trust_entries = state.get("truth", {}).get("trust", [])
-        retrieval_prefs = prefs.get("retrieval", {})
+        retrieval_prefs = query_config.get("retrieval", {})
 
         # Compute derived certainty from implication chains
         derived = compute_derived_truth(trust_entries)
@@ -326,7 +333,7 @@ def build_prompt_bundle(
                 pass
 
     # 2b) Resolve <authority> entries: fetch remote trust tables, scale certainty
-    if prefs.get("tools", {}).get("rag", True):
+    if query_config.get("tools", {}).get("rag", True):
         authority_entries = get_authority_entries(trust_entries)
         if authority_entries:
             resolved = resolve_authority_entries(authority_entries, timeout_s=30)
@@ -364,7 +371,7 @@ def build_prompt_bundle(
     else:
         context_msgs = []
 
-    window_size = prefs.get("message_window", 40)
+    window_size = query_config.get("message_window", 40)
     recent = context_msgs[-window_size:]
     for msg in recent:
         role = msg.get("role", "user")
@@ -408,8 +415,8 @@ def _format_sources(sources: List[Source]) -> str:
 # ---------------------------------------------------------------------------
 # Provider adapters
 # ---------------------------------------------------------------------------
-def to_openai_messages(bundle: PromptBundle) -> List[Dict[str, str]]:
-    """Convert a PromptBundle to OpenAI chat/completions messages array.
+def to_openai_messages(bundle: ProviderBundle) -> List[Dict[str, str]]:
+    """Convert a ProviderBundle to OpenAI chat/completions messages array.
 
     - System context goes in a proper 'system' message (not fake user/assistant turns).
     - History as normal turns.
@@ -451,12 +458,12 @@ def to_openai_messages(bundle: PromptBundle) -> List[Dict[str, str]]:
 
 
 def to_anthropic_payload(
-    bundle: PromptBundle,
+    bundle: ProviderBundle,
     model: str = "claude-sonnet-4-6",
     max_tokens: int = 2048,
     temperature: float = 0.7,
 ) -> Dict[str, Any]:
-    """Convert a PromptBundle to an Anthropic /v1/messages payload.
+    """Convert a ProviderBundle to an Anthropic /v1/messages payload.
 
     - System context goes in the top-level 'system' field.
     - History as alternating user/assistant messages.
@@ -519,8 +526,8 @@ def to_anthropic_payload(
     return payload
 
 
-def to_nanochat_messages(bundle: PromptBundle) -> List[Dict[str, str]]:
-    """Convert a PromptBundle to NanoChat-compatible messages.
+def to_nanochat_messages(bundle: ProviderBundle) -> List[Dict[str, str]]:
+    """Convert a ProviderBundle to NanoChat-compatible messages.
 
     NanoChat uses OpenAI-compatible format but doesn't support system messages.
     Context goes as a user message prefix instead.
@@ -590,11 +597,11 @@ def _save_state(cfg: Config, state: Dict[str, Any]) -> None:
 def _build_bundle(
     state: Dict[str, Any],
     user_message: str,
-    prefs: Dict[str, Any],
+    query_config: Dict[str, Any],
     conversation_id: str | None = None,
     transient_snippets: List[Dict] | None = None,
-) -> PromptBundle:
-    """Build a PromptBundle from state + user message (convenience wrapper)."""
+) -> ProviderBundle:
+    """Build a ProviderBundle from state + user message (convenience wrapper)."""
     return build_prompt_bundle(
         state, user_message, prefs,
         conversation_id=conversation_id,
@@ -602,8 +609,8 @@ def _build_bundle(
     )
 
 
-def _bundle_to_messages(bundle: PromptBundle, provider: str) -> List[Dict[str, str]]:
-    """Convert a PromptBundle to provider-appropriate messages list."""
+def _bundle_to_messages(bundle: ProviderBundle, provider: str) -> List[Dict[str, str]]:
+    """Convert a ProviderBundle to provider-appropriate messages list."""
     if provider == "wikioracle":
         return to_nanochat_messages(bundle)
     elif provider == "openai":
@@ -706,7 +713,7 @@ def _build_anthropic_payload_from_messages(
     return payload
 
 
-def _call_anthropic(bundle: PromptBundle | None, temperature: float, provider_cfg: Dict,
+def _call_anthropic(bundle: ProviderBundle | None, temperature: float, provider_cfg: Dict,
                      messages: List[Dict] | None = None) -> str:
     """Call Anthropic API. Prefers bundle-based payload; falls back to legacy messages."""
     url = provider_cfg.get("url", "https://api.anthropic.com/v1/messages")
@@ -749,11 +756,11 @@ def _call_anthropic(bundle: PromptBundle | None, temperature: float, provider_cf
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or "[No content]"
 
 
-def _call_provider(cfg: Config, bundle: PromptBundle | None, temperature: float,
+def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: float,
                     provider: str, client_api_key: str = "",
                     client_model: str = "",
                     messages: List[Dict] | None = None) -> str:
-    """Call a provider using a PromptBundle (preferred) or legacy messages."""
+    """Call a provider using a ProviderBundle (preferred) or legacy messages."""
     import config as config_mod
 
     if provider == "wikioracle":
@@ -909,7 +916,7 @@ def _fan_out_and_aggregate(
     cfg: Config,
     state: Dict[str, Any],
     user_message: str,
-    prefs: Dict[str, Any],
+    query_config: Dict[str, Any],
     conversation_id: str | None = None,
     temperature: float = 0.7,
 ) -> tuple:
@@ -923,7 +930,7 @@ def _fan_out_and_aggregate(
     primary_entry, primary_config = provider_entries[0]
     secondaries = provider_entries[1:]
 
-    base_bundle = _build_bundle(state, user_message, prefs, conversation_id)
+    base_bundle = _build_bundle(state, user_message, query_config, conversation_id)
 
     provider_sources: List[Source] = []
     if secondaries:
@@ -941,7 +948,7 @@ def _fan_out_and_aggregate(
         )
 
     final_bundle = build_prompt_bundle(
-        state, user_message, prefs,
+        state, user_message, query_config,
         conversation_id=conversation_id,
         provider_sources=provider_sources,
     )
@@ -1064,22 +1071,22 @@ def process_chat(
     import config as config_mod
 
     user_msg = (body.get("message") or "").strip()
-    prefs = body.get("prefs", {}) if isinstance(body.get("prefs"), dict) else {}
+    query_config = body.get("config", {}) if isinstance(body.get("config"), dict) else {}
 
     yaml_chat = runtime_cfg.get("chat", {})
-    provider = prefs.get("provider", "wikioracle")
-    client_model = (prefs.get("model") or "").strip()
-    print(f"[WikiOracle] Chat request: provider='{provider}' (from client prefs)")
+    provider = query_config.get("provider", "wikioracle")
+    client_model = (query_config.get("model") or "").strip()
+    print(f"[WikiOracle] Chat request: provider='{provider}' (from client config)")
 
     temperature = max(0.0, min(2.0, float(
-        prefs.get("temp", yaml_chat.get("temperature", 0.7))
+        query_config.get("temp", yaml_chat.get("temperature", 0.7))
     )))
-    if "tools" not in prefs:
-        prefs["tools"] = {}
-    prefs["tools"].setdefault("rag", yaml_chat.get("rag", True))
-    prefs["tools"].setdefault("url_fetch", yaml_chat.get("url_fetch", False))
-    prefs.setdefault("message_window", yaml_chat.get("message_window", 40))
-    prefs.setdefault("retrieval", yaml_chat.get("retrieval", {}))
+    if "tools" not in query_config:
+        query_config["tools"] = {}
+    query_config["tools"].setdefault("rag", yaml_chat.get("rag", True))
+    query_config["tools"].setdefault("url_fetch", yaml_chat.get("url_fetch", False))
+    query_config.setdefault("message_window", yaml_chat.get("message_window", 40))
+    query_config.setdefault("retrieval", yaml_chat.get("retrieval", {}))
 
     conversation_id = body.get("conversation_id")
     branch_from = body.get("branch_from")
@@ -1101,7 +1108,7 @@ def process_chat(
         print(f"[WikiOracle] Chat: using DYNAMIC provider '{primary_config.get('name')}' "
               f"(from trust entry), secondaries={len(dyn_providers)-1}")
         response_text, _transient = _fan_out_and_aggregate(
-            cfg, state, user_msg, prefs, context_conv_id,
+            cfg, state, user_msg, query_config, context_conv_id,
             temperature=temperature,
         )
         if _transient:
@@ -1132,9 +1139,9 @@ def process_chat(
         print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
               f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
               f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
-        bundle = _build_bundle(state, user_msg, prefs, context_conv_id)
+        bundle = _build_bundle(state, user_msg, query_config, context_conv_id)
         if config_mod.DEBUG_MODE:
-            print(f"[DEBUG] PromptBundle: system={len(bundle.system)} chars, "
+            print(f"[DEBUG] ProviderBundle: system={len(bundle.system)} chars, "
                   f"history={len(bundle.history)} msgs, "
                   f"sources={len(bundle.sources)}, query={len(bundle.query)} chars")
             msgs = _bundle_to_messages(bundle, provider)
@@ -1152,7 +1159,7 @@ def process_chat(
         if config_mod.DEBUG_MODE:
             print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
         llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
-        llm_model = prefs.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
+        llm_model = query_config.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
 
     user_content = ensure_xhtml(user_msg)
     assistant_content = ensure_xhtml(response_text)

@@ -162,7 +162,7 @@ In detail:
    - This provider receives the complete truth table as evidence
 ```
 
-This is the HME (Hierarchical Mixture of Experts) model: operators compute derived certainty over the static truth, authorities contribute remote knowledge, and dynamic providers act as expert consultants — all feeding into the truth table that the UI-selected provider (the "mastermind") uses to synthesise its final answer. See [ArchitectureOfTruth.md](./ArchitectureOfTruth.md) for the theoretical foundation.
+This is the HME (Hierarchical Mixture of Experts) model: operators compute derived certainty over the static truth, authorities contribute remote knowledge, and dynamic providers act as expert consultants — all feeding into the truth table that the UI-selected provider (the "mastermind") uses to synthesise its final answer. See [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) for the theoretical foundation.
 
 ## Rendering
 

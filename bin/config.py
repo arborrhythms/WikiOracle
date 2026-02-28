@@ -235,6 +235,20 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "default_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             "streaming": False,
         },
+        "gemini": {
+            "name": "Gemini",
+            "url": "https://generativelanguage.googleapis.com/v1beta/models",
+            "api_key": os.getenv("GEMINI_API_KEY", ""),
+            "default_model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            "streaming": False,
+        },
+        "grok": {
+            "name": "Grok",
+            "url": "https://api.x.ai/v1/chat/completions",
+            "api_key": os.getenv("XAI_API_KEY", ""),
+            "default_model": os.getenv("XAI_MODEL", "grok-3-mini"),
+            "streaming": False,
+        },
     }
 
     # Merge config.yaml values (YAML overrides defaults; env vars still win)
@@ -265,6 +279,8 @@ PROVIDERS: Dict[str, Dict[str, Any]] = _build_providers()
 _PROVIDER_MODELS: Dict[str, list] = {
     "openai": ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
     "anthropic": ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"],
+    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+    "grok": ["grok-3-mini", "grok-3", "grok-4-1-fast-non-reasoning"],
 }
 
 

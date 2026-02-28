@@ -462,6 +462,7 @@ def to_anthropic_payload(
     model: str = "claude-sonnet-4-6",
     max_tokens: int = 2048,
     temperature: float = 0.7,
+    web_search: bool = True,
 ) -> Dict[str, Any]:
     """Convert a ProviderBundle to an Anthropic /v1/messages payload.
 
@@ -469,6 +470,7 @@ def to_anthropic_payload(
     - History as alternating user/assistant messages.
     - Sources + query in final user message.
     - Handles Anthropic's strict user/assistant alternation requirement.
+    - Includes web_search tool when enabled.
     """
     # System field
     system_parts = []
@@ -522,6 +524,8 @@ def to_anthropic_payload(
         payload["system"] = system_text
     if temperature > 0:
         payload["temperature"] = temperature
+    if web_search:
+        payload["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
 
     return payload
 
@@ -752,8 +756,132 @@ def _call_anthropic(bundle: ProviderBundle | None, temperature: float, provider_
     resp = requests.post(url, json=payload, headers=headers, timeout=120)
     if resp.status_code >= 400:
         return f"[Error from Anthropic: HTTP {resp.status_code}] {resp.text[:500]}"
-    blocks = resp.json().get("content", [])
-    return "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or "[No content]"
+    data = resp.json()
+    blocks = data.get("content", [])
+    # Extract text blocks; append citation URLs if web search was used
+    text_parts = []
+    citations = []
+    for b in blocks:
+        if b.get("type") == "text":
+            text_parts.append(b.get("text", ""))
+            for cite in b.get("citations", []):
+                if cite.get("type") == "web_search_result_location":
+                    url_val = cite.get("url", "")
+                    title = cite.get("title", url_val)
+                    if url_val and url_val not in [c[1] for c in citations]:
+                        citations.append((title, url_val))
+    result = "".join(text_parts) or "[No content]"
+    if citations:
+        result += "\n\nSources:\n" + "\n".join(f"- {t}: {u}" for t, u in citations)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Gemini adapter (Google Generative Language API)
+# ---------------------------------------------------------------------------
+def to_gemini_payload(
+    bundle: ProviderBundle,
+    model: str = "gemini-2.5-flash",
+    temperature: float = 0.7,
+    web_search: bool = True,
+) -> Dict[str, Any]:
+    """Convert a ProviderBundle to a Gemini generateContent payload.
+
+    Gemini uses a different message format: contents → [parts → text].
+    System instructions go in a separate 'system_instruction' field.
+    Enables Google Search grounding when web_search is True.
+    """
+    system_parts = []
+    if bundle.system:
+        system_parts.append(bundle.system)
+    if bundle.output:
+        system_parts.append(bundle.output)
+
+    contents = []
+    for msg in bundle.history:
+        role = "model" if msg["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+
+    # Final user message: sources + query
+    user_parts_text = []
+    source_text = _format_sources(bundle.sources)
+    if source_text:
+        user_parts_text.append(f"[Reference Documents]\n{source_text}")
+    transient_text = _format_sources(bundle.transient_sources)
+    if transient_text:
+        user_parts_text.append(f"[Provider Consultations]\n{transient_text}")
+    user_parts_text.append(bundle.query)
+    contents.append({"role": "user", "parts": [{"text": "\n\n".join(user_parts_text)}]})
+
+    payload: Dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": 2048},
+    }
+    if system_parts:
+        payload["system_instruction"] = {"parts": [{"text": "\n".join(system_parts)}]}
+    if web_search:
+        payload["tools"] = [{"google_search": {}}]
+    return payload
+
+
+def _call_gemini(bundle: ProviderBundle | None, temperature: float,
+                 provider_cfg: Dict, messages: List[Dict] | None = None) -> str:
+    """Call Google Gemini API with optional Google Search grounding."""
+    model = provider_cfg.get("default_model", "gemini-2.5-flash")
+    base_url = provider_cfg.get("url", "https://generativelanguage.googleapis.com/v1beta/models")
+    api_key = provider_cfg.get("api_key", "")
+    url = f"{base_url}/{model}:generateContent?key={api_key}"
+
+    if bundle is not None:
+        payload = to_gemini_payload(bundle, model=model, temperature=temperature)
+    else:
+        # Fallback: convert legacy messages to Gemini format
+        contents = []
+        for msg in (messages or []):
+            role = "model" if msg["role"] == "assistant" else "user"
+            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        payload = {
+            "contents": contents,
+            "generationConfig": {"temperature": temperature, "maxOutputTokens": 2048},
+            "tools": [{"google_search": {}}],
+        }
+
+    if DEBUG_MODE:
+        print(f"[DEBUG] Gemini → {base_url}/{model}:generateContent")
+        contents = payload.get("contents", [])
+        print(f"[DEBUG] Gemini contents ({len(contents)}):")
+        for i, c in enumerate(contents):
+            text = c.get("parts", [{}])[0].get("text", "")
+            print(f"  [{i}] {c.get('role', '?')}: {text[:200]}{'...' if len(text) > 200 else ''}")
+
+    headers = {"Content-Type": "application/json"}
+    resp = requests.post(url, json=payload, headers=headers, timeout=120)
+    if resp.status_code >= 400:
+        return f"[Error from Gemini: HTTP {resp.status_code}] {resp.text[:500]}"
+
+    data = resp.json()
+    candidates = data.get("candidates", [])
+    if not candidates:
+        return "[No response from Gemini]"
+
+    # Extract text from candidate parts
+    parts = candidates[0].get("content", {}).get("parts", [])
+    text_parts = [p.get("text", "") for p in parts if "text" in p]
+    result = "".join(text_parts) or "[No content]"
+
+    # Append grounding citations if present
+    grounding = candidates[0].get("groundingMetadata", {})
+    chunks = grounding.get("groundingChunks", [])
+    if chunks:
+        citations = []
+        for chunk in chunks:
+            web = chunk.get("web", {})
+            if web.get("uri"):
+                citations.append((web.get("title", web["uri"]), web["uri"]))
+        if citations:
+            result += "\n\nSources:\n" + "\n".join(f"- {t}: {u}" for t, u in citations)
+
+    return result
 
 
 def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: float,
@@ -806,6 +934,16 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
         if DEBUG_MODE:
             print(f"[DEBUG] → _call_anthropic ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
         return _call_anthropic(bundle, temperature, effective_cfg, messages=messages)
+    if provider == "gemini":
+        if DEBUG_MODE:
+            print(f"[DEBUG] → _call_gemini (model={effective_cfg.get('default_model')})")
+        return _call_gemini(bundle, temperature, effective_cfg, messages=messages)
+    if provider == "grok":
+        # Grok (xAI) is OpenAI-compatible — reuse the OpenAI adapter
+        if DEBUG_MODE:
+            print(f"[DEBUG] → _call_openai/grok ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
+        oai_msgs = to_openai_messages(bundle) if bundle else (messages or [])
+        return _call_openai(oai_msgs, temperature, effective_cfg)
     return f"[Provider '{provider}' not implemented]"
 
 

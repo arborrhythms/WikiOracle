@@ -490,6 +490,9 @@ async function saveSettings() {
       setStatus("Error saving settings: " + e.message);
     }
   }
+
+  // Redraw to reflect any config-driven UI changes (provider name, layout, etc.)
+  if (typeof renderMessages === "function") renderMessages();
 }
 
 // ─── Config editor (edit config.yaml) ───

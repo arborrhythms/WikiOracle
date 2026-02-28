@@ -31,6 +31,20 @@ providers:
     api_key: ""                          # or set ANTHROPIC_API_KEY env var
     default_model: claude-sonnet-4-6
 
+  gemini:
+    name: gemini
+    username: you@example.com
+    url: https://generativelanguage.googleapis.com/v1beta/models
+    api_key: ""                          # or set GEMINI_API_KEY env var
+    default_model: gemini-2.5-flash
+
+  grok:
+    name: grok
+    username: you@example.com
+    url: https://api.x.ai/v1/chat/completions
+    api_key: ""                          # or set XAI_API_KEY env var
+    default_model: grok-3-mini
+
 # --- Chat settings -----------------------------------------------------------
 
 chat:
@@ -43,12 +57,17 @@ chat:
   retrieval:
     max_entries: 8
     min_certainty: 0.0                    # |certainty| threshold (Kleene: 0=ignorance)
+    certainty_weight: 0.7
+    recency_weight: 0.3
+    prefer_higher_certainty: true
 
 # --- UI defaults -------------------------------------------------------------
 
 ui:
   default_provider: wikioracle
-  layout: flat                             # flat | horizontal | vertical
+  layout: horizontal                      # flat | horizontal | vertical
+  theme: system                           # system | light | dark
+  splitter_pct: 0                         # tree panel height (0 = collapsed)
 
 # --- Server ------------------------------------------------------------------
 # Runtime parameters — usually set via CLI flags; YAML values are defaults.

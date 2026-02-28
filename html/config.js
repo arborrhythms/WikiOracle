@@ -19,7 +19,7 @@ let config = {
   chat: { temperature: 0.7, message_window: 40, rag: true,
           url_fetch: false, confirm_actions: false },
   ui: { default_provider: "wikioracle", layout: "flat", theme: "system",
-        splitter_pct: null, swipe_nav_horizontal: true,
+        splitter_pct: 0, swipe_nav_horizontal: true,
         swipe_nav_vertical: false },
   server: { stateless: false, url_prefix: "", providers: {} },
   defaults: { context: "<div/>", output: "" },
@@ -57,6 +57,7 @@ function _normalizeConfig(cfg) {
   if (!cfg.ui.default_provider) cfg.ui.default_provider = "wikioracle";
   if (!cfg.ui.layout) cfg.ui.layout = "flat";
   if (!cfg.ui.theme) cfg.ui.theme = "system";
+  if (cfg.ui.splitter_pct == null) cfg.ui.splitter_pct = 0;
   if (cfg.ui.swipe_nav_horizontal === undefined) cfg.ui.swipe_nav_horizontal = true;
   if (cfg.ui.swipe_nav_vertical === undefined) cfg.ui.swipe_nav_vertical = false;
   if (!cfg.chat) cfg.chat = {};

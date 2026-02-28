@@ -669,32 +669,40 @@ function renderMessages() {
       summary.appendChild(meta);
     }
 
-    // Context preview
-    if (contextText && contextText !== "" && contextText !== "<div/>") {
-      var ctxSection = document.createElement("div");
-      ctxSection.className = "root-summary-section";
-      var ctxH3 = document.createElement("h3");
-      ctxH3.textContent = "Context";
-      ctxSection.appendChild(ctxH3);
-      var ctxP = document.createElement("p");
-      ctxP.className = "root-summary-context";
-      ctxP.textContent = truncate(contextText, 200);
-      ctxSection.appendChild(ctxP);
-      summary.appendChild(ctxSection);
-    }
+    // Context preview (clickable — opens context editor)
+    var ctxSection = document.createElement("div");
+    ctxSection.className = "root-summary-section";
+    ctxSection.style.cursor = "pointer";
+    var ctxH3 = document.createElement("h3");
+    ctxH3.textContent = "Context";
+    ctxSection.appendChild(ctxH3);
+    var ctxP = document.createElement("p");
+    ctxP.className = "root-summary-context";
+    ctxP.textContent = (contextText && contextText !== "<div/>")
+      ? truncate(contextText, 200)
+      : "(none — tap to edit)";
+    ctxSection.appendChild(ctxP);
+    ctxSection.addEventListener("click", function() {
+      if (typeof _toggleContextEditor === "function") _toggleContextEditor();
+    });
+    summary.appendChild(ctxSection);
 
-    // Trust entries
-    if (trustEntries.length > 0) {
-      var trustSection = document.createElement("div");
-      trustSection.className = "root-summary-section";
-      var trustH3 = document.createElement("h3");
-      trustH3.textContent = "Trust";
-      trustSection.appendChild(trustH3);
-      var trustP = document.createElement("p");
-      trustP.textContent = trustEntries.length + (trustEntries.length === 1 ? " entry" : " entries");
-      trustSection.appendChild(trustP);
-      summary.appendChild(trustSection);
-    }
+    // Trust entries (clickable — opens trust editor)
+    var trustSection = document.createElement("div");
+    trustSection.className = "root-summary-section";
+    trustSection.style.cursor = "pointer";
+    var trustH3 = document.createElement("h3");
+    trustH3.textContent = "Trust";
+    trustSection.appendChild(trustH3);
+    var trustP = document.createElement("p");
+    trustP.textContent = trustEntries.length > 0
+      ? trustEntries.length + (trustEntries.length === 1 ? " entry" : " entries")
+      : "(none — tap to edit)";
+    trustSection.appendChild(trustP);
+    trustSection.addEventListener("click", function() {
+      if (typeof _openTruthEditor === "function") _openTruthEditor();
+    });
+    summary.appendChild(trustSection);
 
     // Hint
     var hint = document.createElement("p");

@@ -603,7 +603,7 @@ def _build_bundle(
 ) -> ProviderBundle:
     """Build a ProviderBundle from state + user message (convenience wrapper)."""
     return build_prompt_bundle(
-        state, user_message, prefs,
+        state, user_message, query_config,
         conversation_id=conversation_id,
         transient_snippets=transient_snippets,
     )

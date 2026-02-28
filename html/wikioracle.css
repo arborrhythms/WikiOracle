@@ -116,7 +116,7 @@ body { display: flex; flex-direction: column; touch-action: manipulation; /* dis
 
 /* Chat */
 .chat-container { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-.chat-wrapper { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
+.chat-wrapper { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1.25rem 1rem 1.5rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
 .chat-placeholder { color: var(--fg-muted); font-size: 0.9rem; text-align: center; padding: 3rem 1rem; }
 
 /* ── Root summary dashboard ── */

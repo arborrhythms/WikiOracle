@@ -1139,9 +1139,6 @@ function bindEvents() {
   document.getElementById("setTemp").addEventListener("input", function() {
     document.getElementById("setTempVal").textContent = this.value;
   });
-  document.getElementById("setWindow").addEventListener("input", function() {
-    document.getElementById("setWindowVal").textContent = this.value;
-  });
   document.getElementById("setProvider").addEventListener("change", function() {
     _populateModelDropdown(this.value);
   });

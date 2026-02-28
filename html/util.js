@@ -245,8 +245,17 @@ function setupZoom(opts) {
     if (mode === "svg") {
       d3.select(opts.target).attr("transform", event.transform);
     } else {
+      var k = event.transform.k;
       opts.target.style.transformOrigin = "top center";
-      opts.target.style.transform = "scale(" + event.transform.k + ")";
+      opts.target.style.transform = "scale(" + k + ")";
+      // Compensate max-width so scaled content stays within the visible area.
+      // Use percentage only when zoomed; clear when back to identity so
+      // the CSS default (48rem on desktop, 90% on touch) takes over.
+      if (Math.abs(k - 1) > 0.01) {
+        opts.target.style.maxWidth = (100 / k) + "%";
+      } else {
+        opts.target.style.maxWidth = "";
+      }
     }
   });
 
@@ -432,9 +441,6 @@ function openSettings() {
   const tempSlider = document.getElementById("setTemp");
   tempSlider.value = chat.temperature ?? 0.7;
   document.getElementById("setTempVal").textContent = tempSlider.value;
-  const winSlider = document.getElementById("setWindow");
-  winSlider.value = chat.message_window ?? 40;
-  document.getElementById("setWindowVal").textContent = winSlider.value;
   document.getElementById("setRag").checked = chat.rag !== false;
   document.getElementById("setUrlFetch").checked = !!chat.url_fetch;
   document.getElementById("setConfirm").checked = !!chat.confirm_actions;
@@ -461,7 +467,6 @@ async function saveSettings() {
   config.chat = {
     ...(config.chat || {}),
     temperature: parseFloat(document.getElementById("setTemp").value),
-    message_window: parseInt(document.getElementById("setWindow").value, 10),
     rag: document.getElementById("setRag").checked,
     url_fetch: document.getElementById("setUrlFetch").checked,
     confirm_actions: document.getElementById("setConfirm").checked,

@@ -251,7 +251,8 @@ wo-logs:
 # It listens on 127.0.0.1:8787 and serves from /chat URL prefix.
 
 WO_CHAT_DEST     := $(WO_DEST)
-WO_CHAT_FILES    := WikiOracle.py config.yaml requirements.txt html bin spec
+# Extra untracked files the server needs (e.g. runtime config with secrets).
+WO_CHAT_EXTRA    := config.yaml
 
 .PHONY: wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs
 
@@ -259,8 +260,8 @@ wo-chat-deploy:
 	@echo "Deploying WikiOracle chat shim to $(WO_HOST):$(WO_CHAT_DEST) ..."
 	rsync -avz --delete --exclude .venv \
 		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
-		$(WO_CHAT_FILES) \
-		$(WO_USER)@$(WO_HOST):$(WO_CHAT_DEST)/
+		--files-from=<(git ls-files -- bin html spec requirements.txt; echo $(WO_CHAT_EXTRA)) \
+		. $(WO_USER)@$(WO_HOST):$(WO_CHAT_DEST)/
 	@echo "Chat shim deployed. Run 'make wo-chat-restart' to apply."
 
 wo-chat-start:

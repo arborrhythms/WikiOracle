@@ -154,6 +154,10 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         fresh = _load_config_yaml()
         if fresh:
             config_mod._CONFIG_YAML = fresh
+            # Re-inject runtime fields lost by disk reload
+            config_mod._CONFIG_YAML.setdefault("server", {})
+            config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
+            config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
         result["config"] = _normalize_config(config_mod._CONFIG_YAML)
 
         return jsonify(result)
@@ -338,6 +342,10 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         fresh = _load_config_yaml()
         if fresh:
             config_mod._CONFIG_YAML = fresh
+            # Re-inject runtime fields lost by disk reload
+            config_mod._CONFIG_YAML.setdefault("server", {})
+            config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
+            config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
 
         if flask_request.method == "GET":
             return jsonify({"config": _normalize_config(config_mod._CONFIG_YAML)})
@@ -358,6 +366,10 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 data = body["config"]
                 cfg_path.write_text(config_to_yaml(data), encoding="utf-8")
                 config_mod._CONFIG_YAML = _load_config_yaml()
+                # Re-inject runtime fields lost by disk reload
+                config_mod._CONFIG_YAML.setdefault("server", {})
+                config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
+                config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
                 PROVIDERS.clear()
                 PROVIDERS.update(_build_providers())
                 normalized = _normalize_config(config_mod._CONFIG_YAML)

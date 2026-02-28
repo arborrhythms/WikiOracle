@@ -15,7 +15,7 @@ Type=simple
 User=bitnami
 WorkingDirectory=/opt/bitnami/wordpress/files/wikiOracle.org/chat
 ExecStart=/opt/bitnami/wordpress/files/wikiOracle.org/chat/.venv/bin/python3 \
-    WikiOracle.py --stateless --url-prefix /chat
+    bin/wikioracle.py --stateless --url-prefix /chat
 Restart=on-failure
 RestartSec=5
 Environment=WIKIORACLE_BIND_HOST=127.0.0.1

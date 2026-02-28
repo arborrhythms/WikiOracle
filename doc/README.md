@@ -1,35 +1,37 @@
 # WikiOracle Docs
-Updated: 2026-02-27
+Updated: 2026-02-28
 
 This directory is the design, governance, and research documentation for WikiOracle.
 
 Recommended reading order:
 1. `Constitution.md` (project invariants)
 2. `WhatIsTruth.md` (plural truth, POVs, and certainty semantics)
-3. `ArchitectureOfTruth.md` (distributed truth vs consensus, conceptual spaces)
+3. `HierarchicalMixtureOfExperts.md` (HME logic, distributed truth vs consensus, conceptual spaces)
 4. `Authority.md` (transitive trust and the authority import format)
 5. `Implication.md` (logical operators: and/or/not under Strong Kleene semantics)
-6. `HowToEnsureSafety.md` (Freedom/Love/Wisdom safety frame)
+6. `HowToEnsureSafety.md` (safety principles and architectural commitments)
 7. `Architecture.md` (current local-first software architecture)
 8. `Security.md` (concrete security considerations)
-9. `FutureWork.md` (roadmap)
-10. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
+9. `Installation.md` (build, deploy, and runtime instructions)
+10. `FutureWork.md` (roadmap)
+11. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
 
 ## Core Documents (doc/)
 
 - [`README.md`](./README.md): this index.
 - [`Constitution.md`](./Constitution.md): the non-negotiable invariants for WikiOracle's truth system and governance.
 - [`WhatIsTruth.md`](./WhatIsTruth.md): plural truth model, POVs, empathy as procedural constraint, HME fan-out, Kleene-style certainty.
-- [`ArchitectureOfTruth.md`](./ArchitectureOfTruth.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
+- [`HierarchicalMixtureOfExperts.md`](./HierarchicalMixtureOfExperts.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
 - [`Authority.md`](./Authority.md): authority blocks (`<authority>`), transitive trust, certainty scaling, namespacing, and fetch/security constraints.
 - [`Implication.md`](./Implication.md): logical operators (and/or/not); Strong Kleene evaluation; derived truth engine.
-- [`HowToEnsureSafety.md`](./HowToEnsureSafety.md): safety principles organized as Freedom (agency), Love (relational integrity), Wisdom (truth).
+- [`HowToEnsureSafety.md`](./HowToEnsureSafety.md): safety principles and architectural commitments.
 - [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).
 - [`Architecture.md`](./Architecture.md): implementation architecture (Flask shim + UI + `llm.jsonl` state model).
+- [`Installation.md`](./Installation.md): build, deploy, and runtime instructions.
 - [`FutureWork.md`](./FutureWork.md): future directions (trust network, sentence-level prediction, conceptual-space operations).
 - [`WikiOracle.md`](./WikiOracle.md): a consistency-first design note (historically labeled "OpenMind" in the text).
 
-Project build/deploy details live in the repository root `README.md`.
+Build, deploy, and runtime details are in [`Installation.md`](./Installation.md).
 
 ## Research Notes (doc/research/)
 

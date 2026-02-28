@@ -96,7 +96,7 @@ If governance fails these obligations, forking is a legitimate remedy. The proje
 This constitution is intentionally compact. For the rest of the system design:
 
 - `WhatIsTruth.md`: plural truth, POVs, certainty semantics, and HME-style fan-out.
-- `ArchitectureOfTruth.md`: HME logic, distributed truth vs consensus, conceptual spaces framing.
+- `HierarchicalMixtureOfExperts.md`: HME logic, distributed truth vs consensus, conceptual spaces framing.
 - `Authority.md`: transitive trust and authority import format/security.
 - `Implication.md`: logical operators (and/or/not) and derived truth computation.
 - `HowToEnsureSafety.md`: the Freedom/Love/Wisdom safety frame.

@@ -184,6 +184,10 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raise StateValidationError("State.context must be an XHTML string")
     state["context"] = ensure_xhtml(context)
 
+    # Title (human-readable document name; defaults to "WikiOracle")
+    title = state.get("title")
+    state["title"] = title.strip() if isinstance(title, str) and title.strip() else "WikiOracle"
+
     # Conversations tree
     convs = state.get("conversations")
     if strict and not isinstance(convs, list):
@@ -201,18 +205,16 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
     else:
         state["output"] = DEFAULT_OUTPUT
 
-    # Truth (retrieval_prefs now lives in config.yaml)
-    truth = state.get("truth", {"trust": []})
-    if strict and not isinstance(truth, dict):
-        raise StateValidationError("State.truth must be an object")
-    if not isinstance(truth, dict):
-        truth = {"trust": []}
-    trust = truth.get("trust")
-    if not isinstance(trust, list):
-        trust = []
-    state["truth"] = {
-        "trust": [_normalize_trust_entry(v) for v in trust],
-    }
+    # Truth — flat array of truth entries
+    # Legacy compat: accept old {"truth": {"trust": [...]}} or new {"truth": [...]}
+    raw_truth = state.get("truth", [])
+    if isinstance(raw_truth, dict):
+        raw_truth = raw_truth.get("trust", [])
+    if not isinstance(raw_truth, list):
+        if strict:
+            raise StateValidationError("State.truth must be an array")
+        raw_truth = []
+    state["truth"] = [_normalize_trust_entry(v) for v in raw_truth]
 
     # Clean up legacy fields
     state.pop("messages", None)
@@ -279,8 +281,8 @@ def state_to_jsonl(state: dict) -> str:
         "version": state.get("version", STATE_VERSION),
         "schema": state.get("schema", SCHEMA_URL),
         "time": state.get("time", utc_now_iso()),
+        "title": state.get("title", "WikiOracle"),
         "context": state.get("context", "<div/>"),
-        "output": state.get("output", DEFAULT_OUTPUT),
     }
     sel = state.get("selected_conversation")
     if sel is not None:
@@ -292,10 +294,10 @@ def state_to_jsonl(state: dict) -> str:
     for rec in flat_convs:
         lines.append(json.dumps(rec, ensure_ascii=False))
 
-    # Trust records
-    for entry in state.get("truth", {}).get("trust", []):
+    # Truth records
+    for entry in (state.get("truth") or []):
         record = {k: v for k, v in entry.items()}
-        record["type"] = "trust"
+        record["type"] = "truth"
         lines.append(json.dumps(record, ensure_ascii=False))
 
     return "\n".join(lines) + "\n"
@@ -309,7 +311,7 @@ def jsonl_to_state(text: str) -> dict:
         "time": utc_now_iso(),
         "context": "<div/>",
         "conversations": [],
-        "truth": {"trust": []},
+        "truth": [],
         "selected_conversation": None,
     }
 
@@ -331,15 +333,17 @@ def jsonl_to_state(text: str) -> dict:
             state["schema"] = obj.get("schema", SCHEMA_URL)
             state["time"] = obj.get("time") or obj.get("date") or state["time"]
             state["context"] = obj.get("context", state["context"])
+            if "title" in obj:
+                state["title"] = obj["title"]
             if "selected_conversation" in obj:
                 state["selected_conversation"] = obj["selected_conversation"]
             if "output" in obj and isinstance(obj["output"], str) and obj["output"].strip():
-                state["output"] = obj["output"].strip()
+                state["output"] = obj["output"].strip()  # legacy compat
         elif record_type == "conversation":
             conv_records.append({k: v for k, v in obj.items() if k != "type"})
-        elif record_type == "trust":
+        elif record_type in ("truth", "trust"):  # "trust" accepted for legacy compat
             entry = {k: v for k, v in obj.items() if k != "type"}
-            state["truth"]["trust"].append(entry)
+            state["truth"].append(entry)
         elif "messages" in obj and "version" in obj:
             return ensure_minimal_state(obj, strict=False)
 
@@ -608,12 +612,12 @@ def merge_llm_states(
     base = ensure_minimal_state(base_raw, strict=True)
     incoming = ensure_minimal_state(incoming_raw, strict=True)
 
-    # Merge trust entries
+    # Merge truth entries
     existing_trust = {}
-    for entry in base["truth"]["trust"]:
+    for entry in base["truth"]:
         existing_trust[entry["id"]] = entry
     new_trust = []
-    for entry in incoming["truth"]["trust"]:
+    for entry in incoming["truth"]:
         resolved_id = _resolve_id_collision(entry["id"], entry, existing_trust, prefix="t")
         if resolved_id != entry["id"]:
             entry = dict(entry)
@@ -637,7 +641,7 @@ def merge_llm_states(
                 base["conversations"].append(normalize_conversation(flat_conv))
 
     out = copy.deepcopy(base)
-    out["truth"]["trust"] = _sort_by_timestamp(list(existing_trust.values()))
+    out["truth"] = _sort_by_timestamp(list(existing_trust.values()))
 
     if keep_base_context:
         new_context = out["context"]
@@ -651,6 +655,9 @@ def merge_llm_states(
         except Exception:
             pass
     out["context"] = ensure_xhtml(new_context)
+    # Title: incoming wins if base is default
+    if incoming.get("title") and (not out.get("title") or out["title"] == "WikiOracle"):
+        out["title"] = incoming["title"]
     out["time"] = utc_now_iso()
 
     merge_meta = {

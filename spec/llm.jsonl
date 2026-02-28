@@ -1,3 +1,3 @@
-{"type": "header", "version": 2, "schema": "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json", "time": "2026-02-24T05:26:21Z", "context": "<div />",  "output": "<div />" }
-{ "type": "trust", "title": "Roses", "certainty": 0.95, "content": "<div><p>roses are red.</p></div>", "id": "t_seed_0001", "time": "2026-02-22T19:30:00Z"}
-{ "type": "trust", "title": "Violets", "certainty": 0.95, "content": "<div><p>Violets are blue.</p></div>", "id": "t_seed_0002", "time": "2026-02-22T19:35:00Z"}
+{"type": "header", "version": 2, "schema": "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json", "time": "2026-02-24T05:26:21Z", "title": "WikiOracle", "context": "<div />"}
+{ "type": "truth", "title": "Roses", "certainty": 0.95, "content": "<div><p>roses are red.</p></div>", "id": "t_seed_0001", "time": "2026-02-22T19:30:00Z"}
+{ "type": "truth", "title": "Violets", "certainty": 0.95, "content": "<div><p>Violets are blue.</p></div>", "id": "t_seed_0002", "time": "2026-02-22T19:35:00Z"}

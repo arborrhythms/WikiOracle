@@ -19,7 +19,7 @@ Browser  ──HTTP──▸  wikioracle.py  ──HTTP──▸  Upstream LLM
 | Config | `bin/config.py` | Config dataclass, YAML loader, provider registry, schema-driven YAML writer, normalization |
 | State library | `bin/state.py` | Pure-Python tree operations, JSONL serialisation, legacy migration |
 | Response | `bin/response.py` | Chat pipeline, provider coordination, state I/O |
-| Truth | `bin/truth.py` | Trust processing, authority resolution, implication engine |
+| Truth | `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not) |
 | Client app | `html/wikioracle.js` | State management, API calls, message rendering, drag/context-menu interactions |
 | Client config | `html/config.js` | Config global, sessionStorage persistence, normalization, legacy migration |
 | Client state | `html/state.js` | State global, sessionStorage persistence |
@@ -40,7 +40,7 @@ State is persisted as line-delimited JSON. Each line is a self-typed record:
 {"type":"header","schema":"…","date":"…","context":"…","selected_conversation":"c_abc"}
 {"type":"conversation","id":"c_abc","title":"Animals","messages":[…]}
 {"type":"conversation","id":"c_def","title":"Dogs","parent":"c_abc","messages":[…]}
-{"type":"trust","id":"t_001","content":"…","certainty":0.9}
+{"type":"truth","id":"t_001","content":"…","certainty":0.9}
 ```
 
 The `parent` field encodes the tree structure in flat form. Root conversations omit `parent`.
@@ -93,6 +93,20 @@ In the tree: `Dialogue → Conversation*`, `Conversation → Message* + Conversa
 | GET | `/` | Serve `html/index.html` |
 | GET | `/<file>` | Serve static assets from `html/` |
 
+### Data flow: client ↔ server
+
+Truth, context, and output are **client-owned**. They flow client → server only; the server never sends them back in a chat response.
+
+```
+POST /chat request:   client sends truth + context + output + message
+POST /chat response:  server returns text + conversation delta
+                      (no truth, no context, no output)
+```
+
+In stateful mode, the server persists the full state (including the client-supplied truth) to `llm.jsonl`. On error rollback, the client reloads conversations from the server but preserves its own truth, context, and output.
+
+In stateless mode, the server has no disk — the client sends and receives the full state.
+
 ### Chat routing
 
 `POST /chat` accepts:
@@ -101,7 +115,54 @@ In the tree: `Dialogue → Conversation*`, `Conversation → Message* + Conversa
 - `branch_from` — create a new child conversation under the specified parent, seed it with the user message + LLM response
 - Neither — create a new root-level conversation
 
-The server calls `get_context_messages()` to build the upstream prompt (see Rendering below).
+### Chat pipeline (HME provider resolution)
+
+The chat pipeline always sends the final query to the provider selected in the UI config (openai, anthropic, gemini, grok, etc.). The truth table is gated by the `rag` config flag: when `rag` is true, **all** `state.truth` is sent; when `rag` is false, **no** truth of any kind is sent.
+
+When `rag` is true, the truth table is processed in two phases — static and dynamic — before it reaches the final provider:
+
+```
+st = static_truth(state.truth)      # facts & references (evaluable subset)
+t  = st + dynamic_truth(st)         # operators, authorities, and providers
+                                    # evaluated against st
+```
+
+`static_truth` selects the entries that the dynamic evaluation steps use as input. All `state.truth` entries (including structural ones) are still sent to the final provider — `static_truth` controls evaluation, not delivery.
+
+In detail:
+
+```
+1. st = static_truth(state.truth)
+   - Extract the evaluable subset: <fact> and <reference> entries
+   - These carry propositional content (claims, citations, URLs)
+   - Structural entries (<provider>, <operator>, <authority>) are
+     excluded from this subset (they are evaluated, not consumed)
+
+2. dynamic_truth(st) — evaluate structural entries against st
+   a. Operators (Strong Kleene): compute_derived_truth evaluates <and>,
+      <or>, <not> over the truth table; derived certainty values
+      propagate back into the entries they govern
+   b. Authorities: <authority> entries reference remote truth tables;
+      each is fetched and its entries are appended with scaled certainty
+   c. Providers (HME): each <provider> entry is an external LLM endpoint;
+      the server calls it with context + history + query, and the
+      response becomes a source with the provider's certainty
+
+3. Assemble the ProviderBundle
+   - ALL state.truth entries are included (facts, references, operators,
+     authorities, providers) — with operator-derived certainty where
+     applicable
+   - Authority remote entries are appended
+   - Provider evaluation responses are appended
+   - Conversation history, system context, and the user message complete
+     the bundle
+
+4. Call the UI-selected provider
+   - The bundle is sent to whichever provider the user chose in Settings
+   - This provider receives the complete truth table as evidence
+```
+
+This is the HME (Hierarchical Mixture of Experts) model: operators compute derived certainty over the static truth, authorities contribute remote knowledge, and dynamic providers act as expert consultants — all feeding into the truth table that the UI-selected provider (the "mastermind") uses to synthesise its final answer. See [ArchitectureOfTruth.md](./ArchitectureOfTruth.md) for the theoretical foundation.
 
 ## Rendering
 
@@ -119,7 +180,7 @@ Root conversation      →  messages: [m1, m2, m3]
 Context sent to LLM: [m1, m2, m3, m4, m5, m6, m7]
 ```
 
-This gives the LLM the full path of dialogue that led to the current point, without noise from sibling branches. The `message_window` preference caps how many messages are included.
+This gives the LLM the full path of dialogue that led to the current point, without noise from sibling branches.
 
 ### Tree visualisation (D3)
 

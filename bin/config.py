@@ -304,14 +304,21 @@ CONFIG_SCHEMA = [
     ("providers.anthropic.url",     "API endpoint URL"),
     ("providers.anthropic.api_key", "API key (or set ANTHROPIC_API_KEY env var)"),
     ("providers.anthropic.default_model", "Default model"),
+    ("providers.gemini.name",       "Display name for Gemini provider"),
+    ("providers.gemini.username",   "API login / email"),
+    ("providers.gemini.url",        "API endpoint URL"),
+    ("providers.gemini.api_key",    "API key (or set GEMINI_API_KEY env var)"),
+    ("providers.gemini.default_model", "Default model"),
+    ("providers.grok.name",         "Display name for Grok provider"),
+    ("providers.grok.username",     "API login / email"),
+    ("providers.grok.url",          "API endpoint URL"),
+    ("providers.grok.api_key",      "API key (or set XAI_API_KEY env var)"),
+    ("providers.grok.default_model", "Default model"),
     ("chat.temperature",            "Sampling temperature (0.0–2.0)"),
-    ("chat.message_window",         "Recent turns to send upstream"),
     ("chat.output_format",          'Appended as "output_format: <value>" line'),
     ("chat.rag",                    "Use truth entries for retrieval"),
     ("chat.url_fetch",              "Allow URL fetching in responses"),
     ("chat.confirm_actions",        "Prompt before deletes, merges, etc."),
-    ("chat.retrieval.max_entries",  "Max RAG entries per query"),
-    ("chat.retrieval.min_certainty", "|certainty| threshold (Kleene: 0 = ignorance)"),
     ("ui.default_provider",         "Provider selected on startup"),
     ("ui.layout",                   "Layout mode: flat | horizontal | vertical"),
     ("ui.theme",                    "Color theme: system | light | dark"),
@@ -488,7 +495,6 @@ def _normalize_config(cfg_yaml: dict) -> dict:
     ui.setdefault("swipe_nav_vertical", False)
     chat = cfg.setdefault("chat", {})
     chat.setdefault("temperature", 0.7)
-    chat.setdefault("message_window", 40)
     chat.setdefault("rag", True)
     chat.setdefault("url_fetch", False)
     chat.setdefault("confirm_actions", False)
@@ -498,14 +504,11 @@ def _normalize_config(cfg_yaml: dict) -> dict:
     # Non-secret provider metadata for UI dropdowns / key-status badges
     prov_meta = {}
     for key, pcfg in PROVIDERS.items():
-        needs_key = key not in ("wikioracle",)
         prov_meta[key] = {
             "name": pcfg["name"],
             "streaming": pcfg.get("streaming", False),
             "model": pcfg.get("default_model", ""),
             "models": _PROVIDER_MODELS.get(key, []),
-            "has_key": bool(pcfg.get("api_key")) or not needs_key,
-            "needs_key": needs_key,
         }
     server["providers"] = prov_meta
     # Factory defaults for reset buttons (context, output)

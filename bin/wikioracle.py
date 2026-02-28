@@ -68,6 +68,7 @@ from state import (
     atomic_write_jsonl,
     build_context_draft,
     ensure_minimal_state,
+    find_conversation,
     load_state_file,
     merge_llm_states,
 )
@@ -271,10 +272,20 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
             if not config_mod.STATELESS_MODE:
                 _save_state(cfg, state)
-                # Reload after save to get normalized state
-                state = _load_state(cfg)
 
-            return jsonify({"ok": True, "text": response_text, "state": state})
+            if config_mod.STATELESS_MODE:
+                # Stateless: client is the only copy — return full state
+                return jsonify({"ok": True, "text": response_text, "state": state})
+            else:
+                # Stateful: truth flows client → server only.  Return
+                # just the conversation delta so the client can merge it.
+                sel = state.get("selected_conversation")
+                conv = find_conversation(state.get("conversations", []), sel) if sel else None
+                response_state = {
+                    "conversations": [conv] if conv else [],
+                    "selected_conversation": sel,
+                }
+                return jsonify({"ok": True, "text": response_text, "state": response_state})
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 502
 
@@ -441,10 +452,9 @@ def main() -> int:
         print(f"  URL prefix : {url_prefix}")
     prov_info = []
     for k, p in PROVIDERS.items():
-        has_key = bool(p.get("api_key"))
         model = p.get("default_model", "")
         url = p.get("url", "")
-        status = "ok" if has_key or k == "wikioracle" else "NO KEY"
+        status = "ok" if bool(p.get("api_key")) or k == "wikioracle" else "no key"
         parts = [status]
         if model:
             parts.append(model)

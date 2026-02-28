@@ -22,14 +22,13 @@ import requests
 
 from config import Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config_yaml, _PROVIDER_MODELS
 from truth import (
+    _has_operator_tag,
     compute_derived_truth,
     ensure_xhtml,
     get_authority_entries,
     get_provider_entries,
-    get_src_entries,
     resolve_api_key,
     resolve_authority_entries,
-    resolve_src_content,
     strip_xhtml,
     utc_now_iso,
 )
@@ -59,7 +58,7 @@ class Source:
     title: str  # Human-readable source label shown to the model/user.
     certainty: float  # Confidence score used in ranking/display.
     content: str  # Plaintext/XHTML snippet injected into prompts.
-    kind: str = "fact"          # "fact" | "provider" | "src" | "url" | "transient"
+    kind: str = "fact"          # "fact" | "reference" | "provider" | "operator" | "authority" | "transient"
     time: str = ""
 
 
@@ -69,14 +68,14 @@ class ProviderBundle:
 
     Fields:
         system:   global instructions / context (goes in system message)
-        history:  conversation messages from ancestor chain, windowed
-        sources:  trust entries with certainty scores
+        history:  conversation messages from ancestor chain
+        sources:  all state.truth entries + dynamic results (when rag=True)
         query:    current user message
         output:   short instruction describing the output format
     """
     system: str = ""  # Global instructions/context.
     history: List[Dict[str, str]] = field(default_factory=list)  # Prior turns on active path.
-    sources: List[Source] = field(default_factory=list)  # Ranked retrieval evidence.
+    sources: List[Source] = field(default_factory=list)  # Truth table evidence.
     transient_sources: List[Source] = field(default_factory=list)  # Legacy ad hoc provider snippets.
     query: str = ""  # Current user message.
     output: str = ""  # Output-format guidance appended to prompts.
@@ -85,49 +84,35 @@ class ProviderBundle:
 # ---------------------------------------------------------------------------
 # Certainty-aware retrieval ranking
 # ---------------------------------------------------------------------------
-def rank_retrieval_entries(
+def static_truth(
     trust_entries: List[Dict[str, Any]],
-    retrieval_prefs: Dict[str, Any],
-    *,
-    exclude_providers: bool = True,
-    exclude_srcs: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Rank and filter trust entries by |certainty| (Kleene ternary logic).
+    """Extract the evaluable (static) subset of the truth table.
 
-    Certainty range is [-1, 1]:  +1 = true, 0 = ignorance (inert), -1 = false.
-    Entries with |certainty| below min_certainty are dropped (ignorance zone).
-    Remaining entries are ranked by |certainty| descending, then timestamp, then id.
-    Returns at most max_entries.
+    Returns every entry whose content is a fact or reference — i.e. the
+    entries that carry propositional content rather than structural wiring.
+    These are the entries that ``dynamic_truth`` evaluates against.
+
+    Structural entries are excluded from this subset:
+      - ``<provider>``  — evaluated separately as dynamic expert consultations
+      - ``<operator>``  — evaluated by ``compute_derived_truth`` (Strong Kleene)
+      - ``<authority>``  — resolved separately via ``resolve_authority_entries``
+
+    Note: ``static_truth`` controls what the dynamic evaluation steps see
+    as input.  All ``state.truth`` entries (including structural ones) are
+    still sent to the final provider when ``rag`` is true.
     """
-    max_entries = retrieval_prefs.get("max_entries", 8)
-    min_certainty = retrieval_prefs.get("min_certainty", 0.0)
-
-    candidates = []
+    result = []
     for entry in trust_entries:
-        # Use derived certainty (from implication engine) when available
-        certainty = entry.get("_derived_certainty", entry.get("certainty", 0))
-        if abs(certainty) < min_certainty:
-            continue
         content = entry.get("content", "")
-        if exclude_providers and "<provider" in content:
+        if "<provider" in content:
             continue
-        if exclude_srcs and "<src" in content:
-            continue
-        # Implication and authority entries are structural, not content — exclude from RAG
-        if "<implication" in content:
+        if _has_operator_tag(content):
             continue
         if "<authority" in content:
             continue
-
-        # Rank by |certainty| (both strong belief and strong disbelief are relevant)
-        score = abs(certainty)
-        ts = entry.get("time", "")
-        candidates.append((score, ts, entry.get("id", ""), entry))
-
-    # Sort: highest |certainty| first, then by timestamp and id for determinism
-    candidates.sort(key=lambda t: (-t[0], t[1] if t[1] else "", t[2]))
-
-    return [c[3] for c in candidates[:max_entries]]
+        result.append(entry)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +156,7 @@ def evaluate_providers(
         provider_entries: list of (trust_entry, provider_config) pairs
                           as returned by get_provider_entries().
         system:   system context string (from state.context).
-        history:  windowed conversation history.
+        history:  conversation history (ancestor chain).
         query:    the current user message.
         output:   structured output instructions.
         call_fn:  callable(provider_config, messages) -> str
@@ -238,7 +223,7 @@ def evaluate_providers(
 # ---------------------------------------------------------------------------
 # Bundle builder
 # ---------------------------------------------------------------------------
-def build_prompt_bundle(
+def build_query(
     state: Dict[str, Any],
     user_message: str,
     query_config: Dict[str, Any],
@@ -247,32 +232,36 @@ def build_prompt_bundle(
     *,
     strip_xhtml_fn=None,
     get_context_messages_fn=None,
-    get_src_entries_fn=None,
-    resolve_src_content_fn=None,
     provider_sources: Optional[List[Source]] = None,
 ) -> ProviderBundle:
     """Build a canonical ProviderBundle from state + user message.
 
     This is the single entry point for all providers. The bundle captures:
     - system: cleaned context text (project constraints, formatting rules)
-    - history: windowed conversation messages from ancestor chain
-    - sources: ranked trust entries with certainty scores
-    - transient_sources: secondary provider consultation results
+    - history: conversation messages from ancestor chain
+    - sources: all state.truth entries plus dynamic results (when rag=True)
     - query: the current user message
     - output: structured output instructions
 
-    If provider_sources is supplied (from evaluate_providers()), those
-    are included as sources with kind="provider".  This is the HME path:
-    secondary provider responses become evidence for the mastermind.
+    When ``rag`` is true, **all** ``state.truth`` entries are sent to the
+    provider (facts, references, operators, authorities, providers), plus
+    dynamic results (resolved authorities, evaluated provider responses).
+    When ``rag`` is false, **no** truth of any kind is sent.
+
+    The pipeline is:
+
+        st = static_truth(state.truth)   — facts & references (evaluable)
+        t  = st + dynamic_truth(st)      — operators propagate certainty,
+                                           authorities resolved, providers
+                                           evaluated
+        bundle.sources = state.truth (with derived certainty)
+                       + authority remote entries
+                       + provider_sources (HME expert responses)
     """
     if strip_xhtml_fn is None:
         strip_xhtml_fn = strip_xhtml
     if get_context_messages_fn is None:
         get_context_messages_fn = get_context_messages
-    if get_src_entries_fn is None:
-        get_src_entries_fn = get_src_entries
-    if resolve_src_content_fn is None:
-        resolve_src_content_fn = resolve_src_content
 
     bundle = ProviderBundle()
 
@@ -284,62 +273,37 @@ def build_prompt_bundle(
     else:
         bundle.system = XHTML_INSTRUCTION
 
-    # 2) Certainty-aware source retrieval (RAG)
-    if query_config.get("tools", {}).get("rag", True):
-        trust_entries = state.get("truth", {}).get("trust", [])
-        retrieval_prefs = query_config.get("retrieval", {})
+    # 2) Truth table → sources  (the HME pipeline)
+    #
+    #    st = static_truth(state.truth)     — facts & references
+    #    t  = st + dynamic_truth(st)        — augmented with operators,
+    #                                         authorities, and providers
+    #
+    # When rag is true ALL state.truth is sent, plus dynamic results.
+    # When rag is false NO truth of any kind is sent.
+    #
+    if query_config.get("chat", {}).get("rag", True):
+        trust_entries = state.get("truth") or []
 
-        # Compute derived certainty from implication chains
+        # st: the evaluable subset (facts + references) — used as input
+        # to dynamic evaluation steps
+        st = static_truth(trust_entries)
+
+        # dynamic_truth(st): operators (Strong Kleene certainty propagation)
         derived = compute_derived_truth(trust_entries)
         for entry in trust_entries:
             eid = entry.get("id", "")
             if eid in derived:
                 entry["_derived_certainty"] = derived[eid]
 
-        # Ranked normal entries (excluding providers and srcs)
-        ranked = rank_retrieval_entries(
-            trust_entries, retrieval_prefs,
-            exclude_providers=True, exclude_srcs=True,
-        )
-        for entry in ranked:
-            certainty = entry.get("_derived_certainty", entry.get("certainty", 0))
-            bundle.sources.append(Source(
-                source_id=entry.get("id", ""),
-                title=entry.get("title", "untitled"),
-                certainty=certainty,
-                content=strip_xhtml_fn(entry.get("content", "")),
-                kind="fact",
-                time=entry.get("time", ""),
-            ))
-
-        # Resolve <src> file entries
-        src_entries = get_src_entries_fn(trust_entries)
-        min_certainty = retrieval_prefs.get("min_certainty", 0.0)
-        for entry, src_config in src_entries:
-            if entry.get("certainty", 0) < min_certainty:
-                continue
-            try:
-                content = resolve_src_content_fn(src_config)
-                if content:
-                    bundle.sources.append(Source(
-                        source_id=entry.get("id", ""),
-                        title=entry.get("title", src_config.get("name", "Source")),
-                        certainty=entry.get("certainty", 0),
-                        content=content[:4000],
-                        kind="src",
-                        time=entry.get("time", ""),
-                    ))
-            except Exception:
-                pass
-
-    # 2b) Resolve <authority> entries: fetch remote trust tables, scale certainty
-    if query_config.get("tools", {}).get("rag", True):
+        # dynamic_truth(st): authority resolution (remote truth tables)
         authority_entries = get_authority_entries(trust_entries)
+        authority_sources: List[Source] = []
         if authority_entries:
             resolved = resolve_authority_entries(authority_entries, timeout_s=30)
             for _auth_entry, remote_trusts in resolved:
                 for rt in remote_trusts:
-                    bundle.sources.append(Source(
+                    authority_sources.append(Source(
                         source_id=rt.get("id", ""),
                         title=rt.get("title", "untitled"),
                         certainty=rt.get("certainty", 0),
@@ -348,9 +312,36 @@ def build_prompt_bundle(
                         time=rt.get("time", ""),
                     ))
 
-    # 2c) Provider HME sources (evaluated <provider> entries)
-    if provider_sources:
-        bundle.sources.extend(provider_sources)
+        # dynamic_truth(st): evaluated <provider> entries (HME experts)
+        # provider_sources are computed upstream by evaluate_providers()
+
+        # t = st + dynamic_truth(st)
+        # Send every state.truth entry to the provider, with derived
+        # certainty where operators have propagated it.
+        for entry in trust_entries:
+            certainty = entry.get("_derived_certainty", entry.get("certainty", 0))
+            content = entry.get("content", "")
+            if "<provider" in content:
+                kind = "provider"
+            elif "<authority" in content:
+                kind = "authority"
+            elif "<reference" in content:
+                kind = "reference"
+            elif _has_operator_tag(content):
+                kind = "operator"
+            else:
+                kind = "fact"
+            bundle.sources.append(Source(
+                source_id=entry.get("id", ""),
+                title=entry.get("title", "untitled"),
+                certainty=certainty,
+                content=strip_xhtml_fn(content),
+                kind=kind,
+                time=entry.get("time", ""),
+            ))
+        bundle.sources.extend(authority_sources)
+        if provider_sources:
+            bundle.sources.extend(provider_sources)
 
     # 3) Transient sources (legacy path; HME replaces this)
     if transient_snippets:
@@ -364,15 +355,14 @@ def build_prompt_bundle(
                 time=s.get("time", ""),
             ))
 
-    # 4) Conversation history (windowed ancestor chain)
+    # 4) Conversation history (ancestor chain)
     conversations = state.get("conversations", [])
     if conversation_id:
         context_msgs = get_context_messages_fn(conversations, conversation_id)
     else:
         context_msgs = []
 
-    window_size = query_config.get("message_window", 40)
-    recent = context_msgs[-window_size:]
+    recent = context_msgs
     for msg in recent:
         role = msg.get("role", "user")
         content = strip_xhtml_fn(msg.get("content", ""))
@@ -606,7 +596,7 @@ def _build_bundle(
     transient_snippets: List[Dict] | None = None,
 ) -> ProviderBundle:
     """Build a ProviderBundle from state + user message (convenience wrapper)."""
-    return build_prompt_bundle(
+    return build_query(
         state, user_message, query_config,
         conversation_id=conversation_id,
         transient_snippets=transient_snippets,
@@ -1059,7 +1049,7 @@ def _fan_out_and_aggregate(
     temperature: float = 0.7,
 ) -> tuple:
     """HME fan-out: evaluate secondary providers, feed results to primary."""
-    trust_entries = state.get("truth", {}).get("trust", [])
+    trust_entries = state.get("truth") or []
     provider_entries = get_provider_entries(trust_entries)
 
     if not provider_entries:
@@ -1085,7 +1075,7 @@ def _fan_out_and_aggregate(
             timeout_s=max(int(cfg.timeout_s), 60),
         )
 
-    final_bundle = build_prompt_bundle(
+    final_bundle = build_query(
         state, user_message, query_config,
         conversation_id=conversation_id,
         provider_sources=provider_sources,
@@ -1214,17 +1204,18 @@ def process_chat(
     yaml_chat = runtime_cfg.get("chat", {})
     provider = query_config.get("provider", "wikioracle")
     client_model = (query_config.get("model") or "").strip()
-    print(f"[WikiOracle] Chat request: provider='{provider}' (from client config)")
+    print(f"[WikiOracle] Chat request: provider='{provider}' (from client config), "
+          f"rag={query_config.get('chat', {}).get('rag', '?')}")
 
     temperature = max(0.0, min(2.0, float(
         query_config.get("temp", yaml_chat.get("temperature", 0.7))
     )))
-    if "tools" not in query_config:
-        query_config["tools"] = {}
-    query_config["tools"].setdefault("rag", yaml_chat.get("rag", True))
-    query_config["tools"].setdefault("url_fetch", yaml_chat.get("url_fetch", False))
-    query_config.setdefault("message_window", yaml_chat.get("message_window", 40))
-    query_config.setdefault("retrieval", yaml_chat.get("retrieval", {}))
+    # Chat settings live at query_config.chat.{rag, url_fetch, ...}.
+    # The client sends these directly; fill in defaults from config.yaml.
+    if "chat" not in query_config or not isinstance(query_config.get("chat"), dict):
+        query_config["chat"] = {}
+    query_config["chat"].setdefault("rag", yaml_chat.get("rag", True))
+    query_config["chat"].setdefault("url_fetch", yaml_chat.get("url_fetch", False))
 
     conversation_id = body.get("conversation_id")
     branch_from = body.get("branch_from")
@@ -1232,72 +1223,73 @@ def process_chat(
 
     user_timestamp = utc_now_iso()
 
-    trust = state.get("truth", {}).get("trust", [])
-    derived = compute_derived_truth(trust)
-    for entry in trust:
+    truth_list = state.get("truth") or []
+    derived = compute_derived_truth(truth_list)
+    for entry in truth_list:
         eid = entry.get("id", "")
         if eid in derived and abs(derived[eid] - entry.get("certainty", 0.0)) > 1e-9:
             entry["_derived_certainty"] = derived[eid]
 
-    dyn_providers = get_provider_entries(trust)
-
+    # ── Step 1: resolve dynamic <provider> truth entries ──
+    # Each <provider> truth entry references an external LLM endpoint.
+    # We call those endpoints now; their responses are passed to
+    # build_query as provider_sources (they are NOT written back into
+    # state.truth — truth only flows client → server).  The API key
+    # for each dynamic provider can come from the truth entry itself
+    # or from the matching provider in config.yaml.
+    dyn_providers = get_provider_entries(truth_list)
+    provider_sources: list = []
     if dyn_providers:
-        primary_entry, primary_config = dyn_providers[0]
-        print(f"[WikiOracle] Chat: using DYNAMIC provider '{primary_config.get('name')}' "
-              f"(from trust entry), secondaries={len(dyn_providers)-1}")
-        response_text, _transient = _fan_out_and_aggregate(
-            cfg, state, user_msg, query_config, context_conv_id,
-            temperature=temperature,
+        print(f"[WikiOracle] Resolving {len(dyn_providers)} dynamic <provider> truth "
+              f"entr{'y' if len(dyn_providers) == 1 else 'ies'} before chat")
+        base_bundle = _build_bundle(state, user_msg, query_config, context_conv_id)
+        secondaries = dyn_providers  # all dynamic providers are evaluated
+        def _call_for_eval(pconfig, messages):
+            return _call_dynamic_provider(pconfig, messages, temperature, cfg)
+        provider_sources = evaluate_providers(
+            secondaries,
+            system=base_bundle.system,
+            history=base_bundle.history,
+            query=base_bundle.query,
+            output=base_bundle.output,
+            call_fn=_call_for_eval,
+            timeout_s=max(int(cfg.timeout_s), 60),
         )
-        if _transient:
-            trust_list = state.get("truth", {}).get("trust", [])
-            for src in _transient:
-                trust_list.append({
-                    "type": "trust",
-                    "id": src.source_id + "_resp_" + utc_now_iso().replace(":", "").replace("-", "")[:15],
-                    "title": f"{src.title} response",
-                    "certainty": src.certainty,
-                    "content": ensure_xhtml(src.content),
-                    "time": utc_now_iso(),
-                })
-            if "truth" not in state:
-                state["truth"] = {"trust": trust_list}
-            else:
-                state["truth"]["trust"] = trust_list
-        derived = compute_derived_truth(state.get("truth", {}).get("trust", []))
-        for entry in state.get("truth", {}).get("trust", []):
-            eid = entry.get("id", "")
-            if eid in derived and abs(derived[eid] - entry.get("certainty", 0.0)) > 1e-9:
-                entry["_derived_certainty"] = derived[eid]
+        # provider_sources are passed to build_query below — they are NOT
+        # written back into state.truth.  Truth only flows client → server.
 
-        llm_provider_name = primary_config.get("name", "unknown")
-        llm_model = primary_config.get("model", "")
-    else:
-        context_text = strip_xhtml(state.get("context", ""))
-        print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
-              f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
-              f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
-        bundle = _build_bundle(state, user_msg, query_config, context_conv_id)
-        if config_mod.DEBUG_MODE:
-            print(f"[DEBUG] ProviderBundle: system={len(bundle.system)} chars, "
-                  f"history={len(bundle.history)} msgs, "
-                  f"sources={len(bundle.sources)}, query={len(bundle.query)} chars")
-            msgs = _bundle_to_messages(bundle, provider)
-            print(f"[DEBUG] Upstream messages ({len(msgs)} total):")
-            for i, m in enumerate(msgs):
-                role = m.get("role", "?")
-                content = m.get("content", "")
-                print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
-        client_api_key = ""
-        if config_mod.STATELESS_MODE:
-            rc_providers = runtime_cfg.get("providers", {})
-            rc_pcfg = rc_providers.get(provider, {})
-            client_api_key = rc_pcfg.get("api_key", "")
-        response_text = _call_provider(cfg, bundle, temperature, provider, client_api_key, client_model)
-        if config_mod.DEBUG_MODE:
-            print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
-        llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
-        llm_model = query_config.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
+    # ── Step 2: call the UI-selected provider ──
+    context_text = strip_xhtml(state.get("context", ""))
+    print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
+          f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
+          f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
+    truth_count = len(state.get("truth") or [])
+    rag_flag = query_config.get("chat", {}).get("rag", "MISSING")
+    bundle = build_query(state, user_msg, query_config,
+                         conversation_id=context_conv_id,
+                         provider_sources=provider_sources or None)
+    print(f"[WikiOracle] RAG: rag={rag_flag}, truth_entries={truth_count}, "
+          f"bundle.sources={len(bundle.sources)}")
+    if config_mod.DEBUG_MODE:
+        print(f"[DEBUG] ProviderBundle: system={len(bundle.system)} chars, "
+              f"history={len(bundle.history)} msgs, "
+              f"sources={len(bundle.sources)}, query={len(bundle.query)} chars")
+        msgs = _bundle_to_messages(bundle, provider)
+        print(f"[DEBUG] Upstream messages ({len(msgs)} total):")
+        for i, m in enumerate(msgs):
+            role = m.get("role", "?")
+            content = m.get("content", "")
+            print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
+    client_api_key = ""
+    if config_mod.STATELESS_MODE:
+        rc_providers = runtime_cfg.get("providers", {})
+        rc_pcfg = rc_providers.get(provider, {})
+        client_api_key = rc_pcfg.get("api_key", "")
+    response_text = _call_provider(cfg, bundle, temperature, provider, client_api_key, client_model)
+    if config_mod.DEBUG_MODE:
+        print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
+    llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
+    llm_model = query_config.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
 
     user_content = ensure_xhtml(user_msg)
     assistant_content = ensure_xhtml(response_text)

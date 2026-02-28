@@ -5,7 +5,7 @@
 //   XHTML validation       — validateXhtml, repairXhtml, ensureXhtml
 //   Config/state persist   — _persistConfig, _persistState (call api(); deps live in config.js/state.js)
 //   Layout + theme         — applyLayout, applyTheme
-//   Provider metadata      — _refreshProviderMeta, _populateModelDropdown, _providerReady
+//   Provider metadata      — _refreshProviderMeta, _populateModelDropdown
 //   Tree navigation        — navigateToNode, branchFromNode, _navigateChild/Sibling
 //   Conversation actions   — deleteConversation, _deleteAllConversations, _splitAfterMessage
 //   Clipboard              — _cutConversation, _pasteConversation, _copyConversationContent
@@ -212,8 +212,8 @@ function _pasteConversation(targetId) {
 function _deepCloneConversation(conv) {
   var clone = JSON.parse(JSON.stringify(conv));
   function _reassignIds(c) {
-    c.id = tempId("conv_");
-    (c.messages || []).forEach(function(m) { m.id = tempId("msg_"); });
+    c.id = generateUUID();
+    (c.messages || []).forEach(function(m) { m.id = generateUUID(); });
     (c.children || []).forEach(_reassignIds);
   }
   _reassignIds(clone);
@@ -266,7 +266,7 @@ function _splitAfterMessage(msgIdx) {
   const newTitle = preview || "Split";
 
   const newConv = {
-    id: tempId("conv_"),
+    id: generateUUID(),
     title: newTitle,
     messages: tailMessages,
     children: conv.children || [],  // existing children follow the tail
@@ -443,7 +443,7 @@ function _pasteMessage(targetIdx) {
     var srcMsg = srcConv.messages[_clipboard.msgIdx];
     if (!srcMsg) { _clipboard = null; return; }
     var clone = JSON.parse(JSON.stringify(srcMsg));
-    clone.id = tempId("msg_");
+    clone.id = generateUUID();
     conv.messages.splice(targetIdx, 0, clone);
     // Don't clear clipboard — copy allows repeated paste
     renderMessages();
@@ -611,22 +611,28 @@ function renderMessages() {
   // ─── Root summary dashboard (when viewing the root node) ───
   if (state.selected_conversation === null && !_pendingBranchParent) {
     var stats = _computeTreeStats(state.conversations);
-    var trustEntries = (state.truth && state.truth.trust) || [];
+    var trustEntries = Array.isArray(state.truth) ? state.truth : [];
     var contextText = stripTags(state.context || "").trim();
 
     var summary = document.createElement("div");
     summary.className = "root-summary";
 
-    // Title
+    // Title (from state.title, editable on click)
     var h2 = document.createElement("h2");
     h2.className = "root-summary-title";
-    h2.textContent = "WikiOracle";
+    h2.textContent = state.title || "WikiOracle";
+    h2.title = "Click to rename";
+    h2.style.cursor = "pointer";
+    h2.addEventListener("click", function() {
+      var cur = state.title || "WikiOracle";
+      var newTitle = prompt("Document title:", cur);
+      if (newTitle !== null && newTitle.trim()) {
+        state.title = newTitle.trim();
+        _persistState();
+        renderMessages();
+      }
+    });
     summary.appendChild(h2);
-
-    var sub = document.createElement("p");
-    sub.className = "root-summary-subtitle";
-    sub.textContent = "Document overview";
-    summary.appendChild(sub);
 
     // Stat grid
     var grid = document.createElement("div");
@@ -680,35 +686,29 @@ function renderMessages() {
     ctxP.className = "root-summary-context";
     ctxP.textContent = (contextText && contextText !== "<div/>")
       ? truncate(contextText, 200)
-      : "(none — tap to edit)";
+      : "none";
     ctxSection.appendChild(ctxP);
     ctxSection.addEventListener("click", function() {
       if (typeof _toggleContextEditor === "function") _toggleContextEditor();
     });
     summary.appendChild(ctxSection);
 
-    // Trust entries (clickable — opens trust editor)
-    var trustSection = document.createElement("div");
-    trustSection.className = "root-summary-section";
-    trustSection.style.cursor = "pointer";
-    var trustH3 = document.createElement("h3");
-    trustH3.textContent = "Trust";
-    trustSection.appendChild(trustH3);
-    var trustP = document.createElement("p");
-    trustP.textContent = trustEntries.length > 0
+    // Truth entries (clickable — opens truth editor)
+    var truthSection = document.createElement("div");
+    truthSection.className = "root-summary-section";
+    truthSection.style.cursor = "pointer";
+    var truthH3 = document.createElement("h3");
+    truthH3.textContent = "Truth";
+    truthSection.appendChild(truthH3);
+    var truthP = document.createElement("p");
+    truthP.textContent = trustEntries.length > 0
       ? trustEntries.length + (trustEntries.length === 1 ? " entry" : " entries")
-      : "(none — tap to edit)";
-    trustSection.appendChild(trustP);
-    trustSection.addEventListener("click", function() {
+      : "none";
+    truthSection.appendChild(truthP);
+    truthSection.addEventListener("click", function() {
       if (typeof _openTruthEditor === "function") _openTruthEditor();
     });
-    summary.appendChild(trustSection);
-
-    // Hint
-    var hint = document.createElement("p");
-    hint.className = "root-summary-hint";
-    hint.textContent = "Type a message to start a new conversation.";
-    summary.appendChild(hint);
+    summary.appendChild(truthSection);
 
     wrapper.appendChild(summary);
   }
@@ -826,13 +826,6 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  // Check provider readiness before sending
-  if (!_providerReady()) {
-    const meta = config.server.providers[config.ui.default_provider] || {};
-    setStatus(`${meta.name || config.ui.default_provider} requires an API key. Add it in Settings \u2192 config.yaml.`);
-    return;
-  }
-
   input.value = "";
   input.style.height = "auto";
   document.getElementById("btnSend").disabled = true;
@@ -859,7 +852,7 @@ async function sendMessage() {
               "branchFrom=", branchFrom, "newRoot=", isNewRoot);
 
   // Optimistic UI: show user message immediately
-  const optimisticMsgId = tempId("m_");
+  const optimisticMsgId = generateUUID();
   const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const userEntry = {
     id: optimisticMsgId,
@@ -876,7 +869,7 @@ async function sendMessage() {
     if (conv) conv.messages.push(userEntry);
   } else if (branchFrom || isNewRoot) {
     // Create temporary optimistic conversation
-    const optConvId = tempId("c_");
+    const optConvId = generateUUID();
     const optConv = {
       id: optConvId,
       title: text.slice(0, 50),
@@ -915,7 +908,7 @@ async function sendMessage() {
     const targetConvId = conversationId || branchFrom || state.selected_conversation;
     const prunedState = {
       version: state.version, schema: state.schema, time: state.time,
-      context: state.context, output: state.output, truth: state.truth,
+      title: state.title, context: state.context, truth: state.truth,
       selected_conversation: state.selected_conversation,
       conversations: _buildAncestorPath(state.conversations, targetConvId),
       _path_only: true,
@@ -932,32 +925,39 @@ async function sendMessage() {
     }
     const data = await api("POST", "/chat", queryBundle);
     const responseBundle = data.state || {};
-    // ResponseBundle: returned from POST /chat
+    // ResponseBundle: server returns only the conversation delta +
+    // selected_conversation.  Truth flows client → server only; the
+    // server never sends truth back.
 
-    // Merge response into local full state (path_only means response has pruned tree)
+    // Merge the conversation delta into local state
     if (!Array.isArray(state.conversations)) state.conversations = [];
     _mergeResponseConversation(state.conversations, responseBundle);
     state.selected_conversation = responseBundle.selected_conversation || state.selected_conversation;
-    // Update truth (derived certainty may have changed)
-    if (responseBundle.truth) state.truth = responseBundle.truth;
 
     _persistState();
     renderMessages();
     setStatus("Ready");
   } catch (e) {
-    // Rollback: reload state from sessionStorage (stateless) or server (stateful)
+    // Rollback: reload conversations from sessionStorage (stateless) or
+    // server (stateful).  Truth/context/output are client-owned and are
+    // NOT overwritten from the server — truth flows client → server only.
     try {
       if (config.server.stateless) {
         const localState = _loadLocalState();
         if (localState) state = localState;
       } else {
+        const saved = { truth: state.truth, context: state.context, output: state.output };
         const data = await api("GET", "/state");
         state = data.state || state;
+        state.truth = saved.truth;
+        state.context = saved.context;
+        state.output = saved.output;
       }
     } catch {}
     if (isNewRoot || branchFrom) state.selected_conversation = null;
     renderMessages();
     setStatus("Error: " + e.message);
+    showErrorDialog("Send Failed", e.message);
   } finally {
     document.getElementById("btnSend").disabled = false;
     input.focus();
@@ -981,11 +981,10 @@ function bindEvents() {
     const lines = [];
     const header = {
       type: "header", version: 2,
-      schema: state.schema || "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state.json",
+      schema: state.schema || "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json",
       date: new Date().toISOString(),
+      title: state.title || "WikiOracle",
       context: state.context || "<div/>",
-      output: state.output || "<div/>",
-      retrieval_prefs: (state.truth || {}).retrieval_prefs || {},
     };
     if (state.selected_conversation) header.selected_conversation = state.selected_conversation;
     lines.push(JSON.stringify(header));
@@ -1010,9 +1009,9 @@ function bindEvents() {
     }
     flattenConvs(state.conversations || [], null);
 
-    // Trust
-    for (const t of ((state.truth || {}).trust || [])) {
-      lines.push(JSON.stringify({type: "trust", ...t}));
+    // Truth entries
+    for (const t of (Array.isArray(state.truth) ? state.truth : [])) {
+      lines.push(JSON.stringify({type: "truth", ...t}));
     }
 
     const blob = new Blob([lines.join("\n") + "\n"], { type: "application/x-jsonlines" });
@@ -1048,11 +1047,11 @@ function bindEvents() {
           version: first.version || 2,
           schema: first.schema || "",
           time: first.time || first.date || "",
+          title: first.title || "",
           context: first.context || "<div/>",
-          output: first.output || "",
           conversations: [],
           selected_conversation: first.selected_conversation || null,
-          truth: { trust: [], retrieval_prefs: first.retrieval_prefs || {} },
+          truth: [],
         };
         const convRecords = [];
         const total = lines.length - 1;
@@ -1061,9 +1060,9 @@ function bindEvents() {
           if (rec.type === "conversation") {
             const { type, ...rest } = rec;
             convRecords.push(rest);
-          } else if (rec.type === "trust") {
+          } else if (rec.type === "truth" || rec.type === "trust") {
             const { type, ...rest } = rec;
-            importState.truth.trust.push(rest);
+            importState.truth.push(rest);
           }
           // Update progress bar during parse (yield every 200 lines for large files)
           if (total > 200 && i % 200 === 0) {
@@ -1113,11 +1112,11 @@ function bindEvents() {
       _hideProgress();
 
       // User-visible feedback
-      const trustCount = (state.truth && state.truth.trust || []).length;
+      const trustCount = (Array.isArray(state.truth) ? state.truth : []).length;
       const convCount = (state.conversations || []).length;
-      const importTrust = (importState.truth && importState.truth.trust || []).length;
+      const importTrust = (Array.isArray(importState.truth) ? importState.truth : []).length;
       const importConvs = (importState.conversations || []).length;
-      const msg = `Imported ${file.name}: ${importTrust} trust entries, ${importConvs} conversations`;
+      const msg = `Imported ${file.name}: ${importTrust} truth entries, ${importConvs} conversations`;
       setStatus(msg);
 
       // Flash confirmation in message input placeholder
@@ -1381,6 +1380,7 @@ async function init() {
 
     const convCount = state.conversations.length;
     console.log("[WikiOracle] init: loaded", convCount, "root conversations");
+    _navScrollHint = "top"; // scroll messages pane to top on initial load
     renderMessages();
     _hideProgress();
     setStatus(`Loaded ${convCount} conversation${convCount !== 1 ? "s" : ""}`);
@@ -1511,7 +1511,7 @@ function _fetchStateWithProgress(expectedSize) {
   });
 }
 
-// Refresh provider metadata from server (updates has_key flags).
+// Refresh provider metadata from server.
 // Re-reads /config since provider meta is part of config.server.providers.
 async function _refreshProviderMeta() {
   try {
@@ -1530,8 +1530,7 @@ function _populateProviderDropdown() {
   for (const [key, info] of Object.entries(config.server.providers)) {
     const opt = document.createElement("option");
     opt.value = key;
-    const keyWarning = (info.needs_key && !info.has_key) ? " \u26a0 no key" : "";
-    opt.textContent = info.name + keyWarning;
+    opt.textContent = info.name;
     sel.appendChild(opt);
   }
 }
@@ -1559,19 +1558,15 @@ function _populateModelDropdown(providerKey) {
   }
 }
 
-// Check if the currently selected provider can accept messages
-function _providerReady() {
-  var meta = config.server.providers[config.ui.default_provider];
-  if (!meta) return true;  // unknown provider — let server decide
-  if (!meta.needs_key) return true;
-  if (meta.has_key) return true;
-  // In stateless mode, check local config for client-supplied key
-  if (config.server.stateless) {
-    var rcKey = ((config.providers || {})[config.ui.default_provider] || {}).api_key;
-    if (rcKey) return true;
-  }
-  return false;
-}
+// ─── Prevent browser zoom outside tree + chat panels ───
+// ctrl+wheel (trackpad pinch on desktop) triggers browser zoom page-wide.
+// Block it everywhere except the two zoom-enabled panels.
+document.addEventListener("wheel", function(e) {
+  if (!e.ctrlKey) return;
+  var tgt = e.target;
+  if (tgt.closest("#treeContainer") || tgt.closest("#chatContainer")) return;
+  e.preventDefault();
+}, { passive: false });
 
 // ─── Boot ───
 bindEvents();
@@ -1647,6 +1642,35 @@ init();
   }, { passive: false });
   document.addEventListener("touchend", endDrag);
   document.addEventListener("touchcancel", endDrag);
+
+  // Double-click divider to toggle tree between collapsed and 40%
+  divider.addEventListener("dblclick", function(e) {
+    e.preventDefault();
+    var collapsed = tree.classList.contains("tree-collapsed") ||
+                    (isVertical() ? tree.clientWidth < 4 : tree.clientHeight < 4);
+    var pct = collapsed ? 40 : 0;
+    if (isVertical()) {
+      tree.style.width = pct === 0 ? "0px" : (pct / 100 * window.innerWidth) + "px";
+    } else {
+      tree.style.height = pct === 0 ? "0px" : (pct / 100 * window.innerHeight) + "px";
+    }
+    tree.classList.toggle("tree-collapsed", pct === 0);
+    config.ui.splitter_pct = pct;
+    _persistConfig();
+    if (typeof renderMessages === "function") renderMessages();
+  });
+
+  // Reapply splitter percentage on window resize (e.g. maximize/restore)
+  window.addEventListener("resize", function() {
+    if (dragging) return; // don't fight with an active drag
+    var pct = config.ui.splitter_pct;
+    if (pct == null) return;
+    if (isVertical()) {
+      tree.style.width = pct === 0 ? "0px" : (pct / 100 * window.innerWidth) + "px";
+    } else {
+      tree.style.height = pct === 0 ? "0px" : (pct / 100 * window.innerHeight) + "px";
+    }
+  });
 })();
 
 // ─── Pinch-zoom on chat panel (shared setupZoom from util.js) ───

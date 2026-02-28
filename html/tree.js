@@ -127,8 +127,9 @@ function renderTree(hierarchyData, callbacks) {
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
   // Compute zoom-to-fit transform (used for initial view + double-click reset)
-  const fitScaleX = (svgW - margin.left - margin.right) / contentW;
-  const fitScaleY = (svgH - margin.top - margin.bottom) / contentH;
+  // contentW/H already include margins, so fit them into the full SVG area.
+  const fitScaleX = svgW / contentW;
+  const fitScaleY = svgH / contentH;
   const fitScale = Math.min(fitScaleX, fitScaleY, 1); // never zoom in beyond 1:1
   const fitTx = (svgW - contentW * fitScale) / 2;
   const fitTy = (svgH - contentH * fitScale) / 2;
@@ -444,7 +445,7 @@ function _showRootContextMenu(event, callbacks) {
 
   var truthItem = document.createElement("div");
   truthItem.className = "ctx-item";
-  truthItem.textContent = "Trust\u2026";
+  truthItem.textContent = "Truth\u2026";
   truthItem.addEventListener("click", function(e) {
     e.stopPropagation(); _hideContextMenu();
     if (callbacks.onEditTruth) callbacks.onEditTruth();

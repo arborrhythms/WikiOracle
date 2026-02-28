@@ -8,7 +8,7 @@ Recommended reading order:
 2. `WhatIsTruth.md` (plural truth, POVs, and certainty semantics)
 3. `ArchitectureOfTruth.md` (distributed truth vs consensus, conceptual spaces)
 4. `Authority.md` (transitive trust and the authority import format)
-5. `Implication.md` (typed implication operators and derived truth)
+5. `Implication.md` (logical operators: and/or/not under Strong Kleene semantics)
 6. `HowToEnsureSafety.md` (Freedom/Love/Wisdom safety frame)
 7. `Architecture.md` (current local-first software architecture)
 8. `Security.md` (concrete security considerations)
@@ -22,7 +22,7 @@ Recommended reading order:
 - [`WhatIsTruth.md`](./WhatIsTruth.md): plural truth model, POVs, empathy as procedural constraint, HME fan-out, Kleene-style certainty.
 - [`ArchitectureOfTruth.md`](./ArchitectureOfTruth.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
 - [`Authority.md`](./Authority.md): authority blocks (`<authority>`), transitive trust, certainty scaling, namespacing, and fetch/security constraints.
-- [`Implication.md`](./Implication.md): material/strict/relevant implication operators; derived truth engine notes and limitations.
+- [`Implication.md`](./Implication.md): logical operators (and/or/not); Strong Kleene evaluation; derived truth engine.
 - [`HowToEnsureSafety.md`](./HowToEnsureSafety.md): safety principles organized as Freedom (agency), Love (relational integrity), Wisdom (truth).
 - [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).
 - [`Architecture.md`](./Architecture.md): implementation architecture (Flask shim + UI + `llm.jsonl` state model).

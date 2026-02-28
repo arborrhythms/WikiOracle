@@ -37,11 +37,8 @@ from truth import (
     StateValidationError,
     get_primary_provider,
     get_provider_entries,
-    get_src_entries,
     parse_provider_block,
-    parse_src_block,
     resolve_api_key,
-    resolve_src_content,
     utc_now_iso,
 )
 
@@ -55,7 +52,7 @@ def _make_state(**overrides):
         "context": "<div>Test</div>",
         "conversations": [],
         "selected_conversation": None,
-        "truth": {"trust": []},
+        "truth": [],
     }
     base.update(overrides)
     return base
@@ -96,7 +93,7 @@ class TestEnsureMinimalState(unittest.TestCase):
     def test_strict_rejects_bad_schema(self):
         with self.assertRaises(StateValidationError):
             ensure_minimal_state({"version": 2, "schema": "bad", "time": "2026-01-01T00:00:00Z",
-                                  "context": "<div/>", "conversations": [], "truth": {"trust": []}}, strict=True)
+                                  "context": "<div/>", "conversations": [], "truth": []}, strict=True)
 
     def test_conversations_normalized(self):
         state = ensure_minimal_state(_make_state(conversations=[
@@ -114,10 +111,10 @@ class TestEnsureMinimalState(unittest.TestCase):
         self.assertEqual(conv["children"], [])
 
     def test_trust_certainty_clamped(self):
-        state = ensure_minimal_state(_make_state(truth={
-            "trust": [{"title": "X", "certainty": 5.0, "content": "test", "time": "2026-01-01T00:00:00Z"}],
-                    }), strict=True)
-        self.assertEqual(state["truth"]["trust"][0]["certainty"], 1.0)
+        state = ensure_minimal_state(_make_state(truth=[
+            {"title": "X", "certainty": 5.0, "content": "test", "time": "2026-01-01T00:00:00Z"},
+        ]), strict=True)
+        self.assertEqual(state["truth"][0]["certainty"], 1.0)
 
     def test_removes_legacy_fields(self):
         state = ensure_minimal_state({
@@ -125,7 +122,7 @@ class TestEnsureMinimalState(unittest.TestCase):
             "context": "<div/>", "conversations": [],
             "messages": [{"id": "m_1"}],  # legacy
             "active_path": ["m_1"],  # legacy
-            "truth": {"trust": []},
+            "truth": [],
         }, strict=False)
         self.assertNotIn("messages", state)
         self.assertNotIn("active_path", state)
@@ -142,10 +139,10 @@ class TestJSONLRoundTrip(unittest.TestCase):
                               time="2026-02-23T00:00:02Z"),
                 ]),
             ],
-            truth={"trust": [
+            truth=[
                 {"id": "t_1", "title": "Fact", "time": "2026-02-23T00:00:00Z",
                  "certainty": 0.9, "content": "<div>Truth</div>"}
-            ]}
+            ]
         ), strict=True)
 
         jsonl_text = state_to_jsonl(original)
@@ -163,7 +160,7 @@ class TestJSONLRoundTrip(unittest.TestCase):
         self.assertEqual(len(restored["conversations"]), 1)
         self.assertEqual(len(restored["conversations"][0]["messages"]), 2)
         self.assertEqual(restored["conversations"][0]["id"], "c_1")
-        self.assertEqual(len(restored["truth"]["trust"]), 1)
+        self.assertEqual(len(restored["truth"]), 1)
 
     def test_roundtrip_with_children(self):
         """Conversations with children survive JSONL roundtrip."""
@@ -200,12 +197,12 @@ class TestJSONLRoundTrip(unittest.TestCase):
         original = load_state_file(spec_path, strict=True)
 
         # Verify initial parse has expected trust entries
-        trust = original.get("truth", {}).get("trust", [])
+        trust = original.get("truth", [])
         self.assertGreaterEqual(len(trust), 10, "hme.jsonl should have ≥10 trust entries")
         ids_orig = {e["id"] for e in trust if "id" in e}
-        self.assertIn("t_axiom_01", ids_orig)
-        self.assertIn("t_false_01", ids_orig)
-        self.assertIn("t_provider_claude", ids_orig)
+        self.assertIn("axiom_01", ids_orig)
+        self.assertIn("false_01", ids_orig)
+        self.assertIn("provider_claude", ids_orig)
 
         # Context should describe Kleene ternary logic
         self.assertIn("Kleene", original.get("context", ""))
@@ -216,15 +213,15 @@ class TestJSONLRoundTrip(unittest.TestCase):
         restored = ensure_minimal_state(restored, strict=True)
 
         # Trust entries preserved
-        trust_rt = restored.get("truth", {}).get("trust", [])
+        trust_rt = restored.get("truth", [])
         ids_rt = {e["id"] for e in trust_rt if "id" in e}
         self.assertEqual(ids_orig, ids_rt, "Trust entry IDs must survive round-trip")
 
         # Certainty values preserved (including negative)
         by_id = {e["id"]: e for e in trust_rt}
-        self.assertEqual(by_id["t_axiom_01"]["certainty"], 1.0)
-        self.assertEqual(by_id["t_false_01"]["certainty"], -0.9)
-        self.assertEqual(by_id["t_soft_01"]["certainty"], 0.8)
+        self.assertEqual(by_id["axiom_01"]["certainty"], 1.0)
+        self.assertEqual(by_id["false_01"]["certainty"], -0.9)
+        self.assertEqual(by_id["soft_01"]["certainty"], 0.8)
 
         # Context preserved
         self.assertIn("Kleene", restored.get("context", ""))
@@ -234,7 +231,7 @@ class TestJSONLRoundTrip(unittest.TestCase):
             path = Path(tmpdir) / "hme_roundtrip.jsonl"
             atomic_write_jsonl(path, original)
             reloaded = load_state_file(path, strict=True)
-            trust_disk = reloaded.get("truth", {}).get("trust", [])
+            trust_disk = reloaded.get("truth", [])
             ids_disk = {e["id"] for e in trust_disk if "id" in e}
             self.assertEqual(ids_orig, ids_disk, "Trust entries must survive disk round-trip")
 
@@ -246,7 +243,7 @@ class TestJSONLRoundTrip(unittest.TestCase):
             "time": "2026-02-23T00:00:00Z",
             "context": "<div/>",
             "conversations": [],
-            "truth": {"trust": []},
+            "truth": [],
         }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(state, f)
@@ -404,18 +401,18 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(meta["conversations_added"], 0)
 
     def test_merge_trust_entries(self):
-        base = ensure_minimal_state(_make_state(truth={
-            "trust": [{"id": "t_1", "title": "Fact A", "certainty": 0.8,
-                       "time": "2026-02-23T00:00:00Z", "content": "<div>A</div>"}],
-        }), strict=True)
+        base = ensure_minimal_state(_make_state(truth=[
+            {"id": "t_1", "title": "Fact A", "certainty": 0.8,
+             "time": "2026-02-23T00:00:00Z", "content": "<div>A</div>"},
+        ]), strict=True)
 
-        incoming = ensure_minimal_state(_make_state(truth={
-            "trust": [{"id": "t_2", "title": "Fact B", "certainty": 0.6,
-                       "time": "2026-02-23T00:01:00Z", "content": "<div>B</div>"}],
-        }), strict=True)
+        incoming = ensure_minimal_state(_make_state(truth=[
+            {"id": "t_2", "title": "Fact B", "certainty": 0.6,
+             "time": "2026-02-23T00:01:00Z", "content": "<div>B</div>"},
+        ]), strict=True)
 
         merged, meta = merge_llm_states(base, incoming)
-        self.assertEqual(len(merged["truth"]["trust"]), 2)
+        self.assertEqual(len(merged["truth"]), 2)
         self.assertEqual(meta["trust_added"], 1)
 
     def test_merge_child_attached_to_parent(self):
@@ -589,39 +586,6 @@ class TestProviderParsing(unittest.TestCase):
         self.assertIsNone(result)
 
 
-class TestSrcParsing(unittest.TestCase):
-
-    SRC_XHTML = (
-        '<src>'
-        '<name>project-readme</name>'
-        '<path>file://~/.wikioracle/keys/readme.txt</path>'
-        '<format>text</format>'
-        '</src>'
-    )
-
-    def test_parse_src_block(self):
-        result = parse_src_block(self.SRC_XHTML)
-        self.assertIsNotNone(result)
-        self.assertEqual(result["name"], "project-readme")
-        self.assertIn("readme.txt", result["path"])
-        self.assertEqual(result["format"], "text")
-
-    def test_parse_no_src(self):
-        result = parse_src_block("<div><p>Just text.</p></div>")
-        self.assertIsNone(result)
-
-    def test_get_src_entries(self):
-        entries = [
-            {"id": "t_1", "certainty": 0.7, "time": "2026-02-23T00:00:01Z",
-             "content": "<src><name>a</name><path>file://x</path></src>"},
-            {"id": "t_2", "certainty": 0.5, "time": "2026-02-23T00:00:01Z",
-             "content": "<div>Normal</div>"},
-        ]
-        result = get_src_entries(entries)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0][1]["name"], "a")
-
-
 class TestSelectedConversationRoundtrip(unittest.TestCase):
 
     def test_selected_conversation_persists(self):
@@ -657,21 +621,47 @@ class TestOutputField(unittest.TestCase):
         state = ensure_minimal_state({})
         self.assertEqual(state["output"], DEFAULT_OUTPUT)
 
-    def test_output_jsonl_roundtrip(self):
-        """Output survives JSONL serialization round-trip."""
+    def test_output_not_in_jsonl_header(self):
+        """Output is not serialized to JSONL (internal runtime field only)."""
         state = ensure_minimal_state({"output": "Return JSON."})
         jsonl_text = state_to_jsonl(state)
-        restored = jsonl_to_state(jsonl_text)
+        import json as _json
+        header = _json.loads(jsonl_text.split("\n")[0])
+        self.assertNotIn("output", header)
+
+    def test_output_roundtrip_via_legacy_header(self):
+        """Output from a legacy JSONL header is still accepted on import."""
+        legacy_jsonl = '{"type":"header","version":2,"schema":"https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json","time":"2026-01-01T00:00:00Z","context":"<div/>","output":"Return JSON."}'
+        restored = jsonl_to_state(legacy_jsonl)
         restored = ensure_minimal_state(restored)
         self.assertEqual(restored["output"], "Return JSON.")
 
     def test_default_output_roundtrip(self):
-        """Default output persists through JSONL round-trip."""
+        """Default output persists through ensure_minimal_state."""
         state = ensure_minimal_state({})
+        self.assertEqual(state["output"], DEFAULT_OUTPUT)
+
+
+class TestTitleField(unittest.TestCase):
+    """Test state.title persistence and defaults."""
+
+    def test_title_preserved(self):
+        """Non-empty title survives normalization."""
+        state = ensure_minimal_state({"title": "My Doc"})
+        self.assertEqual(state["title"], "My Doc")
+
+    def test_title_default(self):
+        """Missing title gets the default."""
+        state = ensure_minimal_state({})
+        self.assertEqual(state["title"], "WikiOracle")
+
+    def test_title_jsonl_roundtrip(self):
+        """Title survives JSONL serialization round-trip."""
+        state = ensure_minimal_state({"title": "Research Notes"})
         jsonl_text = state_to_jsonl(state)
         restored = jsonl_to_state(jsonl_text)
         restored = ensure_minimal_state(restored)
-        self.assertEqual(restored["output"], DEFAULT_OUTPUT)
+        self.assertEqual(restored["title"], "Research Notes")
 
 
 if __name__ == "__main__":

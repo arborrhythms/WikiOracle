@@ -54,7 +54,7 @@ State is persisted as line-delimited JSON (`.jsonl`):
 {"type":"header", "schema":"…", "date":"…", "context":"…", "selected_conversation":"c_abc"}
 {"type":"conversation", "id":"c_abc", "title":"Animals", "messages":[…]}
 {"type":"conversation", "id":"c_def", "title":"Dogs", "parent":"c_abc", "messages":[…]}
-{"type":"trust", "id":"t_001", "content":"…", "certainty":0.9}
+{"type":"truth", "id":"t_001", "content":"…", "certainty":0.9}
 ```
 
 In memory, conversations are nested via `children` arrays. The `parent` field in JSONL is used only for serialisation — on load, the tree is reconstructed from parent references.

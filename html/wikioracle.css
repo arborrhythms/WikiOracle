@@ -71,7 +71,7 @@
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; font-family: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--fg); margin: 0; overflow: hidden; overscroll-behavior: none; }
-body { display: flex; flex-direction: column; touch-action: manipulation; /* disable double-tap zoom */ }
+body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disable native pinch-zoom and double-tap zoom; d3.zoom handles zoom in tree + chat */ }
 
 /* Header */
 .header { background: var(--header-bg); border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
@@ -110,13 +110,13 @@ body { display: flex; flex-direction: column; touch-action: manipulation; /* dis
 .btn:hover { background: var(--accent-light); }
 
 /* Tree view (top-down hierarchy) */
-.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 40%; min-height: 0; overflow: hidden; }
+.tree-container { flex-shrink: 0; background: var(--header-bg); border-bottom: 1px solid var(--border); position: relative; height: 40%; min-height: 0; overflow: hidden; touch-action: none; /* d3.zoom handles gestures */ }
 .tree-container.tree-collapsed { border-bottom: none; overflow: hidden; }
 .tree-container svg { display: block; min-width: 100%; min-height: 100%; }
 
 /* Chat */
-.chat-container { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-.chat-wrapper { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
+.chat-container { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y pinch-zoom; /* d3.zoom handles pinch; allow vertical scroll */ }
+.chat-wrapper { max-width: 90%; margin: 0 auto; padding: 1.5rem 1rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; min-height: 100px; }
 .chat-placeholder { color: var(--fg-muted); font-size: 0.9rem; text-align: center; padding: 3rem 1rem; }
 
 /* ── Root summary dashboard ── */
@@ -246,7 +246,7 @@ body.layout-vertical .chat-container { flex: 1; }
 /* Trust editor */
 .trust-panel          { max-width: 620px; }
 .trust-entries-scroll { max-height: 400px; overflow-y: auto; margin-bottom: 0.6rem; }
-.trust-label          { font-size: 0.82rem; font-weight: 600; }
+.trust-label          { font-size: 0.82rem; font-weight: 600; display: block; margin-bottom: 0.5rem; }
 .trust-label-hint     { font-weight: normal; color: var(--fg-muted); }
 .trust-input          { width: 100%; margin-bottom: 0.5rem; padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; background: var(--input-bg); color: var(--fg); }
 .trust-textarea       { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; line-height: 1.5; padding: 0.4rem; border: 1px solid var(--border); border-radius: 4px; resize: vertical; background: var(--input-bg); color: var(--fg); }
@@ -277,10 +277,6 @@ body.layout-vertical .chat-container { flex: 1; }
 .search-result-snippet mark { background: var(--accent-light); color: var(--accent); font-weight: 600; }
 
 /* ── Mobile: pinch-zoomed layout ── */
-/* On touch devices Q/R bubbles, chat wrapper, and input bar constrain
-   to 90% width so content stays readable when pinch-zoomed. */
 @media (pointer: coarse) {
-  .chat-wrapper { max-width: 90%; }
   .msg-bubble { max-width: 90%; }
-  .input-wrapper { max-width: 90%; }
 }

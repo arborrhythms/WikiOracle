@@ -1,6 +1,6 @@
 ## HME Logic
 
-The WikiOracle logic is similar to a hierarchical mixture of experts, where trust is based on truth values with associated certainty values in the range [-1, 1]. Those propositions can be static facts, references to other bodies of knowledge, or computed by other minds that are trusted and/or distrusted. Finally, truth is computed by implication (conditional logic) over that body of propositions; see [Implication.md](./Implication.md).
+The WikiOracle logic is similar to a hierarchical mixture of experts, where trust is based on truth values with associated certainty values in the range [-1, 1]. Those propositions can be static facts, references to other bodies of knowledge, or computed by other minds that are trusted and/or distrusted. Finally, truth is computed by logical operators (and/or/not under Strong Kleene semantics) over that body of propositions; see [Implication.md](./Implication.md) (Operator documentation).
 
 ## Distributed Truth vs Consensus: 
 
@@ -25,6 +25,23 @@ WikiOracle attempts to achieve a distributed truth, and shares much of the desig
 - **Cultural Legitimacy** — Wikipedia functions as a widely accepted public reference layer and common starting point for research.
 
 - **Open Knowledge Model** — It demonstrates that large-scale, decentralized, norm-governed collaboration can produce a coherent and durable knowledge commons.
+
+## Provider Resolution
+
+In the HME model, the truth table may contain structural entries — `<provider>`, `<operator>`, and `<authority>` — alongside propositional `<fact>` and `<reference>` entries. When the `rag` flag is true, the pipeline processes these in two phases:
+
+```
+st = static_truth(state.truth)      # facts & references (evaluable subset)
+t  = st + dynamic_truth(st)         # operators, authorities, providers evaluated
+```
+
+`static_truth` selects the entries that the dynamic steps use as input. All `state.truth` entries (including structural ones) are still sent to the final provider — `static_truth` controls evaluation, not delivery.
+
+The dynamic phase evaluates structural entries against the static set: operators propagate derived certainty via Strong Kleene semantics, authorities fetch remote truth tables, and providers call external LLM endpoints whose responses become sources. The UI-selected provider always handles the final response; it receives all `state.truth` entries plus the dynamic results and synthesises an answer.
+
+This separation means that the "experts" (dynamic provider entries) contribute knowledge, operators compute derived certainty, and authorities supply external evidence, while the "mastermind" (UI-selected provider) integrates everything with conversation history and context. API keys are never conflated: each provider uses its own key, whether configured in `config.yaml` or embedded in the truth entry.
+
+See [Architecture.md](./Architecture.md) for the implementation details of the chat pipeline.
 
 ## Conceptual Spaces
 

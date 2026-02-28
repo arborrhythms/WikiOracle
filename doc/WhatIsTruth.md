@@ -147,23 +147,30 @@ The `content` field of each trust entry is XHTML and may contain any combination
 - `<a href="...">` — External source references (Wikipedia, Snopes, etc.) that the LLM may consult.
 - `<provider>` — An LLM provider block that triggers HME fan-out.
 
-### HME Fan-Out Algorithm
+### HME Pipeline
 
-When a user sends a query and trust entries contain `<provider>` blocks:
+The truth table is gated by the `rag` config flag: when `rag` is true, **all** `state.truth` is sent to the final provider; when `rag` is false, **no** truth of any kind is sent. When enabled, the truth table is processed in two phases — static and dynamic:
 
-1. **Provider ranking**: All `<provider>` entries are sorted by (-|certainty|, -timestamp, id). The highest-ranked becomes the **primary** provider; the rest are **secondaries**.
+```
+st = static_truth(state.truth)      # facts & references (evaluable subset)
+t  = st + dynamic_truth(st)         # operators, authorities, and providers
+                                    # evaluated against st
+```
 
-2. **Secondary evaluation**: Each secondary provider receives a RAG-free bundle (system context, conversation history, user query, output instructions) — but no trust entries. This keeps secondary opinions independent.
+`static_truth` selects the entries that the dynamic steps use as input. All `state.truth` entries (including structural ones) are still sent to the final provider — `static_truth` controls evaluation, not delivery.
 
-3. **Response persistence**: Secondary responses are stored as new trust entries in the state, inheriting the certainty of their originating `<provider>` entry. This makes secondary evidence persistent and queryable in future interactions.
+When a user sends a query:
 
-4. **Primary synthesis**: The primary provider receives the full bundle including RAG-ranked trust entries and the secondary provider responses. It synthesizes a final answer informed by all available evidence.
+1. **Static truth**: `static_truth()` extracts the evaluable subset of `state.truth` — every `<fact>` and `<reference>` entry. Structural entries (`<provider>`, `<operator>`, `<authority>`) are excluded from this subset.
 
-5. **Fallback**: If the primary provider fails, secondaries are tried in order.
+2. **Dynamic truth** — structural entries are evaluated against the static set:
+   - **Operators**: `compute_derived_truth()` evaluates `<and>`, `<or>`, `<not>` over the truth table (Strong Kleene semantics). Derived certainty values propagate back into the entries they govern.
+   - **Authorities**: Each `<authority>` entry references a remote truth table. It is fetched and its entries are appended with scaled certainty.
+   - **Providers**: All `<provider>` entries are sorted by (-|certainty|, -timestamp, id). The highest-ranked becomes the **primary** provider; the rest are **secondaries**. Each secondary receives a RAG-free bundle (system context, conversation history, user query, output instructions) — but no truth entries, keeping secondary opinions independent. Their responses become sources with the provider's certainty.
 
-### Retrieval Ranking
+3. **Primary synthesis**: The primary provider receives **all** `state.truth` entries (with operator-derived certainty where applicable), plus authority remote entries and provider evaluation responses, along with conversation history, system context, and the user message.
 
-Trust entries are ranked for retrieval by |certainty| descending (both strong belief and strong disbelief are relevant). Entries below a configurable `min_certainty` threshold are excluded. The `max_entries` parameter bounds how many entries appear in each prompt.
+4. **Fallback**: If the primary provider fails, secondaries are tried in order.
 
 ### Syllogistic Examples
 

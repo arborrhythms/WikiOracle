@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json",
   "title": "WikiOracle LLM State v2 (JSONL)",
-  "description": "Hierarchical dialogue state. Grammar: Dialogue → Conversation*, Conversation → (Query|Response)* + Conversation* (children). JSONL: header line, then conversation and trust records. Conversations reference parent via 'parent' field; root conversations omit it.",
+  "description": "Hierarchical dialogue state. Grammar: Dialogue → Conversation*, Conversation → (Query|Response)* + Conversation* (children). JSONL: header line, then conversation and truth records. Conversations reference parent via 'parent' field; root conversations omit it.",
   "type": "object",
-  "required": ["version", "schema", "time", "context", "conversations", "truth"],
+  "required": ["version", "schema", "time", "title", "context", "conversations", "truth"],
   "properties": {
     "version": {
       "type": "integer",
@@ -21,13 +21,14 @@
       "format": "date-time",
       "description": "ISO-8601 UTC timestamp of last modification."
     },
+    "title": {
+      "type": "string",
+      "description": "Human-readable document title. Shown in root summary and browser tab.",
+      "default": "WikiOracle"
+    },
     "context": {
       "type": "string",
       "description": "XHTML fragment injected into every query."
-    },
-    "output": {
-      "type": "string",
-      "description": "Output-format instructions appended to every LLM call. May be empty."
     },
     "selected_conversation": {
       "type": ["string", "null"],
@@ -40,14 +41,9 @@
       "items": { "$ref": "#/$defs/conversation" }
     },
     "truth": {
-      "type": "object",
-      "required": ["trust"],
-      "properties": {
-        "trust": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/trustEntry" }
-        }
-      }
+      "type": "array",
+      "description": "Flat array of truth entries.",
+      "items": { "$ref": "#/$defs/truthEntry" }
     }
   },
   "$defs": {
@@ -103,15 +99,15 @@
         }
       }
     },
-    "trustEntry": {
+    "truthEntry": {
       "type": "object",
       "required": ["id", "title", "time", "certainty", "content"],
       "properties": {
-        "id": { "type": "string", "description": "Unique trust entry ID (UUID recommended)." },
+        "id": { "type": "string", "description": "Unique truth entry ID (UUID recommended)." },
         "title": { "type": "string" },
         "time": { "type": "string", "format": "date-time" },
         "certainty": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
-        "content": { "type": "string", "description": "XHTML fragment, or a typed XML block: <provider> for LLM provider config, <src> for file-backed content, <implication> for if-then relationships, or <authority> for external trust table references (DID/ORCID + URL to remote llm.jsonl)." }
+        "content": { "type": "string", "description": "Self-describing XHTML element with id, certainty, and title attributes on the root tag. Recognized root tags: <fact> (plain assertion), <reference href> (external link), <and>/<or>/<not>/<non> with <child id> children (Strong Kleene operators), <provider> (LLM config), <authority> (external trust table, DID/ORCID + URL to remote llm.jsonl). Envelope id/certainty/title are synced from content during normalization." }
       }
     }
   }

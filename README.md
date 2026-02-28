@@ -122,7 +122,7 @@ WikiOracle includes a local Flask server (`bin/wikioracle.py`) that enables chat
 - `bin/config.py` — Config dataclass, YAML loader, provider registry, schema-driven YAML writer, normalization.
 - `bin/state.py` — State validation, JSONL I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction.
 - `bin/response.py` — Chat pipeline, provider coordination, state I/O.
-- `bin/truth.py` — Trust processing, authority resolution, implication engine.
+- `bin/truth.py` — Trust processing, authority resolution, operator engine (and/or/not).
 - `test/test_*.py` — Automated tests for state, stateless contract, prompt bundles, authority, derived truth.
 - `html/index.html` — Single-page web UI shell with chat, settings, and merge tools.
 - `llm.jsonl` — Client-owned state file (line-delimited JSON). See `spec/llm_state_v2.json` for the formal schema.

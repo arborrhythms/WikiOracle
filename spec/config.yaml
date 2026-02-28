@@ -49,17 +49,10 @@ providers:
 
 chat:
   temperature: 0.7
-  message_window: 40                     # recent turns to send upstream
   output_format: XHTML                    # appended as "output_format: <value>" line
   rag: false                              # use truth entries for retrieval
   url_fetch: false                       # allow URL fetching in responses
   confirm_actions: true                  # prompt before deletes, merges, etc.
-  retrieval:
-    max_entries: 8
-    min_certainty: 0.0                    # |certainty| threshold (Kleene: 0=ignorance)
-    certainty_weight: 0.7
-    recency_weight: 0.3
-    prefer_higher_certainty: true
 
 # --- UI defaults -------------------------------------------------------------
 

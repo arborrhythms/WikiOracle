@@ -33,7 +33,7 @@ def _make_state(**overrides):
         "context": "<div>You are a helpful assistant.</div>",
         "conversations": [],
         "selected_conversation": None,
-        "truth": {"trust": []},
+        "truth": [],
     }
     base.update(overrides)
     return base

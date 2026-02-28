@@ -114,7 +114,7 @@ def test_ensure_authority_id_deterministic():
 
 def test_get_authority_entries():
     entries = [
-        {"id": "t_fact", "certainty": 0.5, "content": "<p>A fact.</p>", "time": "2026-01-01T00:00:00Z"},
+        {"id": "t_fact", "certainty": 0.5, "content": "<fact id=\"t_fact\" certainty=\"0.5\" title=\"A fact\">A fact.</fact>", "time": "2026-01-01T00:00:00Z"},
         {"id": "a_auth_01", "certainty": 0.8, "content": '<authority did="did:web:a" url="https://a.example/kb.jsonl" />', "time": "2026-01-02T00:00:00Z"},
         {"id": "i_impl", "certainty": 0.0, "content": "<implication><antecedent>a</antecedent><consequent>b</consequent></implication>", "time": "2026-01-03T00:00:00Z"},
         {"id": "a_auth_02", "certainty": 0.6, "content": '<authority did="did:web:b" url="https://b.example/kb.jsonl" />', "time": "2026-01-04T00:00:00Z"},
@@ -135,8 +135,8 @@ def test_resolve_authority_entries_file_protocol():
 
     # Create a temp JSONL file
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(json.dumps({"type": "trust", "id": "t_r1", "title": "Remote 1", "certainty": 1.0, "content": "<p>Fact 1</p>", "time": "2026-01-01T00:00:00Z"}) + "\n")
-        f.write(json.dumps({"type": "trust", "id": "t_r2", "title": "Remote 2", "certainty": 0.8, "content": "<p>Fact 2</p>", "time": "2026-01-01T00:00:01Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "t_r1", "title": "Remote 1", "certainty": 1.0, "content": "<fact id=\"t_r1\" certainty=\"1.0\" title=\"Remote 1\">Fact 1</fact>", "time": "2026-01-01T00:00:00Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "t_r2", "title": "Remote 2", "certainty": 0.8, "content": "<fact id=\"t_r2\" certainty=\"0.8\" title=\"Remote 2\">Fact 2</fact>", "time": "2026-01-01T00:00:01Z"}) + "\n")
         f.write(json.dumps({"type": "header", "version": 2}) + "\n")  # should be skipped
         tmp_path = f.name
 
@@ -168,7 +168,7 @@ def test_resolve_authority_id_namespacing():
     _AUTHORITY_CACHE.clear()
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(json.dumps({"type": "trust", "id": "t_fact_42", "title": "Fact", "certainty": 1.0, "content": "<p>X</p>", "time": "2026-01-01T00:00:00Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "t_fact_42", "title": "Fact", "certainty": 1.0, "content": "<fact id=\"t_pos\" certainty=\"0.8\" title=\"X\">X</fact>", "time": "2026-01-01T00:00:00Z"}) + "\n")
         tmp_path = f.name
 
     try:
@@ -190,8 +190,8 @@ def test_resolve_authority_skips_nested_authorities():
     _AUTHORITY_CACHE.clear()
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(json.dumps({"type": "trust", "id": "t_ok", "title": "OK", "certainty": 1.0, "content": "<p>Fine</p>", "time": "2026-01-01T00:00:00Z"}) + "\n")
-        f.write(json.dumps({"type": "trust", "id": "a_nested", "title": "Nested Authority", "certainty": 0.9, "content": '<authority url="https://other.example/kb.jsonl" />', "time": "2026-01-01T00:00:01Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "t_ok", "title": "OK", "certainty": 1.0, "content": "<fact id=\"t_ok\" certainty=\"1.0\" title=\"OK\">Fine</fact>", "time": "2026-01-01T00:00:00Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "a_nested", "title": "Nested Authority", "certainty": 0.9, "content": '<authority url="https://other.example/kb.jsonl" />', "time": "2026-01-01T00:00:01Z"}) + "\n")
         tmp_path = f.name
 
     try:
@@ -214,7 +214,7 @@ def test_resolve_authority_abbreviated_jsonl():
     _AUTHORITY_CACHE.clear()
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(json.dumps({"type": "trust", "id": "t_a1", "title": "A1", "certainty": 0.6, "content": "<p>A1</p>", "time": "2026-01-01T00:00:00Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "t_a1", "title": "A1", "certainty": 0.6, "content": "<fact id=\"t_a1\" certainty=\"0.6\" title=\"A1\">A1</fact>", "time": "2026-01-01T00:00:00Z"}) + "\n")
         tmp_path = f.name
 
     try:
@@ -253,7 +253,7 @@ def test_resolve_authority_negative_certainty():
     _AUTHORITY_CACHE.clear()
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(json.dumps({"type": "trust", "id": "t_pos", "title": "Positive", "certainty": 0.8, "content": "<p>X</p>", "time": "2026-01-01T00:00:00Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "t_pos", "title": "Positive", "certainty": 0.8, "content": "<fact id=\"t_pos\" certainty=\"0.8\" title=\"X\">X</fact>", "time": "2026-01-01T00:00:00Z"}) + "\n")
         tmp_path = f.name
 
     try:
@@ -276,7 +276,7 @@ def test_resolve_authority_caching():
     _AUTHORITY_CACHE.clear()
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write(json.dumps({"type": "trust", "id": "t_cached", "title": "Cached", "certainty": 1.0, "content": "<p>C</p>", "time": "2026-01-01T00:00:00Z"}) + "\n")
+        f.write(json.dumps({"type": "truth", "id": "t_cached", "title": "Cached", "certainty": 1.0, "content": "<fact id=\"t_cached\" certainty=\"1.0\" title=\"Cached\">C</fact>", "time": "2026-01-01T00:00:00Z"}) + "\n")
         tmp_path = f.name
 
     try:
@@ -333,7 +333,7 @@ def test_hme_jsonl_authority_entry():
             line = line.strip()
             if line:
                 rec = json.loads(line)
-                if rec.get("type") == "trust":
+                if rec.get("type") in ("truth", "trust"):
                     entries.append(rec)
 
     authority_entries = get_authority_entries(entries)
@@ -342,10 +342,10 @@ def test_hme_jsonl_authority_entry():
     # Verify the test authority
     test_auth = None
     for entry, config in authority_entries:
-        if entry.get("id") == "a_test_01":
+        if entry.get("id") == "auth_test_01":
             test_auth = (entry, config)
             break
-    assert test_auth is not None, "a_test_01 not found in hme.jsonl"
+    assert test_auth is not None, "auth_test_01 not found in hme.jsonl"
     assert test_auth[0]["certainty"] == 0.5
     assert "test.example" in test_auth[1]["did"]
 
@@ -364,27 +364,27 @@ def test_hme_authority_resolution():
             line = line.strip()
             if line:
                 rec = json.loads(line)
-                if rec.get("type") == "trust":
+                if rec.get("type") in ("truth", "trust"):
                     entries.append(rec)
 
     authority_entries = get_authority_entries(entries)
     results = resolve_authority_entries(authority_entries, timeout_s=5)
 
-    # Find the result for a_test_01
+    # Find the result for auth_test_01
     for auth_entry, scaled in results:
-        if auth_entry.get("id") == "a_test_01":
+        if auth_entry.get("id") == "auth_test_01":
             assert len(scaled) == 2, f"Expected 2 remote entries, got {len(scaled)}"
-            # t_remote_01: 0.5 * 1.0 = 0.5
-            r1 = next((s for s in scaled if "t_remote_01" in s["id"]), None)
+            # remote_01: 0.5 * 1.0 = 0.5
+            r1 = next((s for s in scaled if "remote_01" in s["id"]), None)
             assert r1 is not None
             assert abs(r1["certainty"] - 0.5) < 1e-9, f"Expected 0.5, got {r1['certainty']}"
-            # t_remote_02: 0.5 * 0.9 = 0.45
-            r2 = next((s for s in scaled if "t_remote_02" in s["id"]), None)
+            # remote_02: 0.5 * 0.9 = 0.45
+            r2 = next((s for s in scaled if "remote_02" in s["id"]), None)
             assert r2 is not None
             assert abs(r2["certainty"] - 0.45) < 1e-9, f"Expected 0.45, got {r2['certainty']}"
             return
 
-    assert False, "a_test_01 not found in resolved results"
+    assert False, "auth_test_01 not found in resolved results"
 
 
 if __name__ == "__main__":

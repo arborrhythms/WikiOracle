@@ -20,11 +20,11 @@ Authority entries are trust entries whose `content` field contains an `<authorit
 
 ```json
 {
-  "type": "trust",
+  "type": "truth",
   "id": "a_aristotle_01",
   "title": "Aristotle's Knowledge Base",
   "certainty": 0.85,
-  "content": "<authority did=\"did:web:aristotle.example\" url=\"https://aristotle.example/kb.jsonl\" />",
+  "content": "<authority id=\"a_aristotle_01\" certainty=\"0.85\" title=\"Aristotle's Knowledge Base\" did=\"did:web:aristotle.example\" url=\"https://aristotle.example/kb.jsonl\"/>",
   "time": "2026-02-27T00:00:01Z"
 }
 ```
@@ -37,7 +37,7 @@ Fields inside `<authority>`:
 
 Both attribute-style (`<authority did="..." url="..." />`) and child-element style (`<authority><did>...</did><url>...</url></authority>`) are supported, following the same pattern as `<provider>`.
 
-The `a_` ID prefix distinguishes authority entries from trust (`t_`), implication (`i_`), message (`m_`), and conversation (`c_`) IDs.
+Authority entries use bare IDs (no prefixes), the same as all other trust entries. IDs are UUIDs or human-readable slugs.
 
 ---
 
@@ -60,12 +60,12 @@ This preserves the [-1, +1] Kleene range and naturally dampens remote beliefs pr
 
 ## Abbreviated JSONL
 
-The remote `llm.jsonl` file may be **abbreviated** — it does not need to contain a header or conversation records. Lines that are valid JSON with `"type": "trust"` are extracted; all other lines (headers, conversations, malformed JSON) are skipped.
+The remote `llm.jsonl` file may be **abbreviated** — it does not need to contain a header or conversation records. Lines that are valid JSON with `"type": "truth"` are extracted; all other lines (headers, conversations, malformed JSON) are skipped.
 
 Example abbreviated file:
 ```jsonl
-{"type":"trust","id":"t_fact_01","title":"Water is wet","certainty":1.0,"content":"<p>Water is wet.</p>","time":"2026-02-27T00:00:01Z"}
-{"type":"trust","id":"t_fact_02","title":"Fire is hot","certainty":0.9,"content":"<p>Fire is hot.</p>","time":"2026-02-27T00:00:02Z"}
+{"type":"truth","id":"remote_01","title":"Water is wet","certainty":1.0,"content":"<fact id=\"remote_01\" certainty=\"1.0\" title=\"Water is wet\">Water is wet.</fact>","time":"2026-02-27T00:00:01Z"}
+{"type":"truth","id":"remote_02","title":"Fire is hot","certainty":0.9,"content":"<fact id=\"remote_02\" certainty=\"0.9\" title=\"Fire is hot\">Fire is hot.</fact>","time":"2026-02-27T00:00:02Z"}
 ```
 
 ---
@@ -106,8 +106,8 @@ This means the same remote entry imported through different authorities will hav
 | File | Function |
 |---|---|
 | `bin/truth.py` | `parse_authority_block()`, `ensure_authority_id()`, `get_authority_entries()`, `resolve_authority_entries()`, `_fetch_authority_jsonl()` |
-| `bin/prompt_bundle.py` | Excludes `<authority>` entries from RAG; resolves authority entries and includes their scaled trust entries as `kind="authority"` sources |
-| `html/wikioracle.js` | Trust editor UI: "Add Authority" button, DID/ORCID/URL form, authority badge display |
-| `spec/hme.jsonl` | Test data with example authority entry (`a_test_01`) |
+| `bin/response.py` | Excludes `<authority>` entries from RAG; resolves authority entries and includes their scaled trust entries as `kind="authority"` sources |
+| `html/util.js` | Trust editor UI: unified XHTML textarea with authority template, authority badge display |
+| `spec/hme.jsonl` | Test data with example authority entry (`auth_test_01`) |
 | `spec/hme_authority_fragment.jsonl` | Test fragment JSONL with two remote trust entries |
 | `tests/test_authority.py` | Unit tests covering parsing, ID generation, resolution, certainty scaling, and security |

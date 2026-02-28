@@ -1,185 +1,102 @@
-# Implication
-## Three implications for WikiOracle’s truth system
+# Operator
 
-WikiOracle wants to talk about “if…then…” in at least three distinct ways, because **truth-functional**, **necessary**, and **relevance-constrained** conditionals behave differently under uncertainty, provenance, and “minority-truth” coexistence.
+## Logical operators in WikiOracle's truth system
 
-Below are three major implication notions you can treat as separate operators in the WikiOracle truth layer.
+WikiOracle's truth layer supports four logical connectives — **and**, **or**, **not**, **non** — evaluated under Strong Kleene semantics on a continuous certainty scale [-1, +1]. These operators let you compose existing trust entries into derived propositions whose certainty is computed automatically.
 
 Wikipedia links (core):
-- [Implication (overview)](https://en.wikipedia.org/wiki/Implication)
-- [Material conditional](https://en.wikipedia.org/wiki/Material_conditional)
-- [Strict conditional](https://en.wikipedia.org/wiki/Strict_conditional)
-- [Relevance logic](https://en.wikipedia.org/wiki/Relevance_logic)
 - [Three-valued logic (Kleene)](https://en.wikipedia.org/wiki/Three-valued_logic)
+- [Material conditional](https://en.wikipedia.org/wiki/Material_conditional)
+- [Logical connective](https://en.wikipedia.org/wiki/Logical_connective)
+- [Relevance logic](https://en.wikipedia.org/wiki/Relevance_logic)
 
 ---
 
-## 1) Material implication (truth-functional):  A →ₘ B
+## Strong Kleene evaluation
 
-### What it is
-The classical “material conditional” treats `A → B` as equivalent to `¬A ∨ B`, i.e. it is **false only when A is true and B is false**, and otherwise true.
+WikiOracle extends Strong Kleene logic from discrete {T, U, F} to a continuous scale [-1, +1], where +1 is full belief, -1 is full disbelief, and 0 is maximally uncertain.
 
-### Why WikiOracle needs it
-This is the workhorse for **purely formal derivations** where you’re modeling *constraint satisfaction inside a chosen calculus* (e.g., “given these axioms, this theorem follows”). It’s cheap to compute and composes well.
+The four operators:
 
-### The catch (important for truth governance)
-Material implication generates the “paradoxes of material implication” (e.g., a false antecedent makes the conditional true), which is often *not* what users mean by “because” or “therefore.”
+- **and(a, b, …)** = min(certainty_a, certainty_b, …) — conjunction is only as strong as the weakest operand.
+- **or(a, b, …)** = max(certainty_a, certainty_b, …) — disjunction takes the strongest operand.
+- **not(a)** = −certainty_a — negation flips the sign (affirming negation).
+- **non(a)** = sign(a) × (1 − |a|) — non-affirming negation. Drains certainty toward zero without crossing the sign boundary. A strong belief (+0.9) becomes weak belief (+0.1); a strong disbelief (−0.9) becomes weak disbelief (−0.1).
 
-### Kleene / ternary connection (Strong Kleene)
-If WikiOracle tracks a ternary value set like **T / F / U(unknown/undefined)**, you can lift material implication in the standard Strong Kleene way:
-
-- Define: `A →ₘ B := ¬A ∨ B` (same shape as classical)
-- Strong Kleene truth table for implication (from the Kleene section):
-
-| A \ B | F | U | T |
-|---|---:|---:|---:|
-| **F** | T | T | T |
-| **U** | U | U | T |
-| **T** | F | U | T |
-
-Interpretation for WikiOracle:
-- If the antecedent is **unknown**, implication is often **unknown** unless the consequent is already **true**.
-- This matches a “don’t hallucinate entailment from missing premises” posture.
+These compose: material implication A → B can be encoded as `or(not(A), B)`, i.e. ¬A ∨ B.
 
 ---
 
-## 2) Strict implication (modal / necessity-loaded):  A →ₛ B
+## Storage format (unified XHTML)
 
-### What it is
-Strict implication is typically modeled as **necessitating** the material conditional:
-- `A →ₛ B` can be represented as `□(A →ₘ B)` (read: “necessarily, if A then B”).
-
-This is what you reach for when you mean:
-- “In *all admissible worlds/models consistent with the background theory*, A entails B.”
-
-### Why WikiOracle needs it
-WikiOracle can treat “strict” conditionals as **invariants under a declared theory or scope**, e.g.:
-- Physics/engineering constraints under a specified model class.
-- “Policy constraints” (deontic/epistemic modalities) where you want “must/ought/known” operators.
-
-### How it fits a truth+trust system
-Strict implication gives you a clean way to separate:
-- **Local assertions** (source-anchored, defeasible)
-from
-- **Scope-necessary constraints** (theory-anchored, globally enforced *within* a declared frame)
-
-In WikiOracle terms: strict implication is a good fit for **“within TrustSet S + Theory T, this conditional is forced.”**
-
-### Ternary / Kleene connection
-You can keep Kleene truth values at the *base* level, but evaluate `□(...)` over:
-- a set of “accessible worlds” (models) as in Kripke semantics, or
-- a set of “admissible contexts” (TrustSets / policy frames).
-
-Operationally:
-- `A →ₛ B` is **T** if every admissible context makes `A →ₘ B` designated true.
-- It is **F** if some admissible context makes it non-designated (or explicitly false).
-- It is **U** when admissibility itself is underspecified (common in real knowledge systems).
-
----
-
-## 3) Relevant implication (relevance / anti-paradox):  A →ᵣ B
-
-### What it is
-Relevance logics were developed to block “irrelevant” implications (including many paradoxes of material and strict implication) by requiring a stronger connection between antecedent and consequent.
-
-A motivating complaint is exactly the WikiOracle problem:
-- “If (some unrelated falsehood), then (any statement)” shouldn’t become “true” just because the antecedent is false.
-
-### Why WikiOracle needs it
-WikiOracle isn’t only proving theorems; it’s mediating **explanations** and **justifications** across contested sources. Relevant implication supports:
-- “Show me why B follows from A” where *why* means “shares content, terms, mechanisms, or evidence pathways.”
-- Causal and mechanistic narratives where vacuous truths are actively harmful.
-
-### How to operationalize relevance in WikiOracle (pragmatic version)
-Full relevance logic semantics can be heavy, but you can implement a **relevance gate** in the truth layer:
-
-Define `A →ᵣ B` as “`A →ₘ B` is designated true **AND** `Rel(A,B)` holds,” where `Rel(A,B)` is a computable predicate such as:
-- shared entities/relations in the claim graphs,
-- shared citations or overlapping evidence sets,
-- nontrivial mutual information in embeddings,
-- explicit “depends-on” edges in provenance.
-
-This turns implication into a *two-channel* object:
-1) truth-functional entailment (possibly ternary, Kleene-style), plus
-2) relevance/provenance adequacy.
-
-### Ternary / Kleene connection
-In a ternary truth layer, relevance becomes even more useful:
-- Many claims sit at **U** because evidence is incomplete.
-- Relevant implication can demand that *whatever supports “A”* must also be in the dependency chain for “B,” preventing “U”-to-“T” jumps that look like “magic.”
-
----
-
-## Putting all three into a WikiOracle truth API
-
-Treat implication as a **typed operator** rather than a single symbol:
-
-- `implies.material(A,B)` : computes ternary truth via Strong Kleene `¬A ∨ B`.
-- `implies.strict(A,B, scope)` : evaluates `□(A →ₘ B)` over admissible contexts/worlds for `scope`.
-- `implies.relevant(A,B, policy)` : requires both entailment + a relevance predicate (graph/provenance-based).
-
-Practical payoff:
-- **Material** for math-like derivations.
-- **Strict** for “under this theory/policy frame, necessarily…”
-- **Relevant** for human-facing “because/therefore” explanations where provenance and conceptual linkage matter.
-
----
-
-## Extra Wikipedia links you’ll likely want nearby
-- [Paradoxes of material implication](https://en.wikipedia.org/wiki/Paradoxes_of_material_implication)
-- [Modal logic](https://en.wikipedia.org/wiki/Modal_logic)
-- [Relevance](https://en.wikipedia.org/wiki/Relevance)
-
----
-
-## Implementation notes
-
-### Storage format
-
-Implication entries are trust entries whose `content` field contains an `<implication>` XML block:
+All trust entries use a unified XHTML format where the root element carries `id`, `certainty`, and `title` attributes. Operator entries use `<and>`, `<or>`, `<not>`, or `<non>` root tags with `<child id="..."/>` self-closing children:
 
 ```json
 {
-  "type": "trust",
-  "id": "i_syllogism_01",
-  "title": "Men are mortal → Socrates is mortal",
+  "type": "truth",
+  "id": "op_socrates_mortal",
+  "title": "Socrates is mortal (AND of axioms)",
   "certainty": 0.0,
-  "content": "<implication><antecedent>t_axiom_02</antecedent><consequent>t_derived_01</consequent><type>material</type></implication>",
+  "content": "<and id=\"op_socrates_mortal\" certainty=\"0.0\" title=\"Socrates is mortal (AND of axioms)\"><child id=\"axiom_01\"/><child id=\"axiom_02\"/></and>",
   "time": "2026-02-25T00:00:01Z"
 }
 ```
 
-Fields inside `<implication>`:
-- `<antecedent>` — trust entry ID (the "if" part)
-- `<consequent>` — trust entry ID (the "then" part)
-- `<type>` — one of: `material`, `strict`, `relevant` (default: `material`; only `material` is currently evaluated)
+```json
+{
+  "type": "truth",
+  "id": "op_not_penguin_fly",
+  "title": "Penguins cannot fly (NOT)",
+  "certainty": 0.0,
+  "content": "<not id=\"op_not_penguin_fly\" certainty=\"0.0\" title=\"Penguins cannot fly (NOT)\"><child id=\"false_01\"/></not>",
+  "time": "2026-02-25T00:00:04Z"
+}
+```
 
-The `i_` ID prefix distinguishes implication entries from trust (`t_`), message (`m_`), and conversation (`c_`) IDs.
+Rules:
+- `<and>` and `<or>` require 2 or more `<child>` children.
+- `<not>` and `<non>` require exactly 1 `<child>` child.
+- Each `<child id="..."/>` must name an existing trust entry ID.
+- IDs are bare (no prefixes). UUIDs or human-readable slugs are both acceptable.
+- The `id` and `certainty` on the root element are canonical; envelope fields are synced from them during normalization.
 
-### Derived truth engine
+---
 
-`compute_derived_truth()` in `bin/truth.py` evaluates all implication entries using fixed-point iteration:
+## Derived truth engine
 
-1. Build a certainty lookup `{ id: certainty }` from all trust entries
-2. Extract implications via `parse_implication_block()`
+`compute_derived_truth()` in `bin/truth.py` evaluates all operator entries using fixed-point iteration:
+
+1. Build a certainty lookup `{ id: certainty }` from all trust entries.
+2. Extract operators via `parse_operator_block()`.
 3. Iterate (max 100 rounds):
-   - For each implication with antecedent certainty > 0: set `consequent = max(consequent, antecedent)`
-   - If no values changed, stop (fixed point reached)
-4. Return the complete derived certainty table
+   - For each operator entry, compute its certainty from its operands (and/or/not/non).
+   - If no values changed (within ε = 1e-9), stop (fixed point reached).
+4. Return the complete derived certainty table.
 
-This implements modus ponens: if the antecedent is believed, the consequent is raised to at least the antecedent's certainty. Implications can only strengthen belief, never weaken it. Disbelieved antecedents (certainty ≤ 0) are vacuously true and do not propagate.
+Operators derive their **own** entry's certainty from their operands. They do not modify other entries. This is a side-effect-free model: an operator's certainty is always a deterministic function of its referenced operands.
 
-### Known limitation: material implication paradox
+### Chaining and cycles
 
-The `i_soft_fly_01` entry in `spec/hme.jsonl` demonstrates the paradox of material implication: the chain `t_axiom_05` (Penguins are birds, c=1.0) → `t_soft_01` (Most birds can fly) → `t_false_01` (Penguins can fly) raises the disbelieved consequent to 1.0, overriding the -0.9 stored certainty. This is a known property of material implication and motivates the planned implementation of relevant implication (`→ᵣ`), which would require a relevance predicate to prevent such vacuous entailments.
+Operators can reference other operator entries, forming chains (e.g., an OR whose operands include an AND). Fixed-point iteration handles this naturally. Cycles terminate because min/max/negate are monotone or contracting on [-1, +1] — the iteration converges or hits the 100-round cap.
 
-### Integration points
+---
+
+## Future directions
+
+The current operator set covers propositional logic under Strong Kleene semantics. Planned extensions:
+
+- **Strict implication** (□(¬A ∨ B)) — necessity-loaded conditionals evaluated across admissible contexts/theories.
+- **Relevant implication** — requiring a relevance predicate (shared entities, citations, provenance) in addition to truth-functional entailment.
+- **Nested composition** — allowing operator tags within operator tags in a single content string (e.g., `<or id="impl" certainty="0.0"><not id="_" certainty="0.0"><child id="A"/></not><child id="B"/></or>` for material implication in one entry).
+
+---
+
+## Integration points
 
 | File | Function |
 |---|---|
-| `bin/truth.py` | `parse_implication_block()`, `ensure_implication_id()`, `compute_derived_truth()` |
-| `bin/prompt_bundle.py` | Excludes `<implication>` entries from RAG; uses `_derived_certainty` for ranking |
-| `bin/response.py` | Calls `compute_derived_truth()` after provider responses; stores transient `_derived_certainty` |
-| `html/wikioracle.js` | Trust editor UI: "Add Implication" button, antecedent/consequent dropdowns, derived certainty display |
-| `spec/hme.jsonl` | Test data with syllogism, chain, and paradox implication entries |
-| `tests/test_derived_truth.py` | 16 unit tests covering parsing, ID generation, modus ponens, chains, cycles, and hme.jsonl integration |
+| `bin/truth.py` | `parse_operator_block()`, `ensure_operator_id()`, `compute_derived_truth()`, `_eval_operator()` |
+| `bin/response.py` | Excludes operator entries from RAG via `_has_operator_tag()`; uses `_derived_certainty` for ranking |
+| `html/util.js` | Trust editor UI: unified XHTML textarea with template dropdown (AND/OR/NOT/NON), IDs visible for `<child id>` references |
+| `spec/hme.jsonl` | Test data with AND, OR, NOT, NON operator entries |
+| `test/test_derived_truth.py` | Unit tests covering parsing, ID generation, and/or/not/non evaluation, chaining, cycles, and hme.jsonl integration |

@@ -98,7 +98,7 @@ This constitution is intentionally compact. For the rest of the system design:
 - `WhatIsTruth.md`: plural truth, POVs, certainty semantics, and HME-style fan-out.
 - `ArchitectureOfTruth.md`: HME logic, distributed truth vs consensus, conceptual spaces framing.
 - `Authority.md`: transitive trust and authority import format/security.
-- `Implication.md`: typed implication operators and derived truth computation.
+- `Implication.md`: logical operators (and/or/not) and derived truth computation.
 - `HowToEnsureSafety.md`: the Freedom/Love/Wisdom safety frame.
 - `Security.md`: concrete security considerations for the local-first implementation.
 - `Architecture.md`: the current software architecture (Flask shim + UI + `llm.jsonl`).

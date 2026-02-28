@@ -124,22 +124,21 @@ function _buildRuntimeConfig() {
 }
 
 // Client-side merge: fold importState data into the live `state` object.
-// Merges trust entries (by id, import wins), conversations (appended),
+// Merges truth entries (by id, import wins), conversations (appended),
 // and context (kept from current state — import context is not overwritten).
 function _clientMerge(importState) {
-  // Trust entries: merge by id (import overwrites duplicates)
-  if (!state.truth) state.truth = {};
-  if (!Array.isArray(state.truth.trust)) state.truth.trust = [];
-  const incoming = (importState.truth && importState.truth.trust) || [];
+  // Truth entries: merge by id (import overwrites duplicates)
+  if (!Array.isArray(state.truth)) state.truth = [];
+  const incoming = Array.isArray(importState.truth) ? importState.truth : [];
   const byId = {};
-  for (const e of state.truth.trust) { if (e.id) byId[e.id] = e; }
+  for (const e of state.truth) { if (e.id) byId[e.id] = e; }
   for (const e of incoming) {
     if (e.id && byId[e.id]) {
       // Replace existing entry
-      const idx = state.truth.trust.indexOf(byId[e.id]);
-      if (idx >= 0) state.truth.trust[idx] = e;
+      const idx = state.truth.indexOf(byId[e.id]);
+      if (idx >= 0) state.truth[idx] = e;
     } else {
-      state.truth.trust.push(e);
+      state.truth.push(e);
     }
   }
 
@@ -179,4 +178,9 @@ function _clientMerge(importState) {
   mergeConvLists(state.conversations, importConvs);
 
   // Context: keep current state context (don't overwrite)
+
+  // Title: import wins if current title is empty or default
+  if (importState.title && (!state.title || state.title === "WikiOracle")) {
+    state.title = importState.title;
+  }
 }

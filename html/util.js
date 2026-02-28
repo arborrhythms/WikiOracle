@@ -8,7 +8,7 @@
 //   Tree navigation helpers — findInTree, removeFromTree, countTreeMessages
 //   Double-tap detection    — onDoubleTap
 //   Zoom utility            — setupZoom
-//   Modal dialogs           — _createDialog, context/output/settings/config/truth/read/search editors
+//   Modal dialogs           — _createDialog, showErrorDialog, context/output/settings/config/truth/read/search editors
 
 // config, state — declared in config.js and state.js
 
@@ -57,6 +57,15 @@ function tempId(prefix) {
   prefix = prefix || "m_";
   return prefix + Array.from(crypto.getRandomValues(new Uint8Array(8)))
     .map(function(b) { return b.toString(16).padStart(2, "0"); }).join("");
+}
+
+/** Generate a RFC4122 v4 UUID string (same format as Python uuid). */
+function generateUUID() {
+  var bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
+  var hex = Array.from(bytes).map(function(b) { return b.toString(16).padStart(2, "0"); }).join("");
+  return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20, 32);
 }
 
 // ─── Tree operations ───
@@ -329,10 +338,29 @@ function _createDialog(id, title, bodyHTML, panelClass, onClose) {
     bodyHTML +
     `</div>`;
   document.body.appendChild(overlay);
-  const closeBtn = overlay.querySelector("[data-dialog-close]");
   function close() { overlay.classList.remove("active"); if (onClose) onClose(); }
-  closeBtn.addEventListener("click", close);
+  overlay.querySelectorAll("[data-dialog-close]").forEach(function(btn) {
+    btn.addEventListener("click", close);
+  });
   return { overlay, close };
+}
+
+// ─── Error dialog (lightweight alert for user-facing errors) ───
+// Shows a modal with a title and message. Auto-closes on OK or backdrop click.
+function showErrorDialog(title, message) {
+  const body =
+    `<p style="margin:0 0 1rem;white-space:pre-wrap;word-break:break-word;">${escapeHtml(message)}</p>` +
+    `<div class="settings-actions"><button class="btn btn-primary" data-dialog-close>OK</button></div>`;
+  const dlg = _createDialog("errorDialog_" + Date.now(), title, body, null, function() {
+    // Remove from DOM on close to avoid piling up
+    if (dlg.overlay.parentNode) dlg.overlay.parentNode.removeChild(dlg.overlay);
+  });
+  // Close on backdrop click too
+  dlg.overlay.addEventListener("click", function(e) {
+    if (e.target === dlg.overlay) dlg.close();
+  });
+  requestAnimationFrame(function() { dlg.overlay.classList.add("active"); });
+  return dlg;
 }
 
 // ─── Context editor (floating modal, triggered from root node) ───
@@ -452,10 +480,6 @@ function closeSettings() {
 }
 async function saveSettings() {
   const newProvider = document.getElementById("setProvider").value;
-  const meta = config.server.providers[newProvider];
-  if (meta && meta.needs_key && !meta.has_key) {
-    setStatus(`${meta.name} requires an API key. Add it to config.yaml (Settings → Edit Config).`);
-  }
 
   config.ui.default_provider = newProvider;
   config.ui.model = document.getElementById("setModel").value || "";
@@ -599,13 +623,12 @@ async function _openConfigEditor() {
 
 // ─── Truth editor ───
 
-let _truthEditing = null; // index into state.truth.trust being edited, or "new"
+let _truthEditing = null; // index into state.truth being edited, or "new"
 
 function _openTruthEditor() {
   closeSettings();
 
-  if (!state.truth) state.truth = {};
-  if (!Array.isArray(state.truth.trust)) state.truth.trust = [];
+  if (!Array.isArray(state.truth)) state.truth = [];
 
   let overlay = document.getElementById("truthOverlay");
   if (!overlay) {
@@ -613,72 +636,70 @@ function _openTruthEditor() {
         <div id="truthListView">
           <div id="truthEntries" class="trust-entries-scroll"></div>
           <div class="settings-actions settings-actions-xs">
-            <button class="btn" id="truthAdd">Add Entry</button>
-            <button class="btn" id="truthAddImpl">Add Implication</button>
-            <button class="btn" id="truthAddAuth">Add Authority</button>
+            <select id="truthAddType" class="trust-input" style="max-width:9rem; font-size:0.78rem;">
+              <option value="fact">Fact</option>
+              <option value="reference">Reference</option>
+              <option value="and">AND</option>
+              <option value="or">OR</option>
+              <option value="not">NOT</option>
+              <option value="non">NON</option>
+              <option value="provider">Provider</option>
+              <option value="authority">Authority</option>
+            </select>
+            <button class="btn" id="truthAdd">Add</button>
             <button class="btn" id="truthClose">Close</button>
           </div>
         </div>
         <div id="truthEditView" class="hidden">
-          <label class="trust-label">Title</label>
-          <input id="truthTitle" type="text" class="trust-input">
-          <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = false, 0 = unknown, +1 = true)</span></label>
-          <input id="truthCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
-          <label class="trust-label">Content <span class="trust-label-hint">(XHTML: &lt;p&gt; facts, &lt;a href&gt; sources, &lt;provider&gt; LLMs, &lt;implication&gt; rules)</span></label>
-          <textarea id="truthContent" class="trust-textarea"></textarea>
+          <label id="truthEditLabel" class="trust-label"></label>
+          <textarea id="truthContent" class="trust-textarea" style="min-height:6rem; font-family:ui-monospace,monospace; font-size:0.82rem;"></textarea>
+          <div id="truthEditError" style="color:#dc2626; font-size:0.78rem; min-height:1.2em;"></div>
           <div class="settings-actions settings-actions-sm">
             <button class="btn" id="truthEditCancel">Cancel</button>
             <button class="btn btn-primary" id="truthEditSave">Save</button>
           </div>
-        </div>
-        <div id="truthImplView" class="hidden">
-          <label class="trust-label">Title</label>
-          <input id="implTitle" type="text" class="trust-input" placeholder="A → B (derived)">
-          <label class="trust-label">Antecedent <span class="trust-label-hint">(if this entry is believed…)</span></label>
-          <select id="implAntecedent" class="trust-input"></select>
-          <label class="trust-label">Consequent <span class="trust-label-hint">(…then raise certainty of this entry)</span></label>
-          <select id="implConsequent" class="trust-input"></select>
-          <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = false, 0 = unknown, +1 = true)</span></label>
-          <input id="implCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
-          <label class="trust-label">Type</label>
-          <select id="implType" class="trust-input">
-            <option value="material">Material (Strong Kleene)</option>
-            <option value="strict">Strict (modal)</option>
-            <option value="relevant">Relevant (anti-paradox)</option>
-          </select>
-          <div class="settings-actions settings-actions-sm">
-            <button class="btn" id="implEditCancel">Cancel</button>
-            <button class="btn btn-primary" id="implEditSave">Save</button>
-          </div>
-        </div>
-        <div id="truthAuthView" class="hidden">
-          <label class="trust-label">Title</label>
-          <input id="authTitle" type="text" class="trust-input" placeholder="Authority name">
-          <label class="trust-label">DID <span class="trust-label-hint">(Decentralized Identifier, e.g. did:web:example.com)</span></label>
-          <input id="authDid" type="text" class="trust-input" placeholder="did:web:...">
-          <label class="trust-label">ORCID <span class="trust-label-hint">(optional, e.g. 0000-0002-1825-0097)</span></label>
-          <input id="authOrcid" type="text" class="trust-input" placeholder="0000-0000-0000-0000">
-          <label class="trust-label">URL <span class="trust-label-hint">(URL to remote llm.jsonl trust table)</span></label>
-          <input id="authUrl" type="text" class="trust-input" placeholder="https://example.com/kb.jsonl">
-          <label class="trust-label">Certainty <span class="trust-label-hint">(-1 = distrust, 0 = unknown, +1 = full trust)</span></label>
-          <input id="authCertainty" type="number" min="-1" max="1" step="0.05" value="0.5" class="trust-input">
-          <label class="trust-label">Refresh <span class="trust-label-hint">(seconds between re-fetches, default 3600)</span></label>
-          <input id="authRefresh" type="number" min="60" step="60" value="3600" class="trust-input">
-          <div class="settings-actions settings-actions-sm">
-            <button class="btn" id="authEditCancel">Cancel</button>
-            <button class="btn btn-primary" id="authEditSave">Save</button>
-          </div>
         </div>`;
-    var dlg = _createDialog("truthOverlay", "Trust", body, "trust-panel", function() { _truthEditing = null; });
+    var dlg = _createDialog("truthOverlay", "Truth", body, "trust-panel", function() { _truthEditing = null; });
     overlay = dlg.overlay;
 
     document.getElementById("truthClose").addEventListener("click", dlg.close);
 
+    // ─── XHTML template for each subtype ───
+    var _truthTemplates = {
+      fact: '<fact id="ID" certainty="0.5" title="TITLE">Assertion text here.</fact>',
+      reference: '<reference id="ID" certainty="0.5" title="TITLE" href="https://example.com">Link text</reference>',
+      and: '<and id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n  <child id="ENTRY_B"/>\n</and>',
+      or: '<or id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n  <child id="ENTRY_B"/>\n</or>',
+      not: '<not id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n</not>',
+      non: '<non id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n</non>',
+      provider: '<provider id="ID" certainty="0.8" title="TITLE" name="provider_name" api_url="https://api.example.com" model="model_name"/>',
+      authority: '<authority id="ID" certainty="0.5" title="TITLE" did="did:web:example.com" url="https://example.com/kb.jsonl"/>'
+    };
+
+    // Brief description shown above the editor for each truth type
+    var _truthDescriptions = {
+      fact:      "Fact \u2014 a direct assertion with a certainty value.",
+      reference: "Reference \u2014 a link to an external source.",
+      and:       "AND \u2014 true when all children are true (min certainty).",
+      or:        "OR \u2014 true when any child is true (max certainty).",
+      not:       "NOT \u2014 negation of a child entry.",
+      non:       "NON \u2014 non-affirming negation (weakens certainty toward zero).",
+      provider:  "Provider \u2014 an LLM API endpoint.",
+      authority: "Authority \u2014 a remote knowledge base (JSONL URL)."
+    };
+
+    function _setTruthEditLabel(tag) {
+      document.getElementById("truthEditLabel").textContent = _truthDescriptions[tag] || _truthDescriptions.fact;
+    }
+
     document.getElementById("truthAdd").addEventListener("click", function() {
       _truthEditing = "new";
-      document.getElementById("truthTitle").value = "";
-      document.getElementById("truthCertainty").value = "0.5";
-      document.getElementById("truthContent").value = "<p></p>";
+      var subtype = document.getElementById("truthAddType").value;
+      var tmpl = _truthTemplates[subtype] || _truthTemplates.fact;
+      tmpl = tmpl.replace(/id="ID"/, 'id="' + generateUUID() + '"');
+      document.getElementById("truthContent").value = tmpl;
+      document.getElementById("truthEditError").textContent = "";
+      _setTruthEditLabel(subtype);
       _truthShowEditView();
     });
 
@@ -688,135 +709,33 @@ function _openTruthEditor() {
     });
 
     document.getElementById("truthEditSave").addEventListener("click", function() {
-      const title = document.getElementById("truthTitle").value.trim() || "Untitled";
-      const certainty = Math.min(1, Math.max(-1, parseFloat(document.getElementById("truthCertainty").value) || 0));
-      const content = document.getElementById("truthContent").value.trim() || "<p/>";
+      const content = document.getElementById("truthContent").value.trim();
+      const errEl = document.getElementById("truthEditError");
       const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+
+      // Syntax check: parse as XML
+      var parsed = _parseXhtmlContent(content);
+      if (!parsed) {
+        errEl.textContent = "Invalid XML. Check syntax.";
+        return;
+      }
+      if (!parsed.id) {
+        errEl.textContent = 'Missing required id="..." attribute on root element.';
+        return;
+      }
+      errEl.textContent = "";
+
+      var id = parsed.id;
+      var certainty = parsed.certainty != null ? Math.min(1, Math.max(-1, parsed.certainty)) : 0.0;
+      var title = parsed.title || "Untitled";
 
       if (_truthEditing === "new") {
-        const entry = { id: tempId("t_"), title: title, certainty: certainty, content: content, time: now };
-        state.truth.trust.push(entry);
+        var entry = { id: id, title: title, certainty: certainty, content: content, time: now };
+        state.truth.push(entry);
       } else if (typeof _truthEditing === "number") {
-        const entry = state.truth.trust[_truthEditing];
+        var entry = state.truth[_truthEditing];
         if (entry) {
-          entry.title = title;
-          entry.certainty = certainty;
-          entry.content = content;
-          entry.time = now;
-        }
-      }
-      _truthEditing = null;
-      _persistState();
-      _truthRenderList();
-      _truthShowListView();
-    });
-
-    // ─── Implication editor handlers ───
-    document.getElementById("truthAddImpl").addEventListener("click", function() {
-      _truthEditing = "new_impl";
-      document.getElementById("implTitle").value = "";
-      document.getElementById("implCertainty").value = "0.5";
-      document.getElementById("implType").value = "material";
-      _populateImplDropdowns();
-      _truthShowImplView();
-    });
-
-    document.getElementById("implEditCancel").addEventListener("click", function() {
-      _truthEditing = null;
-      _truthShowListView();
-    });
-
-    document.getElementById("implEditSave").addEventListener("click", function() {
-      const title = document.getElementById("implTitle").value.trim() || "Untitled implication";
-      const ant = document.getElementById("implAntecedent").value;
-      const con = document.getElementById("implConsequent").value;
-      const certainty = Math.min(1, Math.max(-1, parseFloat(document.getElementById("implCertainty").value) || 0));
-      const implType = document.getElementById("implType").value;
-      const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-
-      if (!ant || !con) {
-        const input = document.getElementById("msgInput");
-        const savedPH = input.placeholder;
-        input.placeholder = "Select both antecedent and consequent";
-        setTimeout(() => { input.placeholder = savedPH; }, 3000);
-        return;
-      }
-
-      const content = "<implication><antecedent>" + ant + "</antecedent><consequent>" + con + "</consequent><type>" + implType + "</type></implication>";
-
-      if (_truthEditing === "new_impl") {
-        const entry = { id: tempId("i_"), title: title, certainty: certainty, content: content, time: now };
-        state.truth.trust.push(entry);
-      } else if (typeof _truthEditing === "number") {
-        const entry = state.truth.trust[_truthEditing];
-        if (entry) {
-          entry.title = title;
-          entry.certainty = certainty;
-          entry.content = content;
-          entry.time = now;
-        }
-      }
-      _truthEditing = null;
-      _persistState();
-      _truthRenderList();
-      _truthShowListView();
-    });
-
-    // ─── Authority editor handlers ───
-    document.getElementById("truthAddAuth").addEventListener("click", function() {
-      _truthEditing = "new_auth";
-      document.getElementById("authTitle").value = "";
-      document.getElementById("authDid").value = "";
-      document.getElementById("authOrcid").value = "";
-      document.getElementById("authUrl").value = "";
-      document.getElementById("authCertainty").value = "0.5";
-      document.getElementById("authRefresh").value = "3600";
-      _truthShowAuthView();
-    });
-
-    document.getElementById("authEditCancel").addEventListener("click", function() {
-      _truthEditing = null;
-      _truthShowListView();
-    });
-
-    document.getElementById("authEditSave").addEventListener("click", function() {
-      const title = document.getElementById("authTitle").value.trim() || "Untitled authority";
-      const did = document.getElementById("authDid").value.trim();
-      const orcid = document.getElementById("authOrcid").value.trim();
-      const url = document.getElementById("authUrl").value.trim();
-      const certainty = Math.min(1, Math.max(-1, parseFloat(document.getElementById("authCertainty").value) || 0));
-      const refresh = parseInt(document.getElementById("authRefresh").value) || 3600;
-      const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-
-      if (!url) {
-        const input = document.getElementById("msgInput");
-        const savedPH = input.placeholder;
-        input.placeholder = "URL to remote trust table is required";
-        setTimeout(() => { input.placeholder = savedPH; }, 3000);
-        return;
-      }
-
-      if (!did && !orcid) {
-        const input = document.getElementById("msgInput");
-        const savedPH = input.placeholder;
-        input.placeholder = "At least one of DID or ORCID is required";
-        setTimeout(() => { input.placeholder = savedPH; }, 3000);
-        return;
-      }
-
-      var attrs = "";
-      if (did) attrs += ' did="' + did.replace(/"/g, "&quot;") + '"';
-      if (orcid) attrs += ' orcid="' + orcid.replace(/"/g, "&quot;") + '"';
-      attrs += ' url="' + url.replace(/"/g, "&quot;") + '"';
-      if (refresh !== 3600) attrs += ' refresh="' + refresh + '"';
-      const content = "<authority" + attrs + " />";
-
-      if (_truthEditing === "new_auth") {
-        const entry = { id: tempId("a_"), title: title, certainty: certainty, content: content, time: now };
-        state.truth.trust.push(entry);
-      } else if (typeof _truthEditing === "number") {
-        const entry = state.truth.trust[_truthEditing];
-        if (entry) {
+          entry.id = id;
           entry.title = title;
           entry.certainty = certainty;
           entry.content = content;
@@ -836,43 +755,62 @@ function _openTruthEditor() {
   overlay.classList.add("active");
 }
 
+function _truthHideAllViews() {
+  document.getElementById("truthListView").classList.add("hidden");
+  document.getElementById("truthEditView").classList.add("hidden");
+}
+
 function _truthShowListView() {
-  document.getElementById("truthListView").style.display = "";
-  document.getElementById("truthEditView").style.display = "none";
-  document.getElementById("truthImplView").style.display = "none";
-  document.getElementById("truthAuthView").style.display = "none";
+  _truthHideAllViews();
+  document.getElementById("truthListView").classList.remove("hidden");
 }
 
 function _truthShowEditView() {
-  document.getElementById("truthListView").style.display = "none";
-  document.getElementById("truthEditView").style.display = "";
-  document.getElementById("truthImplView").style.display = "none";
-  document.getElementById("truthAuthView").style.display = "none";
-  document.getElementById("truthTitle").focus();
+  _truthHideAllViews();
+  document.getElementById("truthEditView").classList.remove("hidden");
+  document.getElementById("truthContent").focus();
 }
 
-function _truthShowImplView() {
-  document.getElementById("truthListView").style.display = "none";
-  document.getElementById("truthEditView").style.display = "none";
-  document.getElementById("truthImplView").style.display = "";
-  document.getElementById("truthAuthView").style.display = "none";
-  document.getElementById("implTitle").focus();
+function _parseXhtmlContent(content) {
+  /** Parse XHTML content and extract root tag, id, certainty, title. */
+  try {
+    var parser = new DOMParser();
+    var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
+    if (doc.querySelector("parsererror")) return null;
+    var root = doc.documentElement;
+    var recognized = ["fact", "reference", "and", "or", "not", "non", "provider", "authority"];
+    for (var i = 0; i < recognized.length; i++) {
+      var el = root.querySelector(recognized[i]);
+      if (el) {
+        var c = parseFloat(el.getAttribute("certainty"));
+        return {
+          tag: recognized[i],
+          id: el.getAttribute("id") || "",
+          certainty: isNaN(c) ? null : c,
+          title: el.getAttribute("title") || ""
+        };
+      }
+    }
+    return null;
+  } catch (e) { return null; }
 }
 
-function _truthShowAuthView() {
-  document.getElementById("truthListView").style.display = "none";
-  document.getElementById("truthEditView").style.display = "none";
-  document.getElementById("truthImplView").style.display = "none";
-  document.getElementById("truthAuthView").style.display = "";
-  document.getElementById("authTitle").focus();
-}
-
-function _isImplication(entry) {
-  return entry && typeof entry.content === "string" && entry.content.indexOf("<implication") !== -1;
+function _isOperator(entry) {
+  if (!entry || typeof entry.content !== "string") return false;
+  var c = entry.content;
+  return c.indexOf("<and") !== -1 || c.indexOf("<or") !== -1 || c.indexOf("<not") !== -1 || c.indexOf("<non") !== -1;
 }
 
 function _isAuthority(entry) {
   return entry && typeof entry.content === "string" && entry.content.indexOf("<authority") !== -1;
+}
+
+function _isReference(entry) {
+  return entry && typeof entry.content === "string" && entry.content.indexOf("<reference") !== -1;
+}
+
+function _isProvider(entry) {
+  return entry && typeof entry.content === "string" && entry.content.indexOf("<provider") !== -1;
 }
 
 function _parseAuthContent(content) {
@@ -890,176 +828,139 @@ function _parseAuthContent(content) {
   } catch (e) { return null; }
 }
 
-function _parseImplContent(content) {
+function _parseOperatorContent(content) {
   try {
     var parser = new DOMParser();
     var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
-    var impl = doc.querySelector("implication");
-    if (!impl) return null;
-    var ant = impl.querySelector("antecedent");
-    var con = impl.querySelector("consequent");
-    var typ = impl.querySelector("type");
-    return {
-      antecedent: ant ? ant.textContent.trim() : "",
-      consequent: con ? con.textContent.trim() : "",
-      type: typ ? typ.textContent.trim() : "material"
-    };
+    var operators = ["and", "or", "not", "non"];
+    for (var oi = 0; oi < operators.length; oi++) {
+      var el = doc.querySelector(operators[oi]);
+      if (el) {
+        var refs = [];
+        // New format: <child id="..."/>
+        var childEls = el.querySelectorAll("child");
+        for (var ci = 0; ci < childEls.length; ci++) {
+          var cid = (childEls[ci].getAttribute("id") || "").trim();
+          if (cid) refs.push(cid);
+        }
+        // Legacy fallback: <ref>text</ref>
+        if (refs.length === 0) {
+          var refEls = el.querySelectorAll("ref");
+          for (var ri = 0; ri < refEls.length; ri++) {
+            var txt = refEls[ri].textContent.trim();
+            if (txt) refs.push(txt);
+          }
+        }
+        return { operator: operators[oi], refs: refs };
+      }
+    }
+    return null;
   } catch (e) { return null; }
 }
 
-function _populateImplDropdowns(selectedAnt, selectedCon) {
-  var entries = (state.truth && state.truth.trust) || [];
-  var antSel = document.getElementById("implAntecedent");
-  var conSel = document.getElementById("implConsequent");
-  antSel.innerHTML = "";
-  conSel.innerHTML = "";
-  var blankA = document.createElement("option");
-  blankA.value = ""; blankA.textContent = "— select —";
-  antSel.appendChild(blankA);
-  var blankC = document.createElement("option");
-  blankC.value = ""; blankC.textContent = "— select —";
-  conSel.appendChild(blankC);
-  for (var i = 0; i < entries.length; i++) {
-    var e = entries[i];
-    if (_isImplication(e) || _isAuthority(e)) continue; // skip structural entries
-    var opt1 = document.createElement("option");
-    opt1.value = e.id;
-    opt1.textContent = e.id + " — " + truncate(e.title || "(untitled)", 30);
-    if (e.id === selectedAnt) opt1.selected = true;
-    antSel.appendChild(opt1);
-    var opt2 = document.createElement("option");
-    opt2.value = e.id;
-    opt2.textContent = e.id + " — " + truncate(e.title || "(untitled)", 30);
-    if (e.id === selectedCon) opt2.selected = true;
-    conSel.appendChild(opt2);
-  }
+function _parseRefContent(content) {
+  try {
+    var parser = new DOMParser();
+    var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
+    // New format: <reference href="...">text</reference>
+    var ref = doc.querySelector("reference");
+    if (ref) return { url: ref.getAttribute("href") || "", text: ref.textContent.trim() };
+    // Legacy fallback: <a href="...">text</a>
+    var a = doc.querySelector("a");
+    if (a) return { url: a.getAttribute("href") || "", text: a.textContent.trim() };
+    return null;
+  } catch (e) { return null; }
+}
+
+/* _populateOperandCheckboxes removed — XHTML editor handles operator children directly */
+
+function _truthEntryTag(entry) {
+  /** Return the XHTML root tag name for a truth entry (e.g. "fact", "and", "provider"). */
+  if (!entry || typeof entry.content !== "string") return "fact";
+  var parsed = _parseXhtmlContent(entry.content);
+  return parsed ? parsed.tag : "fact";
 }
 
 function _truthRenderList() {
   const container = document.getElementById("truthEntries");
   container.innerHTML = "";
-  const entries = (state.truth && state.truth.trust) || [];
+  const entries = Array.isArray(state.truth) ? state.truth : [];
 
   if (entries.length === 0) {
-    container.innerHTML = '<div class="trust-empty">No trust entries. Use <b>Add Entry</b> or <b>Open</b> a .jsonl file.</div>';
+    container.innerHTML = '<div class="trust-empty">No truth entries. Use <b>Add</b> or <b>Open</b> a .jsonl file.</div>';
     return;
   }
 
+  // Build as <table>
+  const table = document.createElement("table");
+  table.style.cssText = "width:100%; border-collapse:collapse; font-size:0.82rem;";
+
+  const thead = document.createElement("thead");
+  thead.innerHTML = '<tr style="border-bottom:2px solid var(--border); font-size:0.72rem; color:var(--fg-muted); text-align:left;">'
+    + '<th style="padding:0.25rem 0.3rem; width:1.5em;"></th>'
+    + '<th style="padding:0.25rem 0.3rem;">ID</th>'
+    + '<th style="padding:0.25rem 0.3rem; text-align:right;">Cert</th>'
+    + '<th style="padding:0.25rem 0.3rem;">Title</th>'
+    + '<th style="padding:0.25rem 0.3rem; width:5em;"></th>'
+    + '</tr>';
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    const isImpl = _isImplication(entry);
-    const isAuth = _isAuthority(entry);
-    const row = document.createElement("div");
-    row.style.cssText = "display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0; border-bottom:1px solid var(--border); font-size:0.82rem;";
+    const tag = _truthEntryTag(entry);
+    const icon = (typeof TRUTH_ICONS !== "undefined" && TRUTH_ICONS[tag]) || TRUTH_ICONS.fact;
+    const row = document.createElement("tr");
+    row.style.cssText = "border-bottom:1px solid var(--border);";
 
-    if (isAuth) {
-      // Authority entry: show shield icon and DID/URL
-      const authData = _parseAuthContent(entry.content);
-      const badge = document.createElement("span");
-      badge.textContent = "\u229e";
-      badge.title = "Authority" + (authData && authData.did ? " (" + authData.did + ")" : "");
-      badge.style.cssText = "min-width:3.2em; text-align:center; font-size:1rem; color:#7c3aed;";
-      row.appendChild(badge);
+    // Icon cell
+    const iconTd = document.createElement("td");
+    iconTd.style.cssText = "padding:0.3rem; text-align:center; font-size:0.9rem;";
+    iconTd.textContent = icon;
+    iconTd.title = tag;
+    row.appendChild(iconTd);
 
-      const label = document.createElement("span");
-      label.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-      if (authData) {
-        var identifier = authData.did || authData.orcid || "";
-        label.textContent = truncate(entry.title || identifier, 36);
-        label.title = (authData.did ? "DID: " + authData.did + "\n" : "") + (authData.orcid ? "ORCID: " + authData.orcid + "\n" : "") + "URL: " + authData.url;
-      } else {
-        label.textContent = truncate(entry.title || "(authority)", 36);
-      }
-      row.appendChild(label);
+    // ID cell
+    const idTd = document.createElement("td");
+    idTd.style.cssText = "padding:0.3rem; font-family:ui-monospace,monospace; font-size:0.72rem; color:var(--fg-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:10em; user-select:all; cursor:default;";
+    idTd.textContent = truncate(entry.id || "?", 18);
+    idTd.title = entry.id || "";
+    row.appendChild(idTd);
 
-      const certSpan = document.createElement("span");
-      const ac = entry.certainty || 0;
-      certSpan.textContent = "c=" + (ac >= 0 ? "+" : "") + ac.toFixed(2);
-      certSpan.style.cssText = "font-family:ui-monospace,monospace; font-size:0.72rem; color:var(--fg-muted);";
-      row.appendChild(certSpan);
-    } else if (isImpl) {
-      // Implication entry: show → icon and antecedent/consequent
-      const implData = _parseImplContent(entry.content);
-      const badge = document.createElement("span");
-      badge.textContent = "\u2192";
-      badge.title = "Implication (" + (implData ? implData.type : "material") + ")";
-      badge.style.cssText = "min-width:3.2em; text-align:center; font-size:1rem; color:var(--accent);";
-      row.appendChild(badge);
+    // Certainty cell
+    const certTd = document.createElement("td");
+    const c = entry.certainty || 0;
+    certTd.textContent = (c >= 0 ? "+" : "") + c.toFixed(2);
+    certTd.style.cssText = "padding:0.3rem; text-align:right; font-family:ui-monospace,monospace; font-size:0.72rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
+    row.appendChild(certTd);
 
-      const label = document.createElement("span");
-      label.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-      if (implData) {
-        label.textContent = implData.antecedent + " \u2192 " + implData.consequent;
-        label.title = entry.title || "";
-      } else {
-        label.textContent = truncate(entry.title || "(implication)", 36);
-      }
-      row.appendChild(label);
+    // Title cell
+    const titleTd = document.createElement("td");
+    titleTd.textContent = truncate(entry.title || "(untitled)", 30);
+    titleTd.style.cssText = "padding:0.3rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
+    titleTd.title = entry.title || "";
+    row.appendChild(titleTd);
 
-      // Show derived certainty of consequent if available
-      if (implData) {
-        const derivedSpan = document.createElement("span");
-        var conEntry = entries.find(function(e) { return e.id === implData.consequent; });
-        if (conEntry) {
-          var dc = conEntry._derived_certainty != null ? conEntry._derived_certainty : conEntry.certainty;
-          derivedSpan.textContent = "c=" + (dc >= 0 ? "+" : "") + dc.toFixed(2);
-          derivedSpan.style.cssText = "font-family:ui-monospace,monospace; font-size:0.72rem; color:var(--fg-muted);";
-        }
-        row.appendChild(derivedSpan);
-      }
-    } else {
-      // Regular trust entry
-      const cert = document.createElement("span");
-      const c = entry.certainty || 0;
-      const dc = entry._derived_certainty;
-      var certText = (c >= 0 ? "+" : "") + c.toFixed(2);
-      if (dc != null && Math.abs(dc - c) > 1e-9) {
-        certText += "\u2192" + (dc >= 0 ? "+" : "") + dc.toFixed(2);
-      }
-      cert.textContent = certText;
-      cert.style.cssText = "min-width:3.2em; text-align:right; font-family:ui-monospace,monospace; font-size:0.78rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
-      if (dc != null && Math.abs(dc - c) > 1e-9) cert.title = "Stored: " + c.toFixed(2) + ", Derived: " + dc.toFixed(2);
-      row.appendChild(cert);
-
-      const title = document.createElement("span");
-      title.textContent = truncate(entry.title || "(untitled)", 36);
-      title.style.cssText = "flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;";
-      row.appendChild(title);
-    }
+    // Actions cell
+    const actionsTd = document.createElement("td");
+    actionsTd.style.cssText = "padding:0.3rem; white-space:nowrap; text-align:right;";
 
     const editBtn = document.createElement("button");
     editBtn.textContent = "Edit";
     editBtn.className = "btn";
-    editBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem;";
-    editBtn.addEventListener("click", (function(idx, entryIsImpl, entryIsAuth) {
+    editBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem; margin-right:0.2rem;";
+    editBtn.addEventListener("click", (function(idx, entryTag) {
       return function() {
         _truthEditing = idx;
-        const e = state.truth.trust[idx];
-        if (entryIsAuth) {
-          const authData = _parseAuthContent(e.content);
-          document.getElementById("authTitle").value = e.title || "";
-          document.getElementById("authDid").value = (authData && authData.did) || "";
-          document.getElementById("authOrcid").value = (authData && authData.orcid) || "";
-          document.getElementById("authUrl").value = (authData && authData.url) || "";
-          document.getElementById("authCertainty").value = e.certainty || 0;
-          document.getElementById("authRefresh").value = (authData && authData.refresh) || 3600;
-          _truthShowAuthView();
-        } else if (entryIsImpl) {
-          const implData = _parseImplContent(e.content);
-          document.getElementById("implTitle").value = e.title || "";
-          document.getElementById("implCertainty").value = e.certainty || 0;
-          document.getElementById("implType").value = (implData && implData.type) || "material";
-          _populateImplDropdowns(implData && implData.antecedent, implData && implData.consequent);
-          _truthShowImplView();
-        } else {
-          document.getElementById("truthTitle").value = e.title || "";
-          document.getElementById("truthCertainty").value = e.certainty || 0;
-          document.getElementById("truthContent").value = stripTags(e.content || "").trim() ? (e.content || "") : "<p></p>";
-          _truthShowEditView();
-        }
+        const e = state.truth[idx];
+        document.getElementById("truthContent").value = e.content || "";
+        document.getElementById("truthEditError").textContent = "";
+        if (typeof _setTruthEditLabel === "function") _setTruthEditLabel(entryTag);
+        _truthShowEditView();
       };
-    })(i, isImpl, isAuth));
-    row.appendChild(editBtn);
+    })(i, tag));
+    actionsTd.appendChild(editBtn);
 
     const delBtn = document.createElement("button");
     delBtn.textContent = "Del";
@@ -1067,18 +968,23 @@ function _truthRenderList() {
     delBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem; color:#dc2626;";
     delBtn.addEventListener("click", (function(idx) {
       return function() {
-        const e = state.truth.trust[idx];
-        if (confirmAction("Delete " + (_isImplication(e) ? "implication" : "trust entry") + " \"" + (e.title || "untitled") + "\"?")) {
-          state.truth.trust.splice(idx, 1);
+        const e = state.truth[idx];
+        var kind = _truthEntryTag(e);
+        if (confirmAction("Delete " + kind + " \"" + (e.title || "untitled") + "\"?")) {
+          state.truth.splice(idx, 1);
           _persistState();
           _truthRenderList();
         }
       };
     })(i));
-    row.appendChild(delBtn);
+    actionsTd.appendChild(delBtn);
 
-    container.appendChild(row);
+    row.appendChild(actionsTd);
+    tbody.appendChild(row);
   }
+
+  table.appendChild(tbody);
+  container.appendChild(table);
 }
 
 // ─── Read view (XHTML export to new window) ───

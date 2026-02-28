@@ -1,11 +1,16 @@
-"""WikiOracle truth processing: trust entry types, implication engine, authority resolution.
+"""WikiOracle truth processing: trust entry types, operator engine, authority resolution.
 
 Foundational module for trust-table interpretation:
   - XHTML sanitization and normalization utilities
   - Timestamp, hashing, and UUID helpers
   - Trust entry normalization and ID generation
-  - <provider>, <src>, <implication>, <authority> XML block parsing
-  - Strong Kleene material implication engine (compute_derived_truth)
+  - Subtypes (all self-describing XHTML with id/certainty/title attrs):
+      <fact>       — plain text assertion
+      <reference>  — external link (href attr)
+      <and>/<or>/<not>/<non> — operators with <child id="..."/> refs
+      <provider>   — LLM provider config (name, api_url, model attrs)
+      <authority>  — remote trust table import (did, url attrs)
+  - Strong Kleene operator engine (compute_derived_truth)
   - Authority resolution (remote JSONL fetch with certainty scaling)
 
 Dependency: stdlib only (no imports from config, state, or oracle).
@@ -181,20 +186,20 @@ def ensure_trust_id(entry: dict) -> str:
     return trust_id
 
 
-def _implication_fingerprint(entry: dict) -> str:
-    """Build a stable hash input for implication identity derivation."""
+def _operator_fingerprint(entry: dict) -> str:
+    """Build a stable hash input for operator identity derivation."""
     content = ensure_xhtml(entry.get("content", ""))
-    return _stable_sha256(f"implication|{content}")
+    return _stable_sha256(f"operator|{content}")
 
 
-def ensure_implication_id(entry: dict) -> str:
-    """Ensure an implication entry has an ID, deriving a deterministic UUID if missing."""
-    iid = str(entry.get("id", "")).strip()
-    if iid:
-        return iid
-    iid = str(uuid.uuid5(WIKIORACLE_UUID_NS, _implication_fingerprint(entry)))
-    entry["id"] = iid
-    return iid
+def ensure_operator_id(entry: dict) -> str:
+    """Ensure an operator entry has an ID, deriving a deterministic UUID if missing."""
+    oid = str(entry.get("id", "")).strip()
+    if oid:
+        return oid
+    oid = str(uuid.uuid5(WIKIORACLE_UUID_NS, _operator_fingerprint(entry)))
+    entry["id"] = oid
+    return oid
 
 
 def ensure_authority_id(entry: dict) -> str:
@@ -210,11 +215,169 @@ def ensure_authority_id(entry: dict) -> str:
 # ---------------------------------------------------------------------------
 # Trust entry normalization
 # ---------------------------------------------------------------------------
+def _has_operator_tag(content: str) -> bool:
+    """Check whether content contains an operator tag (<and>, <or>, <not>, <non>)."""
+    return ("<and" in content or "<or" in content or "<not" in content
+            or "<non" in content)
+
+
+# Recognized XHTML root tags for trust entries.
+_RECOGNIZED_TAGS = frozenset({"fact", "reference", "and", "or", "not", "non", "provider", "authority"})
+
+
+def _parse_root_attrs(content: str) -> dict | None:
+    """Parse XHTML content and extract root element tag name and attributes.
+
+    Returns { tag, id, certainty, title, root_el } or None if content
+    doesn't have a recognized root tag.
+    """
+    if not isinstance(content, str) or not content.strip():
+        return None
+    try:
+        root = ET.fromstring(f"<root>{content}</root>")
+    except ET.ParseError:
+        return None
+    # Find first recognized child element
+    for child in root:
+        tag = child.tag
+        if tag in _RECOGNIZED_TAGS:
+            result = {"tag": tag, "root_el": child}
+            result["id"] = child.get("id", "")
+            try:
+                result["certainty"] = float(child.get("certainty", ""))
+            except (TypeError, ValueError):
+                result["certainty"] = None
+            result["title"] = child.get("title", "")
+            return result
+    return None
+
+
+def _migrate_legacy_content(item: dict) -> str:
+    """Migrate pre-XHTML-spec content into the new self-describing format.
+
+    Handles:
+      - Plain <p> text → <fact id="..." certainty="..." title="...">text</fact>
+      - Bare <a href>  → <reference id="..." certainty="..." title="..." href="...">text</reference>
+      - Old <and>/<or>/<not>/<non> with <ref>text</ref> → same tag with <child id="..."/>
+      - <provider>/<authority> without id/certainty attrs → add attrs
+    Returns updated content string.
+    """
+    content = item.get("content", "")
+    eid = item.get("id", "")
+    certainty = item.get("certainty", 0.0)
+    title = item.get("title", "")
+
+    def _esc_attr(v):
+        return str(v).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+
+    def _common_attrs():
+        parts = []
+        if eid:
+            parts.append(f'id="{_esc_attr(eid)}"')
+        parts.append(f'certainty="{certainty}"')
+        if title:
+            parts.append(f'title="{_esc_attr(title)}"')
+        return " ".join(parts)
+
+    # Already has recognized root tag with id attr — no migration needed
+    parsed = _parse_root_attrs(content)
+    if parsed and parsed["id"]:
+        return content
+
+    # Operator migration: <and><ref>x</ref>...</and> → <and id="..." certainty="..."><child id="x"/>...</and>
+    if _has_operator_tag(content):
+        try:
+            root = ET.fromstring(f"<root>{content}</root>")
+        except ET.ParseError:
+            return content
+        for tag in ("and", "or", "not", "non"):
+            el = root.find(f".//{tag}")
+            if el is not None:
+                # Add id/certainty/title attrs
+                if eid:
+                    el.set("id", eid)
+                el.set("certainty", str(certainty))
+                if title:
+                    el.set("title", title)
+                # Migrate <ref>text</ref> → <child id="text"/>
+                for ref_el in el.findall("ref"):
+                    ref_id = (ref_el.text or "").strip()
+                    child_el = ET.SubElement(el, "child")
+                    child_el.set("id", ref_id)
+                    child_el.tail = ref_el.tail
+                    el.remove(ref_el)
+                inner = ET.tostring(root, encoding="unicode", method="xml")
+                return inner.removeprefix("<root>").removesuffix("</root>").strip()
+        return content
+
+    # Authority migration: add id/certainty attrs if missing
+    if "<authority" in content:
+        try:
+            root = ET.fromstring(f"<root>{content}</root>")
+            auth = root.find(".//authority")
+            if auth is not None:
+                if not auth.get("id") and eid:
+                    auth.set("id", eid)
+                if not auth.get("certainty"):
+                    auth.set("certainty", str(certainty))
+                if not auth.get("title") and title:
+                    auth.set("title", title)
+                inner = ET.tostring(root, encoding="unicode", method="xml")
+                return inner.removeprefix("<root>").removesuffix("</root>").strip()
+        except ET.ParseError:
+            pass
+        return content
+
+    # Provider migration: add id/certainty attrs if missing
+    if "<provider" in content:
+        try:
+            root = ET.fromstring(f"<root>{content}</root>")
+            prov = root.find(".//provider")
+            if prov is not None:
+                if not prov.get("id") and eid:
+                    prov.set("id", eid)
+                if not prov.get("certainty"):
+                    prov.set("certainty", str(certainty))
+                if not prov.get("title") and title:
+                    prov.set("title", title)
+                inner = ET.tostring(root, encoding="unicode", method="xml")
+                return inner.removeprefix("<root>").removesuffix("</root>").strip()
+        except ET.ParseError:
+            pass
+        return content
+
+    # Reference migration: <a href="...">text</a> → <reference id="..." href="..." ...>text</reference>
+    if "<a " in content:
+        try:
+            root = ET.fromstring(f"<root>{content}</root>")
+            a_el = root.find(".//a")
+            if a_el is not None:
+                href = a_el.get("href", "")
+                text = a_el.text or ""
+                attrs = _common_attrs()
+                return f'<reference {attrs} href="{_esc_attr(href)}">{_esc_attr(text)}</reference>'
+        except ET.ParseError:
+            pass
+        return content
+
+    # Fact migration: <p>text</p> or bare text → <fact id="..." ...>text</fact>
+    text = strip_xhtml(content)
+    if not text:
+        text = content
+    attrs = _common_attrs()
+    return f"<fact {attrs}>{text}</fact>"
+
+
 def _normalize_trust_entry(raw: Any) -> dict:
-    """Normalize a trust record and clamp certainty into [-1.0, 1.0] (Kleene ternary)."""
+    """Normalize a truth record into canonical XHTML format.
+
+    All truth entries use a self-describing XHTML root element with id,
+    certainty, and title attributes.  The JSON envelope mirrors these
+    for fast indexing (synced from content).
+    """
     item = dict(raw) if isinstance(raw, dict) else {}
-    item["type"] = "trust"
-    item["title"] = str(item.get("title", "Trust entry"))
+    item["type"] = "truth"
+    item["title"] = str(item.get("title", "Truth entry"))
     item["time"] = _coerce_timestamp(item.get("time"))
     certainty = item.get("certainty", 0.0)
     try:
@@ -223,10 +386,25 @@ def _normalize_trust_entry(raw: Any) -> dict:
         certainty = 0.0
     item["certainty"] = min(1.0, max(-1.0, certainty))
     item["content"] = ensure_xhtml(item.get("content", ""))
-    # Use typed ID generation based on content markers
-    if "<implication" in item.get("content", ""):
-        ensure_implication_id(item)
-    elif "<authority" in item.get("content", ""):
+
+    # Migrate legacy content to new XHTML spec
+    item["content"] = _migrate_legacy_content(item)
+
+    # Parse root attrs and sync envelope from content (content is canonical)
+    parsed = _parse_root_attrs(item["content"])
+    if parsed:
+        if parsed["id"]:
+            item["id"] = parsed["id"]
+        if parsed["certainty"] is not None:
+            item["certainty"] = min(1.0, max(-1.0, parsed["certainty"]))
+        if parsed["title"]:
+            item["title"] = parsed["title"]
+
+    # Ensure ID exists (fallback to generated UUID)
+    content = item["content"]
+    if _has_operator_tag(content):
+        ensure_operator_id(item)
+    elif "<authority" in content:
         ensure_authority_id(item)
     else:
         ensure_trust_id(item)
@@ -242,7 +420,7 @@ def _provider_sort_key(entry: dict) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# Provider / Src parsing
+# Provider parsing
 # ---------------------------------------------------------------------------
 ALLOWED_DATA_DIR = Path.home() / ".wikioracle" / "keys"
 
@@ -292,28 +470,6 @@ def parse_provider_block(content: str) -> dict | None:
     return result
 
 
-def parse_src_block(content: str) -> dict | None:
-    """Parse the first <src> XML block from trust-entry content."""
-    if not isinstance(content, str) or "<src" not in content:
-        return None
-    try:
-        root = ET.fromstring(f"<root>{content}</root>")
-    except ET.ParseError:
-        return None
-    src = root.find(".//src")
-    if src is None:
-        return None
-    def _text(tag, default=""):
-        """Read and strip child text from src XML nodes."""
-        el = src.find(tag)
-        return (el.text or "").strip() if el is not None else default
-    return {
-        "name": _text("name", "unknown"),
-        "path": _text("path"),
-        "format": _text("format", "text"),
-    }
-
-
 def get_provider_entries(trust_entries: list) -> list:
     """Extract and rank trust entries that contain valid <provider> blocks."""
     result = []
@@ -321,17 +477,6 @@ def get_provider_entries(trust_entries: list) -> list:
         prov = parse_provider_block(entry.get("content", ""))
         if prov is not None:
             result.append((entry, prov))
-    result.sort(key=lambda pair: _provider_sort_key(pair[0]))
-    return result
-
-
-def get_src_entries(trust_entries: list) -> list:
-    """Extract and rank trust entries that contain valid <src> blocks."""
-    result = []
-    for entry in trust_entries:
-        src = parse_src_block(entry.get("content", ""))
-        if src is not None:
-            result.append((entry, src))
     result.sort(key=lambda pair: _provider_sort_key(pair[0]))
     return result
 
@@ -363,72 +508,59 @@ def resolve_api_key(raw_key: str) -> str:
     return key_path.read_text(encoding="utf-8").strip()
 
 
-def resolve_src_content(src_config: dict) -> str:
-    """Load file-backed <src> content from allowlisted paths."""
-    path = src_config.get("path", "")
-    if not path:
-        return ""
-    if path.startswith("file://"):
-        rel_path = path[len("file://"):]
-        src_path = Path(rel_path).expanduser().resolve()
-        allowed = ALLOWED_DATA_DIR.resolve()
-        try:
-            src_path.relative_to(allowed)
-        except ValueError:
-            raise StateValidationError(f"Src path outside allowlist: {src_path}")
-        raw_path = Path(rel_path).expanduser()
-        if raw_path.is_symlink() or src_path.is_symlink():
-            raise StateValidationError(f"Src path is a symlink: {raw_path}")
-        if ".." in Path(rel_path).parts:
-            raise StateValidationError(f"Path traversal in src path: {rel_path}")
-        if not src_path.exists():
-            raise StateValidationError(f"Src file not found: {src_path}")
-        return src_path.read_text(encoding="utf-8")
-    return ""
-
-
 # ---------------------------------------------------------------------------
-# Implication parsing
+# Operator parsing (<and>, <or>, <not>, <non>)
 # ---------------------------------------------------------------------------
-def parse_implication_block(content: str) -> dict | None:
-    """Parse the first <implication> XML block from trust-entry content.
+_OPERATOR_TAGS = ("and", "or", "not", "non")
 
-    Returns { antecedent, consequent, type } where antecedent and consequent
-    are trust entry IDs and type is one of: material, strict, relevant.
+
+def parse_operator_block(content: str) -> dict | None:
+    """Parse the first <and>, <or>, <not>, or <non> operator block from trust-entry content.
+
+    Returns { operator: "and"|"or"|"not"|"non", refs: [id, ...] } or None.
+    - <and> and <or> require 2+ <child> elements.
+    - <not> and <non> require exactly 1 <child> element.
+    Each <child id="..."/> references an existing trust entry by ID.
+    Also supports legacy <ref>id</ref> format for backward compatibility.
     """
-    if not isinstance(content, str) or "<implication" not in content:
+    if not isinstance(content, str) or not _has_operator_tag(content):
         return None
     try:
         root = ET.fromstring(f"<root>{content}</root>")
     except ET.ParseError:
         return None
-    impl = root.find(".//implication")
-    if impl is None:
-        return None
-    def _text(tag, default=""):
-        el = impl.find(tag)
-        return (el.text or "").strip() if el is not None else default
-    antecedent = _text("antecedent")
-    consequent = _text("consequent")
-    if not antecedent or not consequent:
-        return None
-    impl_type = _text("type", "material")
-    if impl_type not in ("material", "strict", "relevant"):
-        impl_type = "material"
-    return {
-        "antecedent": antecedent,
-        "consequent": consequent,
-        "type": impl_type,
-    }
+    for tag in _OPERATOR_TAGS:
+        el = root.find(f".//{tag}")
+        if el is not None:
+            refs = []
+            # New format: <child id="..."/>
+            for child_el in el.findall("child"):
+                ref_id = (child_el.get("id") or "").strip()
+                if ref_id:
+                    refs.append(ref_id)
+            # Legacy fallback: <ref>id</ref>
+            if not refs:
+                for ref_el in el.findall("ref"):
+                    ref_id = (ref_el.text or "").strip()
+                    if ref_id:
+                        refs.append(ref_id)
+            if tag in ("not", "non"):
+                if len(refs) != 1:
+                    return None
+            else:
+                if len(refs) < 2:
+                    return None
+            return {"operator": tag, "refs": refs}
+    return None
 
 
-def get_implication_entries(trust_entries: list) -> list:
-    """Extract trust entries that contain valid <implication> blocks."""
+def get_operator_entries(trust_entries: list) -> list:
+    """Extract trust entries that contain valid operator blocks."""
     result = []
     for entry in trust_entries:
-        impl = parse_implication_block(entry.get("content", ""))
-        if impl is not None:
-            result.append((entry, impl))
+        op = parse_operator_block(entry.get("content", ""))
+        if op is not None:
+            result.append((entry, op))
     return result
 
 
@@ -507,7 +639,7 @@ def resolve_authority_entries(
     1. Check cache; if fresh, use cached entries
     2. Otherwise HTTP GET (or file:// read) the auth_config["url"]
     3. Parse each line as JSON
-    4. Extract trust entries (type="trust"), skip headers/conversations/authorities
+    4. Extract truth entries (type="truth"/"trust"), skip headers/conversations/authorities
     5. Scale each entry's certainty by the authority entry's certainty
     6. Prefix imported entry IDs: "{authority_id}:{original_id}"
 
@@ -555,7 +687,7 @@ def resolve_authority_entries(
             namespaced_id = f"{authority_id}:{remote_id}" if remote_id else authority_id
 
             scaled.append({
-                "type": "trust",
+                "type": "truth",
                 "id": namespaced_id,
                 "title": re_entry.get("title", "untitled"),
                 "certainty": scaled_certainty,
@@ -575,7 +707,7 @@ def _fetch_authority_jsonl(
 ) -> list:
     """Fetch and parse a JSONL file from a URL or file:// path.
 
-    Returns a list of trust entry dicts (type="trust" only).
+    Returns a list of truth entry dicts (type="truth"/"trust" accepted).
     On any error, logs a warning and returns [].
     """
     import json as _json
@@ -614,7 +746,7 @@ def _fetch_authority_jsonl(
                 rec = _json.loads(line)
             except _json.JSONDecodeError:
                 continue
-            if isinstance(rec, dict) and rec.get("type") == "trust":
+            if isinstance(rec, dict) and rec.get("type") in ("truth", "trust"):
                 entries.append(rec)
 
     except Exception as exc:
@@ -625,20 +757,51 @@ def _fetch_authority_jsonl(
 
 
 # ---------------------------------------------------------------------------
-# Derived truth: Kleene implication engine
+# Derived truth: Strong Kleene operator engine
 # ---------------------------------------------------------------------------
+def _eval_operator(op: dict, certainty: dict) -> float | None:
+    """Evaluate a single operator given the current certainty table.
+
+    Strong Kleene semantics on [-1, +1]:
+      and(a, b, ...) = min(a, b, ...)
+      or(a, b, ...)  = max(a, b, ...)
+      not(a)         = -a
+      non(a)         = sign(a) * (1 - |a|)   (non-affirming negation)
+    Returns None if any referenced ID is missing from the certainty table.
+    """
+    refs = op["refs"]
+    values = []
+    for ref_id in refs:
+        if ref_id not in certainty:
+            return None
+        values.append(certainty[ref_id])
+    operator = op["operator"]
+    if operator == "and":
+        return min(values)
+    elif operator == "or":
+        return max(values)
+    elif operator == "not":
+        return -values[0]
+    elif operator == "non":
+        x = values[0]
+        if x == 0.0:
+            return 0.0
+        return (1.0 if x > 0 else -1.0) * (1.0 - abs(x))
+    return None
+
+
 def compute_derived_truth(trust_entries: list) -> dict:
-    """Evaluate all implication entries and return a derived truth table.
+    """Evaluate all operator entries and return a derived truth table.
 
     Returns: { entry_id: derived_certainty } for ALL entries (including those
     unchanged), suitable for overlaying onto the trust table during RAG ranking.
 
-    Uses Strong Kleene material implication on the [-1,+1] certainty scale:
-      negation:    not(A) = -A
-      disjunction: A or B = max(A, B)
-      implication: A -> B = max(-A, B)   (i.e. not-A or B)
+    Uses Strong Kleene logic on the [-1,+1] certainty scale:
+      and(A, B, ...) = min(A, B, ...)
+      or(A, B, ...)  = max(A, B, ...)
+      not(A)         = -A
 
-    Iterates to fixed point (implications can chain). Max 100 iterations.
+    Iterates to fixed point (operators can chain). Max 100 iterations.
     """
     # Build certainty lookup from static values
     certainty = {}
@@ -647,40 +810,31 @@ def compute_derived_truth(trust_entries: list) -> dict:
         if eid:
             certainty[eid] = entry.get("certainty", 0.0)
 
-    # Extract implications
-    implications = []
+    # Extract operators and map each to its parent entry ID
+    operators = []
     for entry in trust_entries:
-        impl = parse_implication_block(entry.get("content", ""))
-        if impl is not None:
-            implications.append(impl)
+        op = parse_operator_block(entry.get("content", ""))
+        if op is not None:
+            operators.append((entry.get("id", ""), op))
 
-    if not implications:
+    if not operators:
         return certainty
 
-    # Only entries that start at 0.0 (ignorance) are derivable.
-    # Entries with explicit positive or negative certainty are ground truth
-    # and should not be overridden by implication chains.
-    derivable = {eid for eid, c in certainty.items() if c == 0.0}
-
-    # Fixed-point iteration
+    # Fixed-point iteration: operator entries derive their own certainty
+    # from their referenced operands.
     for _ in range(100):
         changed = False
-        for impl in implications:
-            ant_id = impl["antecedent"]
-            con_id = impl["consequent"]
-            if con_id not in derivable:
-                continue  # Don't override explicit certainty
-            ant_c = certainty.get(ant_id, 0.0)
-            con_c = certainty.get(con_id, 0.0)
-
-            # Modus ponens: if antecedent is believed (positive), the
-            # consequent's derived certainty is raised to match.
-            # Only applies to derivable entries (initial certainty 0.0).
-            if ant_c > 0 and con_id in certainty:
-                new_con = max(con_c, ant_c)
-                if abs(new_con - con_c) > 1e-9:
-                    certainty[con_id] = new_con
-                    changed = True
+        for entry_id, op in operators:
+            if not entry_id or entry_id not in certainty:
+                continue
+            result = _eval_operator(op, certainty)
+            if result is None:
+                continue
+            result = min(1.0, max(-1.0, result))
+            old = certainty[entry_id]
+            if abs(result - old) > 1e-9:
+                certainty[entry_id] = result
+                changed = True
 
         if not changed:
             break

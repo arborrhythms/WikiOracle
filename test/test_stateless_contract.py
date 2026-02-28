@@ -37,7 +37,7 @@ def _make_state(**overrides):
         "context": "<div>Test</div>",
         "conversations": [],
         "selected_conversation": None,
-        "truth": {"trust": []},
+        "truth": [],
     }
     base.update(overrides)
     return base
@@ -49,7 +49,6 @@ def _make_runtime_config(**overrides):
         "user": {"name": "TestUser"},
         "chat": {
             "temperature": 0.7,
-            "message_window": 40,
             "rag": True,
             "url_fetch": False,
         },

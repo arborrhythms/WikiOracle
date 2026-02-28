@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for the derived truth engine (compute_derived_truth).
 
-Tests Strong Kleene material implication, fixed-point iteration,
+Tests Strong Kleene operators (and/or/not/non), fixed-point iteration,
 cycle termination, and integration with hme.jsonl test data.
 """
 
@@ -14,202 +14,311 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 from truth import (
     compute_derived_truth,
-    ensure_implication_id,
-    parse_implication_block,
+    ensure_operator_id,
+    parse_operator_block,
 )
 
 
-def _make_trust(id, certainty, content="<p>test</p>", title=""):
-    return {"type": "trust", "id": id, "certainty": certainty, "content": content, "title": title}
+def _make_trust(id, certainty, content=None, title=""):
+    if content is None:
+        content = f'<fact id="{id}" certainty="{certainty}" title="{title}">test</fact>'
+    return {"type": "truth", "id": id, "certainty": certainty, "content": content, "title": title}
 
 
-def _make_impl(ant, con, impl_type="material"):
-    content = f"<implication><antecedent>{ant}</antecedent><consequent>{con}</consequent><type>{impl_type}</type></implication>"
-    return {"type": "trust", "id": f"i_test_{ant}_{con}", "certainty": 0.0, "content": content, "title": f"{ant} -> {con}"}
+def _make_and(entry_id, refs, certainty=0.0):
+    title = f"and({', '.join(refs)})"
+    child_xml = "".join(f'<child id="{r}"/>' for r in refs)
+    content = f'<and id="{entry_id}" certainty="{certainty}" title="{title}">{child_xml}</and>'
+    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
 
 
-# ─── parse_implication_block tests ───
+def _make_or(entry_id, refs, certainty=0.0):
+    title = f"or({', '.join(refs)})"
+    child_xml = "".join(f'<child id="{r}"/>' for r in refs)
+    content = f'<or id="{entry_id}" certainty="{certainty}" title="{title}">{child_xml}</or>'
+    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
 
 
-def test_parse_implication_block_basic():
-    content = "<implication><antecedent>t_a</antecedent><consequent>t_b</consequent><type>material</type></implication>"
-    result = parse_implication_block(content)
+def _make_not(entry_id, ref, certainty=0.0):
+    title = f"not({ref})"
+    content = f'<not id="{entry_id}" certainty="{certainty}" title="{title}"><child id="{ref}"/></not>'
+    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
+
+
+def _make_non(entry_id, ref, certainty=0.0):
+    title = f"non({ref})"
+    content = f'<non id="{entry_id}" certainty="{certainty}" title="{title}"><child id="{ref}"/></non>'
+    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
+
+
+# ─── parse_operator_block tests ───
+
+
+def test_parse_operator_block_and():
+    content = '<and id="op" certainty="0.0"><child id="a"/><child id="b"/></and>'
+    result = parse_operator_block(content)
     assert result is not None
-    assert result["antecedent"] == "t_a"
-    assert result["consequent"] == "t_b"
-    assert result["type"] == "material"
+    assert result["operator"] == "and"
+    assert result["refs"] == ["a", "b"]
 
 
-def test_parse_implication_block_default_type():
-    content = "<implication><antecedent>t_a</antecedent><consequent>t_b</consequent></implication>"
-    result = parse_implication_block(content)
+def test_parse_operator_block_or():
+    content = '<or id="op" certainty="0.0"><child id="x"/><child id="y"/><child id="z"/></or>'
+    result = parse_operator_block(content)
     assert result is not None
-    assert result["type"] == "material"
+    assert result["operator"] == "or"
+    assert result["refs"] == ["x", "y", "z"]
 
 
-def test_parse_implication_block_not_implication():
-    assert parse_implication_block("<p>Just a fact.</p>") is None
-    assert parse_implication_block("") is None
-    assert parse_implication_block("<provider name='x' />") is None
+def test_parse_operator_block_not():
+    content = '<not id="op" certainty="0.0"><child id="a"/></not>'
+    result = parse_operator_block(content)
+    assert result is not None
+    assert result["operator"] == "not"
+    assert result["refs"] == ["a"]
 
 
-# ─── ensure_implication_id tests ───
+def test_parse_operator_block_non():
+    content = '<non id="op" certainty="0.0"><child id="a"/></non>'
+    result = parse_operator_block(content)
+    assert result is not None
+    assert result["operator"] == "non"
+    assert result["refs"] == ["a"]
 
 
-def test_ensure_implication_id_preserves_existing():
-    entry = {"id": "i_existing_01", "content": "<implication><antecedent>a</antecedent><consequent>b</consequent></implication>"}
-    assert ensure_implication_id(entry) == "i_existing_01"
+def test_parse_operator_block_non_rejects_multiple():
+    """NON with more than 1 child should return None."""
+    content = '<non id="op" certainty="0.0"><child id="a"/><child id="b"/></non>'
+    assert parse_operator_block(content) is None
 
 
-def test_ensure_implication_id_generates():
-    entry = {"content": "<implication><antecedent>t_a</antecedent><consequent>t_b</consequent><type>material</type></implication>"}
-    iid = ensure_implication_id(entry)
+def test_parse_operator_block_not_rejects_multiple():
+    """NOT with more than 1 child should return None."""
+    content = '<not id="op" certainty="0.0"><child id="a"/><child id="b"/></not>'
+    assert parse_operator_block(content) is None
+
+
+def test_parse_operator_block_and_rejects_single():
+    """AND with fewer than 2 children should return None."""
+    content = '<and id="op" certainty="0.0"><child id="a"/></and>'
+    assert parse_operator_block(content) is None
+
+
+def test_parse_operator_block_not_operator():
+    assert parse_operator_block('<fact id="x" certainty="1.0">Just a fact.</fact>') is None
+    assert parse_operator_block("") is None
+    assert parse_operator_block("<provider name='x' />") is None
+
+
+def test_parse_operator_block_legacy_ref():
+    """Legacy <ref>text</ref> format should still be parsed."""
+    content = "<and><ref>a</ref><ref>b</ref></and>"
+    result = parse_operator_block(content)
+    assert result is not None
+    assert result["operator"] == "and"
+    assert result["refs"] == ["a", "b"]
+
+
+# ─── ensure_operator_id tests ───
+
+
+def test_ensure_operator_id_preserves_existing():
+    entry = {"id": "existing_01", "content": '<and id="existing_01" certainty="0.0"><child id="a"/><child id="b"/></and>'}
+    assert ensure_operator_id(entry) == "existing_01"
+
+
+def test_ensure_operator_id_generates():
+    entry = {"content": '<and certainty="0.0"><child id="a"/><child id="b"/></and>'}
+    oid = ensure_operator_id(entry)
     # Generated IDs are deterministic UUIDs (36 chars with dashes).
-    assert len(iid) == 36 and iid.count("-") == 4
-    assert entry["id"] == iid
+    assert len(oid) == 36 and oid.count("-") == 4
+    assert entry["id"] == oid
 
 
-# ─── compute_derived_truth: basic modus ponens ───
+# ─── compute_derived_truth: AND (min) ───
 
 
-def test_basic_modus_ponens():
-    """If A is true and A→B exists, B should become true."""
+def test_and_min():
+    """AND should derive min of operands."""
     entries = [
-        _make_trust("t_a", 1.0),
-        _make_trust("t_b", 0.0),
-        _make_impl("t_a", "t_b"),
+        _make_trust("a", 1.0),
+        _make_trust("b", 0.7),
+        _make_and("op", ["a", "b"]),
     ]
     derived = compute_derived_truth(entries)
-    assert derived["t_b"] == 1.0, f"Expected t_b=1.0, got {derived['t_b']}"
+    assert abs(derived["op"] - 0.7) < 1e-9, f"Expected op=0.7, got {derived['op']}"
 
 
-def test_modus_ponens_soft_antecedent():
-    """Soft antecedent (0.7) should raise consequent to 0.7."""
+def test_and_with_negative():
+    """AND with a negative operand should yield the minimum."""
     entries = [
-        _make_trust("t_a", 0.7),
-        _make_trust("t_b", 0.0),
-        _make_impl("t_a", "t_b"),
+        _make_trust("a", 1.0),
+        _make_trust("b", -0.5),
+        _make_and("op", ["a", "b"]),
     ]
     derived = compute_derived_truth(entries)
-    assert abs(derived["t_b"] - 0.7) < 1e-9, f"Expected t_b=0.7, got {derived['t_b']}"
+    assert abs(derived["op"] - (-0.5)) < 1e-9
 
 
-def test_negative_antecedent_no_propagation():
-    """Disbelieved antecedent should not modify consequent."""
+# ─── compute_derived_truth: OR (max) ───
+
+
+def test_or_max():
+    """OR should derive max of operands."""
     entries = [
-        _make_trust("t_a", -0.8),
-        _make_trust("t_b", 0.0),
-        _make_impl("t_a", "t_b"),
+        _make_trust("a", 0.3),
+        _make_trust("b", 0.8),
+        _make_or("op", ["a", "b"]),
     ]
     derived = compute_derived_truth(entries)
-    assert derived["t_b"] == 0.0, f"Expected t_b=0.0, got {derived['t_b']}"
+    assert abs(derived["op"] - 0.8) < 1e-9
 
 
-def test_zero_antecedent_no_propagation():
-    """Unknown antecedent (0) should not modify consequent."""
+def test_or_with_negative():
+    """OR with all negative operands should yield the least negative."""
     entries = [
-        _make_trust("t_a", 0.0),
-        _make_trust("t_b", 0.0),
-        _make_impl("t_a", "t_b"),
+        _make_trust("a", -0.9),
+        _make_trust("b", -0.3),
+        _make_or("op", ["a", "b"]),
     ]
     derived = compute_derived_truth(entries)
-    assert derived["t_b"] == 0.0
+    assert abs(derived["op"] - (-0.3)) < 1e-9
 
 
-def test_consequent_already_higher():
-    """If consequent is already higher than antecedent, no change."""
+# ─── compute_derived_truth: NOT (negate) ───
+
+
+def test_not_negate():
+    """NOT should negate the operand."""
     entries = [
-        _make_trust("t_a", 0.5),
-        _make_trust("t_b", 0.9),
-        _make_impl("t_a", "t_b"),
+        _make_trust("a", 0.8),
+        _make_not("op", "a"),
     ]
     derived = compute_derived_truth(entries)
-    assert derived["t_b"] == 0.9
+    assert abs(derived["op"] - (-0.8)) < 1e-9
 
 
-# ─── Fixed-point iteration (chains) ───
-
-
-def test_chain_propagation():
-    """A→B→C should propagate through two iterations."""
+def test_not_double_negation():
+    """NOT(NOT(a)) should equal a."""
     entries = [
-        _make_trust("t_a", 1.0),
-        _make_trust("t_b", 0.0),
-        _make_trust("t_c", 0.0),
-        _make_impl("t_a", "t_b"),
-        _make_impl("t_b", "t_c"),
+        _make_trust("a", 0.6),
+        _make_not("op1", "a"),
+        _make_not("op2", "op1"),
     ]
     derived = compute_derived_truth(entries)
-    assert derived["t_b"] == 1.0
-    assert derived["t_c"] == 1.0
+    assert abs(derived["op2"] - 0.6) < 1e-9
 
 
-def test_long_chain():
-    """A→B→C→D→E should propagate through four iterations."""
-    entries = [_make_trust("t_a", 1.0)]
-    for label in ["t_b", "t_c", "t_d", "t_e"]:
-        entries.append(_make_trust(label, 0.0))
-    entries.append(_make_impl("t_a", "t_b"))
-    entries.append(_make_impl("t_b", "t_c"))
-    entries.append(_make_impl("t_c", "t_d"))
-    entries.append(_make_impl("t_d", "t_e"))
+# ─── NON (non-affirming negation) ───
 
+
+def test_non_positive():
+    """NON of positive certainty: sign(0.8)*(1-0.8) = 0.2"""
+    entries = [
+        _make_trust("a", 0.8),
+        _make_non("op", "a"),
+    ]
     derived = compute_derived_truth(entries)
-    for label in ["t_b", "t_c", "t_d", "t_e"]:
-        assert derived[label] == 1.0, f"Expected {label}=1.0, got {derived[label]}"
+    assert abs(derived["op"] - 0.2) < 1e-9
+
+
+def test_non_negative():
+    """NON of negative certainty: sign(-0.9)*(1-0.9) = -0.1"""
+    entries = [
+        _make_trust("a", -0.9),
+        _make_non("op", "a"),
+    ]
+    derived = compute_derived_truth(entries)
+    assert abs(derived["op"] - (-0.1)) < 1e-9
+
+
+def test_non_zero():
+    """NON of zero certainty should be zero."""
+    entries = [
+        _make_trust("a", 0.0),
+        _make_non("op", "a"),
+    ]
+    derived = compute_derived_truth(entries)
+    assert abs(derived["op"] - 0.0) < 1e-9
+
+
+def test_non_full_belief():
+    """NON of +1.0 should be 0.0 (fully believed → no residual doubt)."""
+    entries = [
+        _make_trust("a", 1.0),
+        _make_non("op", "a"),
+    ]
+    derived = compute_derived_truth(entries)
+    assert abs(derived["op"] - 0.0) < 1e-9
+
+
+def test_non_full_disbelief():
+    """NON of -1.0 should be -0.0 (magnitude 0, sign negative)."""
+    entries = [
+        _make_trust("a", -1.0),
+        _make_non("op", "a"),
+    ]
+    derived = compute_derived_truth(entries)
+    assert abs(derived["op"]) < 1e-9
+
+
+# ─── Chaining ───
+
+
+def test_chain_and_or():
+    """AND feeding into OR should propagate through fixed-point iteration."""
+    entries = [
+        _make_trust("a", 1.0),
+        _make_trust("b", 0.5),
+        _make_trust("c", -0.3),
+        _make_and("op_and", ["a", "b"]),  # min(1.0, 0.5) = 0.5
+        _make_or("op_or", ["op_and", "c"]),  # max(0.5, -0.3) = 0.5
+    ]
+    derived = compute_derived_truth(entries)
+    assert abs(derived["op_and"] - 0.5) < 1e-9
+    assert abs(derived["op_or"] - 0.5) < 1e-9
 
 
 # ─── Cycle termination ───
 
 
 def test_cycle_terminates():
-    """A→B, B→A should not cause infinite loop."""
+    """Operators referencing each other should converge, not loop."""
+    # op1 = and(a, op2), op2 = or(b, op1)
+    # With a=1.0, b=0.5, initial op1=0, op2=0:
+    # Iter 1: op1 = min(1.0, 0.0) = 0.0;  op2 = max(0.5, 0.0) = 0.5
+    # Iter 2: op1 = min(1.0, 0.5) = 0.5;  op2 = max(0.5, 0.5) = 0.5
+    # Iter 3: op1 = min(1.0, 0.5) = 0.5;  op2 = max(0.5, 0.5) = 0.5  → stable
     entries = [
-        _make_trust("t_a", 0.5),
-        _make_trust("t_b", 0.3),
-        _make_impl("t_a", "t_b"),
-        _make_impl("t_b", "t_a"),
+        _make_trust("a", 1.0),
+        _make_trust("b", 0.5),
+        _make_and("op1", ["a", "op2"]),
+        _make_or("op2", ["b", "op1"]),
     ]
     derived = compute_derived_truth(entries)
-    # Neither is derivable (both have non-zero initial certainty),
-    # so both should remain unchanged. The engine only modifies
-    # entries that start at 0.0 (ignorance).
-    assert derived["t_a"] == 0.5
-    assert derived["t_b"] == 0.3
+    assert abs(derived["op1"] - 0.5) < 1e-9
+    assert abs(derived["op2"] - 0.5) < 1e-9
 
 
-def test_cycle_both_zero():
-    """Cycle with both at 0 should stay at 0."""
+# ─── No operators ───
+
+
+def test_no_operators():
+    """Without operator entries, certainties pass through unchanged."""
     entries = [
-        _make_trust("t_a", 0.0),
-        _make_trust("t_b", 0.0),
-        _make_impl("t_a", "t_b"),
-        _make_impl("t_b", "t_a"),
+        _make_trust("a", 0.8),
+        _make_trust("b", -0.5),
     ]
     derived = compute_derived_truth(entries)
-    assert derived["t_a"] == 0.0
-    assert derived["t_b"] == 0.0
-
-
-# ─── No implications ───
-
-
-def test_no_implications():
-    """Without implication entries, certainties pass through unchanged."""
-    entries = [
-        _make_trust("t_a", 0.8),
-        _make_trust("t_b", -0.5),
-    ]
-    derived = compute_derived_truth(entries)
-    assert derived["t_a"] == 0.8
-    assert derived["t_b"] == -0.5
+    assert derived["a"] == 0.8
+    assert derived["b"] == -0.5
 
 
 # ─── Integration with hme.jsonl ───
 
 
-def test_hme_jsonl_syllogisms():
-    """Load spec/hme.jsonl and verify derived truth for syllogisms."""
+def test_hme_jsonl_operators():
+    """Load spec/hme.jsonl and verify derived truth for operator entries."""
     hme_path = os.path.join(os.path.dirname(__file__), "..", "spec", "hme.jsonl")
     if not os.path.exists(hme_path):
         return  # skip if file not present
@@ -220,22 +329,30 @@ def test_hme_jsonl_syllogisms():
             line = line.strip()
             if line:
                 rec = json.loads(line)
-                if rec.get("type") == "trust":
+                if rec.get("type") in ("truth", "trust"):
                     entries.append(rec)
 
     derived = compute_derived_truth(entries)
 
-    # t_derived_01 (Socrates is mortal): stored=0.0, should derive to 1.0
-    assert derived.get("t_derived_01") == 1.0, \
-        f"Socrates syllogism failed: got {derived.get('t_derived_01')}"
+    # op_socrates_mortal: and(axiom_01=1.0, axiom_02=1.0) → min = 1.0
+    assert derived.get("op_socrates_mortal") == 1.0, \
+        f"Socrates operator failed: got {derived.get('op_socrates_mortal')}"
 
-    # t_derived_02 (Whales are warm-blooded): stored=0.0, should derive to 1.0
-    assert derived.get("t_derived_02") == 1.0, \
-        f"Whales syllogism failed: got {derived.get('t_derived_02')}"
+    # op_whales_warm: and(axiom_03=1.0, axiom_04=1.0) → min = 1.0
+    assert derived.get("op_whales_warm") == 1.0, \
+        f"Whales operator failed: got {derived.get('op_whales_warm')}"
+
+    # op_penguin_flight: and(soft_01=0.8, axiom_05=1.0) → min = 0.8
+    assert abs(derived.get("op_penguin_flight") - 0.8) < 1e-9, \
+        f"Penguin flight AND failed: got {derived.get('op_penguin_flight')}"
+
+    # op_not_penguin_fly: not(false_01=-0.9) → 0.9
+    assert abs(derived.get("op_not_penguin_fly") - 0.9) < 1e-9, \
+        f"Penguin NOT failed: got {derived.get('op_not_penguin_fly')}"
 
     # Axioms should remain unchanged
-    assert derived.get("t_axiom_01") == 1.0
-    assert derived.get("t_axiom_02") == 1.0
+    assert derived.get("axiom_01") == 1.0
+    assert derived.get("axiom_02") == 1.0
 
 
 if __name__ == "__main__":

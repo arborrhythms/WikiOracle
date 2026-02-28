@@ -13,9 +13,9 @@ from response import (
     ProviderBundle,
     Source,
     _build_provider_query_bundle,
-    build_prompt_bundle,
+    build_query,
     evaluate_providers,
-    rank_retrieval_entries,
+    static_truth,
     to_anthropic_payload,
     to_nanochat_messages,
     to_openai_messages,
@@ -31,17 +31,18 @@ def _make_state(**overrides):
         "context": "<div>You are a helpful assistant.</div>",
         "conversations": [],
         "selected_conversation": None,
-        "truth": {"trust": []},
+        "truth": [],
     }
     base.update(overrides)
     return base
 
 
 def _make_trust_entry(title, certainty, content="Some fact", entry_id="", time=""):
+    eid = entry_id or "auto"
     entry = {
         "title": title,
         "certainty": certainty,
-        "content": f"<p>{content}</p>",
+        "content": f'<fact id="{eid}" certainty="{certainty}" title="{title}">{content}</fact>',
     }
     if entry_id:
         entry["id"] = entry_id
@@ -54,11 +55,11 @@ def _make_trust_entry(title, certainty, content="Some fact", entry_id="", time="
 # ProviderBundle construction
 # ---------------------------------------------------------------------------
 class TestBuildProviderBundle(unittest.TestCase):
-    """Test build_prompt_bundle() produces correct bundles."""
+    """Test build_query() produces correct bundles."""
 
     def test_basic_bundle(self):
         state = _make_state()
-        bundle = build_prompt_bundle(state, "Hello!", {})
+        bundle = build_query(state, "Hello!", {})
         self.assertIsInstance(bundle, ProviderBundle)
         self.assertEqual(bundle.query, "Hello!")
         # System now includes mandatory XHTML instruction
@@ -70,7 +71,7 @@ class TestBuildProviderBundle(unittest.TestCase):
 
     def test_empty_context(self):
         state = _make_state(context="")
-        bundle = build_prompt_bundle(state, "Hi", {})
+        bundle = build_query(state, "Hi", {})
         # Even with empty context, XHTML instruction is present
         self.assertIn("XHTML", bundle.system)
 
@@ -79,30 +80,30 @@ class TestBuildProviderBundle(unittest.TestCase):
             _make_trust_entry("Doc A", 0.9, "Fact A", "t1"),
             _make_trust_entry("Doc B", 0.5, "Fact B", "t2"),
         ]
-        state = _make_state(truth={"trust": trust})
-        bundle = build_prompt_bundle(state, "query", {"tools": {"rag": True}})
+        state = _make_state(truth=trust)
+        bundle = build_query(state, "query", {"chat": {"rag": True}})
         self.assertEqual(len(bundle.sources), 2)
         self.assertEqual(bundle.sources[0].title, "Doc A")
         self.assertGreaterEqual(bundle.sources[0].certainty, bundle.sources[1].certainty)
 
     def test_rag_disabled(self):
         trust = [_make_trust_entry("Doc", 0.9)]
-        state = _make_state(truth={"trust": trust})
-        bundle = build_prompt_bundle(state, "q", {"tools": {"rag": False}})
+        state = _make_state(truth=trust)
+        bundle = build_query(state, "q", {"chat": {"rag": False}})
         self.assertEqual(len(bundle.sources), 0)
 
-    def test_min_certainty_filter(self):
+    def test_all_entries_included(self):
+        """All fact entries are included regardless of certainty."""
         trust = [
             _make_trust_entry("High", 0.9, entry_id="t1"),
             _make_trust_entry("Low", 0.3, entry_id="t2"),
         ]
-        state = _make_state(truth={"trust": trust})
-        bundle = build_prompt_bundle(state, "q", {"tools": {"rag": True}, "retrieval": {"min_certainty": 0.5}})
-        self.assertEqual(len(bundle.sources), 1)
-        self.assertEqual(bundle.sources[0].title, "High")
+        state = _make_state(truth=trust)
+        bundle = build_query(state, "q", {"chat": {"rag": True}})
+        self.assertEqual(len(bundle.sources), 2)
 
-    def test_history_windowing(self):
-        """History should be limited to message_window."""
+    def test_full_history_sent(self):
+        """All conversation history should be sent (no windowing)."""
         convs = [{
             "id": "c1",
             "title": "Test",
@@ -113,63 +114,71 @@ class TestBuildProviderBundle(unittest.TestCase):
             "children": [],
         }]
         state = _make_state(conversations=convs)
-        bundle = build_prompt_bundle(
-            state, "new query", {"message_window": 10},
+        bundle = build_query(
+            state, "new query", {},
             conversation_id="c1",
         )
-        self.assertEqual(len(bundle.history), 10)
+        self.assertEqual(len(bundle.history), 50)
 
     def test_transient_snippets(self):
         state = _make_state()
         snippets = [{"source": "GPT-4", "certainty": 0.8, "content": "Some answer"}]
-        bundle = build_prompt_bundle(state, "q", {}, transient_snippets=snippets)
+        bundle = build_query(state, "q", {}, transient_snippets=snippets)
         self.assertEqual(len(bundle.transient_sources), 1)
         self.assertEqual(bundle.transient_sources[0].title, "GPT-4")
 
-    def test_provider_entries_excluded_from_sources(self):
-        """Trust entries with <provider> blocks should NOT appear in sources."""
+    def test_all_entry_types_included_in_sources(self):
+        """When rag=True, ALL state.truth entries appear in sources."""
         trust = [
             _make_trust_entry("Normal", 0.9, "Normal fact", "t1"),
             {"title": "LLM Provider", "certainty": 0.95, "id": "t2",
              "content": "<provider><name>GPT-4</name><api_url>https://api.openai.com</api_url></provider>"},
+            {"title": "Op", "certainty": 0.8, "id": "t3",
+             "content": '<and id="t3" certainty="0.8"><child id="t1"/></and>'},
+            {"title": "Auth", "certainty": 0.7, "id": "t4",
+             "content": '<authority url="http://example.com/state"/>'},
         ]
-        state = _make_state(truth={"trust": trust})
-        bundle = build_prompt_bundle(state, "q", {"tools": {"rag": True}})
+        state = _make_state(truth=trust)
+        bundle = build_query(state, "q", {"chat": {"rag": True}})
         titles = [s.title for s in bundle.sources]
         self.assertIn("Normal", titles)
-        self.assertNotIn("LLM Provider", titles)
+        self.assertIn("LLM Provider", titles)
+        self.assertIn("Op", titles)
+        self.assertIn("Auth", titles)
+        kinds = {s.kind for s in bundle.sources}
+        self.assertEqual(kinds, {"fact", "provider", "operator", "authority"})
+
+    def test_no_entries_when_rag_false(self):
+        """When rag=False, NO state.truth entries appear in sources."""
+        trust = [
+            _make_trust_entry("Normal", 0.9, "Normal fact", "t1"),
+            {"title": "LLM Provider", "certainty": 0.95, "id": "t2",
+             "content": "<provider><name>GPT-4</name></provider>"},
+        ]
+        state = _make_state(truth=trust)
+        bundle = build_query(state, "q", {"chat": {"rag": False}})
+        self.assertEqual(len(bundle.sources), 0)
 
 
 # ---------------------------------------------------------------------------
-# RAG ranking
+# static_truth — filtering
 # ---------------------------------------------------------------------------
-class TestRankRetrievalEntries(unittest.TestCase):
-    """Test rank_retrieval_entries with different weights."""
+class TestStaticTruth(unittest.TestCase):
+    """Test static_truth extracts only facts and references."""
 
-    def test_ranked_by_certainty(self):
+    def test_facts_returned(self):
         entries = [
             _make_trust_entry("Low", 0.3, entry_id="e1"),
             _make_trust_entry("High", 0.9, entry_id="e2"),
             _make_trust_entry("Mid", 0.6, entry_id="e3"),
         ]
-        ranked = rank_retrieval_entries(entries, {})
-        self.assertEqual(ranked[0]["title"], "High")
-        self.assertEqual(ranked[1]["title"], "Mid")
-        self.assertEqual(ranked[2]["title"], "Low")
+        st = static_truth(entries)
+        self.assertEqual(len(st), 3)
 
-    def test_max_entries_limit(self):
+    def test_all_entries_returned(self):
         entries = [_make_trust_entry(f"E{i}", 0.5 + i * 0.01, entry_id=f"e{i}") for i in range(20)]
-        ranked = rank_retrieval_entries(entries, {"max_entries": 5})
-        self.assertEqual(len(ranked), 5)
-
-    def test_min_certainty(self):
-        entries = [
-            _make_trust_entry("Keep", 0.8, entry_id="e1"),
-            _make_trust_entry("Drop", 0.2, entry_id="e2"),
-        ]
-        ranked = rank_retrieval_entries(entries, {"min_certainty": 0.5})
-        self.assertEqual(len(ranked), 1)
-        self.assertEqual(ranked[0]["title"], "Keep")
+        st = static_truth(entries)
+        self.assertEqual(len(st), 20)
 
     def test_excludes_providers(self):
         entries = [
@@ -177,50 +186,56 @@ class TestRankRetrievalEntries(unittest.TestCase):
             {"title": "Provider", "certainty": 0.95, "id": "e2",
              "content": "<provider><name>X</name></provider>"},
         ]
-        ranked = rank_retrieval_entries(entries, {}, exclude_providers=True)
-        self.assertEqual(len(ranked), 1)
-        self.assertEqual(ranked[0]["title"], "Fact")
+        st = static_truth(entries)
+        self.assertEqual(len(st), 1)
+        self.assertEqual(st[0]["title"], "Fact")
 
-    def test_excludes_srcs(self):
+    def test_excludes_operators(self):
         entries = [
             _make_trust_entry("Fact", 0.9, "plain", "e1"),
-            {"title": "File", "certainty": 0.95, "id": "e2",
-             "content": "<src><path>file://test.txt</path></src>"},
+            {"title": "Op", "certainty": 0.95, "id": "e2",
+             "content": '<and id="e2" certainty="0.95"><child id="e1"/><child id="e1"/></and>'},
         ]
-        ranked = rank_retrieval_entries(entries, {}, exclude_srcs=True)
-        self.assertEqual(len(ranked), 1)
+        st = static_truth(entries)
+        self.assertEqual(len(st), 1)
 
-    def test_deterministic_tiebreaking(self):
-        """Entries with the same certainty should have deterministic ordering."""
+    def test_excludes_authorities(self):
         entries = [
-            _make_trust_entry("A", 0.8, entry_id="e_a", time="2026-01-02T00:00:00Z"),
-            _make_trust_entry("B", 0.8, entry_id="e_b", time="2026-01-01T00:00:00Z"),
+            _make_trust_entry("Fact", 0.9, "plain", "e1"),
+            {"title": "Auth", "certainty": 0.8, "id": "e2",
+             "content": '<authority url="http://example.com/state"/>'},
         ]
-        ranked1 = rank_retrieval_entries(entries, {})
-        ranked2 = rank_retrieval_entries(entries, {})
-        self.assertEqual([r["title"] for r in ranked1], [r["title"] for r in ranked2])
+        st = static_truth(entries)
+        self.assertEqual(len(st), 1)
+        self.assertEqual(st[0]["title"], "Fact")
 
-    def test_negative_certainty_ranked_by_abs(self):
-        """Negative certainty (disbelief) should rank by |certainty|."""
+    def test_preserves_insertion_order(self):
+        """static_truth preserves the original insertion order."""
         entries = [
-            _make_trust_entry("Weak belief", 0.3, entry_id="e1"),
-            _make_trust_entry("Strong disbelief", -0.9, entry_id="e2"),
-            _make_trust_entry("Moderate belief", 0.6, entry_id="e3"),
+            _make_trust_entry("A", 0.3, entry_id="e_a"),
+            _make_trust_entry("B", 0.9, entry_id="e_b"),
+            _make_trust_entry("C", 0.6, entry_id="e_c"),
         ]
-        ranked = rank_retrieval_entries(entries, {})
-        self.assertEqual(ranked[0]["title"], "Strong disbelief")
-        self.assertEqual(ranked[1]["title"], "Moderate belief")
-        self.assertEqual(ranked[2]["title"], "Weak belief")
+        st = static_truth(entries)
+        self.assertEqual([e["title"] for e in st], ["A", "B", "C"])
 
-    def test_zero_certainty_filtered(self):
-        """Certainty=0 (ignorance) should be filtered by any positive min_certainty."""
+    def test_negative_certainty_included(self):
+        """Negative certainty (disbelief) entries are included."""
+        entries = [
+            _make_trust_entry("Belief", 0.3, entry_id="e1"),
+            _make_trust_entry("Disbelief", -0.9, entry_id="e2"),
+        ]
+        st = static_truth(entries)
+        self.assertEqual(len(st), 2)
+
+    def test_zero_certainty_included(self):
+        """Certainty=0 (ignorance) entries are still included."""
         entries = [
             _make_trust_entry("Known", 0.8, entry_id="e1"),
             _make_trust_entry("Unknown", 0.0, entry_id="e2"),
         ]
-        ranked = rank_retrieval_entries(entries, {"min_certainty": 0.1})
-        self.assertEqual(len(ranked), 1)
-        self.assertEqual(ranked[0]["title"], "Known")
+        st = static_truth(entries)
+        self.assertEqual(len(st), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -592,9 +607,10 @@ class TestEvaluateProviders(unittest.TestCase):
 
 
 class TestProviderSourcesInBundle(unittest.TestCase):
-    """Test that provider_sources are included in build_prompt_bundle."""
+    """Test that provider_sources are included in build_query."""
 
-    def test_provider_sources_appear_in_bundle(self):
+    def test_provider_sources_excluded_when_rag_false(self):
+        """When rag=False, no truth — including provider sources — is sent."""
         provider_src = Source(
             source_id="t_prov",
             title="Claude",
@@ -603,8 +619,23 @@ class TestProviderSourcesInBundle(unittest.TestCase):
             kind="provider",
         )
         state = _make_state()
-        bundle = build_prompt_bundle(
-            state, "query", {"tools": {"rag": False}},
+        bundle = build_query(
+            state, "query", {"chat": {"rag": False}},
+            provider_sources=[provider_src],
+        )
+        self.assertEqual(len(bundle.sources), 0)
+
+    def test_provider_sources_included_when_rag_true(self):
+        provider_src = Source(
+            source_id="t_prov",
+            title="Claude",
+            certainty=0.9,
+            content='<div class="provider-response">Claude says yes</div>',
+            kind="provider",
+        )
+        state = _make_state()
+        bundle = build_query(
+            state, "query", {"chat": {"rag": True}},
             provider_sources=[provider_src],
         )
         self.assertEqual(len(bundle.sources), 1)
@@ -618,9 +649,9 @@ class TestProviderSourcesInBundle(unittest.TestCase):
             kind="provider",
         )
         trust = [_make_trust_entry("Fact A", 0.9, "Some fact", "t1")]
-        state = _make_state(truth={"trust": trust})
-        bundle = build_prompt_bundle(
-            state, "q", {"tools": {"rag": True}},
+        state = _make_state(truth=trust)
+        bundle = build_query(
+            state, "q", {"chat": {"rag": True}},
             provider_sources=[provider_src],
         )
         kinds = [s.kind for s in bundle.sources]
@@ -663,14 +694,14 @@ class TestOutputResolution(unittest.TestCase):
     def test_no_output_no_format(self):
         """No output and no output_format yields empty string."""
         state = _make_state()
-        bundle = build_prompt_bundle(state, "q", {})
+        bundle = build_query(state, "q", {})
         self.assertEqual(bundle.output, "")
 
     def test_state_output_used_when_present(self):
         """When state.output is set, bundle uses it."""
         state = _make_state()
         state["output"] = "Return JSON only."
-        bundle = build_prompt_bundle(state, "q", {})
+        bundle = build_query(state, "q", {})
         self.assertEqual(bundle.output, "Return JSON only.")
 
     def test_output_format_ignored_in_prefs(self):
@@ -678,7 +709,7 @@ class TestOutputResolution(unittest.TestCase):
         state = _make_state()
         state["output"] = "Be concise."
         prefs = {"output_format": "XHTML"}
-        bundle = build_prompt_bundle(state, "q", prefs)
+        bundle = build_query(state, "q", prefs)
         # output_format is NOT appended — XHTML is enforced via system prompt
         self.assertEqual(bundle.output, "Be concise.")
 
@@ -687,7 +718,7 @@ class TestOutputResolution(unittest.TestCase):
         state = _make_state()
         state["output"] = "Be concise."
         prefs = {"chat": {"output_format": "JSON"}}
-        bundle = build_prompt_bundle(state, "q", prefs)
+        bundle = build_query(state, "q", prefs)
         self.assertEqual(bundle.output, "Be concise.")
 
     def test_empty_state_output_stays_empty(self):
@@ -695,7 +726,7 @@ class TestOutputResolution(unittest.TestCase):
         state = _make_state()
         state["output"] = ""
         prefs = {"output_format": "XHTML"}
-        bundle = build_prompt_bundle(state, "q", prefs)
+        bundle = build_query(state, "q", prefs)
         self.assertEqual(bundle.output, "")
 
     def test_empty_output_format_no_effect(self):
@@ -703,14 +734,14 @@ class TestOutputResolution(unittest.TestCase):
         state = _make_state()
         state["output"] = "Custom."
         prefs = {"output_format": ""}
-        bundle = build_prompt_bundle(state, "q", prefs)
+        bundle = build_query(state, "q", prefs)
         self.assertEqual(bundle.output, "Custom.")
 
     def test_no_output_format_in_prefs(self):
         """Missing output_format in prefs doesn't alter output."""
         state = _make_state()
         state["output"] = "Custom."
-        bundle = build_prompt_bundle(state, "q", {})
+        bundle = build_query(state, "q", {})
         self.assertEqual(bundle.output, "Custom.")
 
 

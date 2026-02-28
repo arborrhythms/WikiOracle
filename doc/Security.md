@@ -1,6 +1,6 @@
 # Security
 
-WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:8787` by default and is not intended for direct exposure to the public internet. This document covers the security considerations relevant to its architecture.
+WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:8888` by default and is not intended for direct exposure to the public internet. This document covers the security considerations relevant to its architecture.
 
 ## 1. Private Data
 
@@ -23,11 +23,11 @@ Provider API keys (OpenAI, Anthropic, etc.) can be configured in three places, l
 
 **Recommendation:** In any deployment where the server is reachable beyond `127.0.0.1`, use environment variables exclusively. Do not place raw API keys in `config.yaml`.
 
-The `/providers` endpoint exposes only `has_key` (boolean) and `needs_key` (boolean) metadata — never the key itself.
+The `config.server.providers` metadata (served via `/config` and `/bootstrap`) exposes only `has_key` (boolean) and `needs_key` (boolean) — never the key itself.
 
 ## 3. Identity
 
-WikiOracle does not implement authentication. The server trusts any request from an allowed origin (configured via `WIKIORACLE_ALLOWED_ORIGINS`, defaulting to `http://127.0.0.1:8787` and `http://localhost:8787`).
+WikiOracle does not implement authentication. The server trusts any request from an allowed origin (configured via `WIKIORACLE_ALLOWED_ORIGINS`, defaulting to `https://127.0.0.1:8888` and `https://localhost:8888`).
 
 - **Username** is a display label set in Settings, not an authenticated identity. It is stored in `config.yaml` and included in message metadata.
 - **No sessions or tokens.** There is no login, no cookies used for auth, and no per-user isolation. If multiple users share a server instance, they share the same state.
@@ -42,7 +42,7 @@ WikiOracle renders user and LLM content as HTML (XHTML subset). Several layers m
 
 ```
 default-src 'self';
-script-src 'self' https://d3js.org;
+script-src 'self' https://d3js.org https://cdnjs.cloudflare.com;
 style-src 'self';
 img-src 'self' data:;
 connect-src 'self';
@@ -52,7 +52,7 @@ frame-ancestors 'none';
 form-action 'self'
 ```
 
-This blocks inline scripts, inline styles, and external resource loading (except D3 from its CDN). Even if malicious content is injected into a message, the browser will refuse to execute it.
+This blocks inline scripts, inline styles, and external resource loading (except D3 and js-yaml from their CDNs). Even if malicious content is injected into a message, the browser will refuse to execute it.
 
 **XHTML enforcement:** The system context instructs the LLM to return strictly valid XHTML. The client validates responses and repairs malformed markup via `validateXhtml()` and `repairXhtml()` before rendering.
 

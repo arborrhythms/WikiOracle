@@ -1420,11 +1420,8 @@ async function _initStateless() {
         if (!Array.isArray(state.conversations)) state.conversations = [];
       }
 
-      // Provider metadata
-      if (boot.providers) {
-        config.server.providers = boot.providers;
-        _populateProviderDropdown();
-      }
+      // Provider metadata is now part of config.server.providers
+      _populateProviderDropdown();
     } catch (e) {
       console.warn("[WikiOracle] bootstrap failed:", e);
       if (localConfig) config = _normalizeConfig(localConfig);
@@ -1438,31 +1435,21 @@ async function _initStateless() {
     state = localState;
     if (!Array.isArray(state.conversations)) state.conversations = [];
 
-    // Provider metadata: try server, but don't block
-    try {
-      const provData = await api("GET", "/providers");
-      config.server.providers = provData.providers || {};
-    } catch {}
+    // Provider metadata is already in config.server.providers
     _populateProviderDropdown();
   }
 }
 
 // Stateful init: server disk is authoritative.
 async function _initStateful() {
-  // Load config from server (YAML-shaped with defaults)
+  // Load config from server (YAML-shaped with defaults, includes providers)
   try {
     const configData = await api("GET", "/config");
     config = _normalizeConfig(configData.config || {});
   } catch (e) {
     console.warn("[WikiOracle] Failed to load config:", e);
   }
-
-  // Load provider metadata
-  try {
-    const provData = await api("GET", "/providers");
-    config.server.providers = provData.providers || {};
-    _populateProviderDropdown();
-  } catch {}
+  _populateProviderDropdown();
 
   // Get state file size for determinate progress bar
   var expectedSize = 0;
@@ -1519,11 +1506,12 @@ function _fetchStateWithProgress(expectedSize) {
   });
 }
 
-// Refresh provider metadata from server (updates has_key flags)
+// Refresh provider metadata from server (updates has_key flags).
+// Re-reads /config since provider meta is part of config.server.providers.
 async function _refreshProviderMeta() {
   try {
-    var provData = await api("GET", "/providers");
-    config.server.providers =provData.providers || {};
+    var cfgData = await api("GET", "/config");
+    config = _normalizeConfig(cfgData.config || {});
     _populateProviderDropdown();
   } catch (e) {
     console.warn("[WikiOracle] Failed to refresh provider metadata:", e);

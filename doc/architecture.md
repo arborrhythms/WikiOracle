@@ -5,7 +5,7 @@
 WikiOracle is a local-first Flask shim that sits between a browser UI and one or more upstream LLM providers. Conversations are stored as a hierarchical tree — each conversation is an ordered list of messages that may branch into child conversations.
 
 ```
-Browser  ──HTTP──▸  WikiOracle.py  ──HTTP──▸  Upstream LLM
+Browser  ──HTTP──▸  wikioracle.py  ──HTTP──▸  Upstream LLM
                         │
                     llm.jsonl
                    (persistent state)
@@ -15,13 +15,20 @@ Browser  ──HTTP──▸  WikiOracle.py  ──HTTP──▸  Upstream LLM
 
 | Layer | File(s) | Role |
 |---|---|---|
-| Server | `WikiOracle.py` | Flask app — `/chat`, `/state`, `/merge`, `/providers` endpoints; reads/writes `llm.jsonl` |
-| State library | `bin/wikioracle_state.py` | Pure-Python tree operations, JSONL serialisation, legacy migration |
+| Server | `bin/wikioracle.py` | Flask app — `/chat`, `/state`, `/merge`, `/config`, `/bootstrap` endpoints; reads/writes `llm.jsonl` |
+| Config | `bin/config.py` | Config dataclass, YAML loader, provider registry, schema-driven YAML writer, normalization |
+| State library | `bin/state.py` | Pure-Python tree operations, JSONL serialisation, legacy migration |
+| Response | `bin/response.py` | Chat pipeline, provider coordination, state I/O |
+| Truth | `bin/truth.py` | Trust processing, authority resolution, implication engine |
 | Client app | `html/wikioracle.js` | State management, API calls, message rendering, drag/context-menu interactions |
-| Tree renderer | `html/d3tree.js` | D3.js top-down hierarchy — layout, navigation, drag-to-merge |
+| Client config | `html/config.js` | Config global, sessionStorage persistence, normalization, legacy migration |
+| Client state | `html/state.js` | State global, sessionStorage persistence |
+| Client utils | `html/util.js` | Shared helpers, settings panel, config editor, context/output editors |
+| Client query | `html/query.js` | Server communication layer, conversation tree helpers |
+| Tree renderer | `html/tree.js` | D3.js top-down hierarchy — layout, navigation, drag-to-merge |
 | Shell | `html/index.html` | Single-page app: layout, CSS, settings panel |
 | Spec | `spec/llm_state.json` | JSON Schema for the state format |
-| Tests | `tests/test_derived_truth.py` | 16 tests covering implication parsing, modus ponens, chains, cycles, hme.jsonl integration |
+| Tests | `test/test_*.py` | Tests covering state, stateless contract, prompt bundles, authority, derived truth |
 
 ## Data model
 
@@ -72,11 +79,17 @@ In the tree: `Dialogue → Conversation*`, `Conversation → Message* + Conversa
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `/health` | Liveness check |
+| GET | `/server_info` | Stateless flag + url_prefix |
+| GET | `/bootstrap` | One-shot seed for stateless clients (state + config) |
+| GET | `/info` | State/schema/provider metadata for diagnostics |
 | GET | `/state` | Return current in-memory state |
 | POST | `/state` | Replace state |
-| POST | `/chat` | Send a message — append to existing conversation (`conversation_id`), branch (`branch_from`), or create new root |
+| GET | `/state_size` | State file size in bytes (progress bar) |
+| POST | `/chat` | Send a message — append to existing conversation, branch, or create new root |
 | POST | `/merge` | Merge an imported state file into current state |
-| GET | `/providers` | List available upstream LLM providers |
+| GET | `/config` | Normalized config (YAML-shaped, includes provider metadata and defaults) |
+| POST | `/config` | Accept full config dict; write config.yaml to disk |
 | GET | `/` | Serve `html/index.html` |
 | GET | `/<file>` | Serve static assets from `html/` |
 
@@ -110,7 +123,7 @@ This gives the LLM the full path of dialogue that led to the current point, with
 
 ### Tree visualisation (D3)
 
-`d3tree.js` renders the conversation tree as a top-down hierarchy using `d3.tree()`:
+`tree.js` renders the conversation tree as a top-down hierarchy using `d3.tree()`:
 
 ```
 conversationsToHierarchy(state.conversations, selectedId)
@@ -183,7 +196,7 @@ Dragging conversation A onto B:
 
 Double-click or right-click a tree node → "Branch" creates a new empty child conversation. The next message typed seeds it. The LLM receives the full ancestor context.
 
-## State library (`bin/wikioracle_state.py`)
+## State library (`bin/state.py`)
 
 Key functions:
 

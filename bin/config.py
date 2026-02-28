@@ -208,6 +208,7 @@ def _load_config_yaml(project_root: Path | None = None) -> Dict[str, Any]:
 _CONFIG_YAML: Dict[str, Any] = _load_config_yaml()
 
 
+
 # ---------------------------------------------------------------------------
 # Provider configuration
 # ---------------------------------------------------------------------------
@@ -478,6 +479,24 @@ def _normalize_config(cfg_yaml: dict) -> dict:
     server = cfg.setdefault("server", {})
     server.setdefault("stateless", False)
     server.setdefault("url_prefix", "")
+    # Non-secret provider metadata for UI dropdowns / key-status badges
+    prov_meta = {}
+    for key, pcfg in PROVIDERS.items():
+        needs_key = key not in ("wikioracle",)
+        prov_meta[key] = {
+            "name": pcfg["name"],
+            "streaming": pcfg.get("streaming", False),
+            "model": pcfg.get("default_model", ""),
+            "models": _PROVIDER_MODELS.get(key, []),
+            "has_key": bool(pcfg.get("api_key")) or not needs_key,
+            "needs_key": needs_key,
+        }
+    server["providers"] = prov_meta
+    # Factory defaults for reset buttons (context, output)
+    cfg["defaults"] = {
+        "context": "<div/>",
+        "output": "",
+    }
     return cfg
 
 

@@ -11,14 +11,12 @@ REST API Endpoints:
 |------------------|--------------|--------------------------------------------------------------|
 | /health          | GET          | Liveness check                                               |
 | /server_info     | GET          | Stateless flag + url_prefix                                  |
-| /bootstrap       | GET          | One-shot seed for stateless clients (state + config + providers) |
+| /bootstrap       | GET          | One-shot seed for stateless clients (state + config)             |
 | /info            | GET          | State/schema/provider metadata for diagnostics               |
 | /state           | GET, POST    | Read or replace local state                                  |
 | /state_size      | GET          | State file size in bytes (progress bar)                      |
 | /chat            | POST         | Process chat turn (QueryBundle → ResponseBundle)             |
 | /merge           | POST         | Merge imported state payloads/files                          |
-| /spec_defaults   | GET          | Spec defaults for reset buttons (context, output, config)    |
-| /providers       | GET          | Non-secret provider metadata for UI dropdowns                |
 | /config          | GET, POST    | GET: normalized config. POST: full config dict               |
 | /                | GET          | Serve index.html                                             |
 | /<path>          | GET          | Serve whitelisted static assets                              |
@@ -55,7 +53,6 @@ from config import (
     PROVIDERS,
     _CONFIG_YAML,
     _CONFIG_YAML_STATUS,
-    _PROVIDER_MODELS,
     _build_providers,
     _normalize_config,
     _env_bool,
@@ -66,7 +63,6 @@ from config import (
     parse_args,
 )
 from state import (
-    DEFAULT_OUTPUT,
     SCHEMA_URL,
     STATE_VERSION,
     atomic_write_jsonl,
@@ -159,20 +155,6 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if fresh:
             config_mod._CONFIG_YAML = fresh
         result["config"] = _normalize_config(config_mod._CONFIG_YAML)
-
-        # Provider metadata (non-secret)
-        prov_meta = {}
-        for key, pcfg in PROVIDERS.items():
-            needs_key = key not in ("wikioracle",)
-            prov_meta[key] = {
-                "name": pcfg["name"],
-                "streaming": pcfg.get("streaming", False),
-                "model": pcfg.get("default_model", ""),
-                "models": _PROVIDER_MODELS.get(key, []),
-                "has_key": bool(pcfg.get("api_key")) or not needs_key,
-                "needs_key": needs_key,
-            }
-        result["providers"] = prov_meta
 
         return jsonify(result)
 
@@ -346,42 +328,6 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if merged_count > 0:
             _save_state(cfg, base)
         return jsonify({"ok": True, "merged": merged_count, "files": merged_names})
-
-    @app.route(url_prefix + "/spec_defaults", methods=["GET"])
-    def spec_defaults_endpoint():
-        """Serve spec defaults for reset buttons (context, output, config_parsed)."""
-        result: Dict[str, Any] = {
-            "context": "<div/>",
-            "output": DEFAULT_OUTPUT,
-            "config_parsed": {},
-        }
-        project_root = Path(__file__).resolve().parent.parent
-        spec_cfg = project_root / "spec" / "config.yaml"
-        if spec_cfg.exists():
-            try:
-                import yaml
-                result["config_parsed"] = yaml.safe_load(
-                    spec_cfg.read_text(encoding="utf-8")
-                ) or {}
-            except Exception:
-                pass
-        return jsonify(result)
-
-    @app.route(url_prefix + "/providers", methods=["GET"])
-    def providers():
-        """Expose non-secret provider metadata for UI model selectors."""
-        result = {}
-        for key, pcfg in PROVIDERS.items():
-            needs_key = key not in ("wikioracle",)
-            result[key] = {
-                "name": pcfg["name"],
-                "streaming": pcfg.get("streaming", False),
-                "model": pcfg.get("default_model", ""),
-                "models": _PROVIDER_MODELS.get(key, []),
-                "has_key": bool(pcfg.get("api_key")) or not needs_key,
-                "needs_key": needs_key,
-            }
-        return jsonify({"providers": result})
 
     @app.route(url_prefix + "/config", methods=["GET", "POST"])
     def config_endpoint():

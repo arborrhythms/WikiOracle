@@ -105,7 +105,7 @@ This means the same remote entry imported through different authorities will hav
 
 | File | Function |
 |---|---|
-| `bin/wikioracle_state.py` | `parse_authority_block()`, `ensure_authority_id()`, `get_authority_entries()`, `resolve_authority_entries()`, `_fetch_authority_jsonl()` |
+| `bin/truth.py` | `parse_authority_block()`, `ensure_authority_id()`, `get_authority_entries()`, `resolve_authority_entries()`, `_fetch_authority_jsonl()` |
 | `bin/prompt_bundle.py` | Excludes `<authority>` entries from RAG; resolves authority entries and includes their scaled trust entries as `kind="authority"` sources |
 | `html/wikioracle.js` | Trust editor UI: "Add Authority" button, DID/ORCID/URL form, authority badge display |
 | `spec/hme.jsonl` | Test data with example authority entry (`a_test_01`) |

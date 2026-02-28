@@ -57,7 +57,7 @@ WO_HOST           ?= $(or $(call _yaml_val,c.get('ssh',{}).get('wikioracle',{}).
 WO_DEST           ?= $(or $(call _yaml_val,c.get('ssh',{}).get('wikioracle',{}).get('dest','')),/opt/bitnami/wordpress/files/wikiOracle.org/chat)
 
 ALERT_EMAIL ?=
-WIKIORACLE_APP ?= WikiOracle.py
+WIKIORACLE_APP ?= bin/wikioracle.py
 
 DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
                --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)
@@ -109,8 +109,8 @@ help:
 	@echo "  make train-gpu          Full pipeline: data + tok + pretrain + sft (GPU)"
 	@echo ""
 	@echo "Evaluation & Inference:"
-	@echo "  make test              Run wikioracle_state unit tests"
-	@echo "  make run               Start WikiOracle local shim (WikiOracle.py)"
+	@echo "  make test              Run unit tests"
+	@echo "  make run               Start WikiOracle local shim (bin/wikioracle.py)"
 	@echo "  make eval-cpu           Evaluate model (CPU)"
 	@echo "  make eval-gpu           Evaluate model (GPU)"
 	@echo "  make run-cli            Chat with the model (CLI)"

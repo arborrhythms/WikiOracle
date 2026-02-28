@@ -1,6 +1,6 @@
 # WikiOracle — Client UI
 
-Browser-based interface for the WikiOracle local LLM shim. All front-end assets live in this directory and are served by `WikiOracle.py`.
+Browser-based interface for the WikiOracle local LLM shim. All front-end assets live in this directory and are served by `bin/wikioracle.py`.
 
 ## Architecture
 
@@ -21,9 +21,12 @@ Root (/)
 |---|---|
 | `index.html` | Single-page app shell — layout, settings panel |
 | `wikioracle.css` | Stylesheet — layout, dark mode, chat and tree panel styles |
-| `wikioracle.js` | Client logic — state management, API calls, message rendering, settings, trust editor |
-| `d3tree.js` | D3.js tree renderer — hierarchy layout, click/double-click/right-click navigation, drag-to-merge |
-| `util.js` | Shared helpers — `escapeHtml`, `stripTags`, `truncate`, `tempId`, `findInTree`, `removeFromTree`, `countTreeMessages`, `onDoubleTap`, `setupZoom`, `cssVar` |
+| `config.js` | Config global, sessionStorage persistence, normalization, legacy migration |
+| `state.js` | State global, sessionStorage persistence |
+| `util.js` | Shared helpers — `escapeHtml`, `stripTags`, `truncate`, `tempId`, `findInTree`, settings/context/output editors |
+| `query.js` | Server communication layer — `api()`, conversation tree helpers, `_buildRuntimeConfig` |
+| `tree.js` | D3.js tree renderer — hierarchy layout, click/double-click/right-click navigation, drag-to-merge |
+| `wikioracle.js` | Main app — XHTML validation, layout/theme, provider metadata, chat, tree navigation, init |
 | `404.html` | Fallback error page |
 
 ## Interactions
@@ -70,6 +73,8 @@ In memory, conversations are nested via `children` arrays. The `parent` field in
 
 ## Development
 
-The server (`WikiOracle.py`) serves everything in this directory for extensions matching `.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.jsonl`. No build step is required — edit files and refresh.
+The server (`bin/wikioracle.py`) serves everything in this directory for extensions matching `.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.jsonl`. No build step is required — edit files and refresh.
 
-Cache-busting is handled via query-string versions on the script tags in `index.html` (e.g. `d3tree.js?v=10`). Bump the version number after changes.
+Cache-busting is handled via query-string versions on the script tags in `index.html` (e.g. `tree.js?v=10`). Bump the version number after changes.
+
+JS load order: `config.js → state.js → util.js → query.js → tree.js → wikioracle.js`.

@@ -251,11 +251,12 @@ class TestBootstrapEndpoint(StatelessContractBase):
         self.assertIn("config", data)
         self.assertIsInstance(data["config"], dict)
 
-    def test_bootstrap_returns_providers(self):
+    def test_bootstrap_returns_providers_in_config(self):
+        """Provider metadata is part of config.server.providers."""
         resp = self.client.get("/bootstrap")
         data = resp.get_json()
-        self.assertIn("providers", data)
-        provs = data["providers"]
+        self.assertNotIn("providers", data)  # no longer a top-level key
+        provs = data["config"]["server"]["providers"]
         self.assertIn("wikioracle", provs)
         self.assertIn("name", provs["wikioracle"])
 

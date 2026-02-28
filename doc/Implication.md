@@ -158,7 +158,7 @@ The `i_` ID prefix distinguishes implication entries from trust (`t_`), message 
 
 ### Derived truth engine
 
-`compute_derived_truth()` in `bin/wikioracle_state.py` evaluates all implication entries using fixed-point iteration:
+`compute_derived_truth()` in `bin/truth.py` evaluates all implication entries using fixed-point iteration:
 
 1. Build a certainty lookup `{ id: certainty }` from all trust entries
 2. Extract implications via `parse_implication_block()`
@@ -177,9 +177,9 @@ The `i_soft_fly_01` entry in `spec/hme.jsonl` demonstrates the paradox of materi
 
 | File | Function |
 |---|---|
-| `bin/wikioracle_state.py` | `parse_implication_block()`, `ensure_implication_id()`, `compute_derived_truth()` |
+| `bin/truth.py` | `parse_implication_block()`, `ensure_implication_id()`, `compute_derived_truth()` |
 | `bin/prompt_bundle.py` | Excludes `<implication>` entries from RAG; uses `_derived_certainty` for ranking |
-| `WikiOracle.py` | Calls `compute_derived_truth()` after provider responses; stores transient `_derived_certainty` |
+| `bin/response.py` | Calls `compute_derived_truth()` after provider responses; stores transient `_derived_certainty` |
 | `html/wikioracle.js` | Trust editor UI: "Add Implication" button, antecedent/consequent dropdowns, derived certainty display |
 | `spec/hme.jsonl` | Test data with syllogism, chain, and paradox implication entries |
 | `tests/test_derived_truth.py` | 16 unit tests covering parsing, ID generation, modus ponens, chains, cycles, and hme.jsonl integration |

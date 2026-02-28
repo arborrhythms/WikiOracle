@@ -103,7 +103,7 @@ Use:
 
 `make run`
 
-This invokes `WikiOracle.py` via the `WIKIORACLE_APP` Make variable (default: `WikiOracle.py`).
+This invokes `bin/wikioracle.py` via the `WIKIORACLE_APP` Make variable (default: `bin/wikioracle.py`).
 
 Common runtime environment variables for the local shim:
 - `WIKIORACLE_STATE_FILE` (path to local state file, default: `llm.jsonl`)
@@ -114,13 +114,16 @@ Common runtime environment variables for the local shim:
 
 ## Local Shim & Client-Owned State
 
-WikiOracle includes a local Flask server (`WikiOracle.py`) that enables chatting with any LLM (NanoChat, OpenAI, Anthropic) while keeping all conversation state on your own filesystem. The remote server remains strictly stateless.
+WikiOracle includes a local Flask server (`bin/wikioracle.py`) that enables chatting with any LLM (NanoChat, OpenAI, Anthropic) while keeping all conversation state on your own filesystem. The remote server remains strictly stateless.
 
 **Key components:**
 
-- `WikiOracle.py` — Local shim server (binds to `127.0.0.1:8787`). Proxies chat requests upstream and persists state to a single `llm.jsonl` file. Also supports CLI merge: `python WikiOracle.py merge llm_*.jsonl`
-- `bin/wikioracle_state.py` — State validation, JSONL I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction.
-- `test/test_wikioracle_state.py` — Automated tests for state and merge semantics.
+- `bin/wikioracle.py` — Local shim server (binds to `0.0.0.0:8888` with TLS). Proxies chat requests upstream and persists state to a single `llm.jsonl` file. Also supports CLI merge: `python bin/wikioracle.py merge llm_*.jsonl`
+- `bin/config.py` — Config dataclass, YAML loader, provider registry, schema-driven YAML writer, normalization.
+- `bin/state.py` — State validation, JSONL I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction.
+- `bin/response.py` — Chat pipeline, provider coordination, state I/O.
+- `bin/truth.py` — Trust processing, authority resolution, implication engine.
+- `test/test_*.py` — Automated tests for state, stateless contract, prompt bundles, authority, derived truth.
 - `html/index.html` — Single-page web UI shell with chat, settings, and merge tools.
 - `llm.jsonl` — Client-owned state file (line-delimited JSON). See `spec/llm_state_v2.json` for the formal schema.
 
@@ -129,7 +132,7 @@ WikiOracle includes a local Flask server (`WikiOracle.py`) that enables chatting
 ```bash
 export WIKIORACLE_STATE_FILE="/path/to/your/project/llm.jsonl"
 pip install -r requirements.txt
-python WikiOracle.py
+python bin/wikioracle.py
 ```
 
 **Session portability:** Export conversations from phone/browser as `llm_YYYY.MM.DD.HHMM.jsonl`, then merge them into a local project's `llm.jsonl` later. This provides a clean integration path with Claude Code, OpenAI Codex, or any local tooling that can read the state file for project context.

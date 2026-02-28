@@ -304,17 +304,6 @@ function setupZoom(opts) {
 
 // ─── Modal dialogs ───
 
-// ─── Spec defaults (cached after first fetch) ───
-let _specDefaults = null;
-async function _getSpecDefaults() {
-  if (!_specDefaults) {
-    try { _specDefaults = await api("GET", "/spec_defaults"); }
-    catch (e) { _specDefaults = { context: "<div/>", output: "", config_parsed: {} }; }
-  }
-  return _specDefaults;
-}
-
-
 // ─── Shared dialog factory ───
 // Creates a modal overlay with title bar and close button.
 // Returns { overlay, close } where close() hides the dialog.
@@ -360,9 +349,9 @@ function _toggleContextEditor() {
     var dlg = _createDialog("contextOverlay", "Context", body);
     overlay = dlg.overlay;
 
-    document.getElementById("ctxReset").addEventListener("click", async function() {
-      const defaults = await _getSpecDefaults();
-      document.getElementById("contextTextarea").value = stripTags(defaults.context).trim();
+    document.getElementById("ctxReset").addEventListener("click", function() {
+      var d = config.defaults || {};
+      document.getElementById("contextTextarea").value = stripTags(d.context || "<div/>").trim();
     });
     document.getElementById("ctxCancel").addEventListener("click", dlg.close);
     document.getElementById("ctxSave").addEventListener("click", function() {
@@ -406,9 +395,9 @@ function _toggleOutputEditor() {
     overlay = dlg.overlay;
 
     document.getElementById("outCancel").addEventListener("click", dlg.close);
-    document.getElementById("outReset").addEventListener("click", async function() {
-      const defaults = await _getSpecDefaults();
-      document.getElementById("outputTextarea").value = defaults.output ?? "";
+    document.getElementById("outReset").addEventListener("click", function() {
+      var d = config.defaults || {};
+      document.getElementById("outputTextarea").value = d.output ?? "";
     });
     document.getElementById("outSave").addEventListener("click", function() {
       const newText = document.getElementById("outputTextarea").value.trim();
@@ -518,14 +507,9 @@ async function _openConfigEditor() {
     var dlg = _createDialog("configOverlay", "config.yaml", body, "config-panel");
     overlay = dlg.overlay;
 
-    document.getElementById("cfgReset").addEventListener("click", async function() {
-      const defaults = await _getSpecDefaults();
-      var parsed = defaults.config_parsed;
-      if (parsed && Object.keys(parsed).length) {
-        document.getElementById("configEditorTextarea").value = jsyaml.dump(parsed, { lineWidth: -1 });
-      } else {
-        setStatus("spec/config.yaml not found");
-      }
+    document.getElementById("cfgReset").addEventListener("click", function() {
+      var factory = _normalizeConfig({});
+      document.getElementById("configEditorTextarea").value = jsyaml.dump(factory, { lineWidth: -1 });
     });
     document.getElementById("cfgCancel").addEventListener("click", dlg.close);
     document.getElementById("cfgOk").addEventListener("click", async function() {

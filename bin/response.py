@@ -124,16 +124,26 @@ def _build_provider_query_bundle(
     history: List[Dict[str, str]],
     query: str,
     output: str,
+    dom_prelim: Optional[str] = None,
 ) -> ProviderBundle:
     """Build a RAG-free bundle for a secondary provider consultation.
 
     The provider sees system context, history, the query, and the output
     instructions — but NO sources (no RAG).  This keeps the secondary
     providers independent so the mastermind can weigh their opinions.
+
+    When *dom_prelim* is provided (the dom's preliminary response), the
+    sub sees the Q → R_dom exchange in its history before being asked
+    the same question for its own assessment.  This is the steering
+    signal described in the voting protocol (doc/Voting.md).
     """
+    hist = list(history)
+    if dom_prelim:
+        hist.append({"role": "user", "content": query})
+        hist.append({"role": "assistant", "content": dom_prelim})
     return ProviderBundle(
         system=system,
-        history=list(history),
+        history=hist,
         sources=[],
         transient_sources=[],
         query=query,
@@ -195,6 +205,7 @@ def evaluate_providers(
     *,
     timeout_s: int = 60,
     call_chain: Optional[List[str]] = None,
+    dom_prelim: Optional[str] = None,
 ) -> List[Source]:
     """Evaluate <provider> trust entries by sending each a RAG-free bundle.
 
@@ -211,6 +222,9 @@ def evaluate_providers(
         call_chain: ordered list of provider IDs that have acted as dom
                     in the current vote ancestry.  A provider whose ID
                     appears in this chain stays silent (cycle prevention).
+        dom_prelim: the dom's preliminary response text.  When provided,
+                    each sub sees Q → R_dom in its history before being
+                    asked the same question (voting protocol steering).
 
     Returns:
         List of Source objects with kind="provider", whose content is
@@ -224,6 +238,7 @@ def evaluate_providers(
     # Base RAG-free bundle (shared when no per-provider truth)
     base_bundle = _build_provider_query_bundle(
         system, history, query, output,
+        dom_prelim=dom_prelim,
     )
     base_messages = to_nanochat_messages(base_bundle)
 
@@ -243,6 +258,7 @@ def evaluate_providers(
         if prov_truth:
             custom_bundle = _build_provider_query_bundle(
                 system, history, query, output,
+                dom_prelim=dom_prelim,
             )
             custom_bundle.sources = prov_truth
             messages = to_nanochat_messages(custom_bundle)
@@ -1118,7 +1134,12 @@ def _fan_out_and_aggregate(
     temperature: float = 0.7,
     call_chain: Optional[List[str]] = None,
 ) -> tuple:
-    """HME fan-out: evaluate secondary providers, feed results to primary."""
+    """HME diamond vote: R_dom_prelim → R_sub_* → R_dom_final.
+
+    1. Call the primary provider with Q → R_prelim (initial assessment)
+    2. Fan out to secondaries with Q + R_prelim (dom steers the subs)
+    3. Call the primary again with truth table + R_prelim + R_sub_* → R_final
+    """
     trust_entries = state.get("truth") or []
     provider_entries = get_provider_entries(trust_entries)
 
@@ -1126,12 +1147,30 @@ def _fan_out_and_aggregate(
         raise ValueError("No provider trust entries found")
 
     primary_entry, primary_config = provider_entries[0]
+    primary_id = primary_entry.get("id", "")
     secondaries = provider_entries[1:]
 
     base_bundle = _build_bundle(state, user_message, query_config, conversation_id)
 
+    # ── Step 1: dom preliminary response ──
+    # The dom sees Q (with its truth table) and produces R_prelim.
+    prelim_messages = to_nanochat_messages(base_bundle)
+    dom_prelim = _call_dynamic_provider(
+        primary_config, prelim_messages, temperature, cfg,
+    )
+    if dom_prelim.startswith("[Error"):
+        dom_prelim = None  # Fall back to single-shot if prelim fails
+
+    # ── Step 2: fan out to secondaries with Q + R_prelim ──
+    # Each sub sees the dom's preliminary response as steering context.
+    # The call chain includes the primary so it stays silent if a sub
+    # tries to call it back (cycle prevention).
     provider_sources: List[Source] = []
     if secondaries:
+        sub_chain = list(call_chain or [])
+        if primary_id:
+            sub_chain.append(primary_id)
+
         def _call_for_eval(pconfig, messages):
             return _call_dynamic_provider(pconfig, messages, temperature, cfg)
 
@@ -1143,14 +1182,22 @@ def _fan_out_and_aggregate(
             output=base_bundle.output,
             call_fn=_call_for_eval,
             timeout_s=max(int(cfg.timeout_s), 60),
-            call_chain=call_chain,
+            call_chain=sub_chain,
+            dom_prelim=dom_prelim,
         )
 
+    # ── Step 3: dom final response ──
+    # The dom sees its full truth table + its own R_prelim + all R_sub_*.
     final_bundle = build_query(
         state, user_message, query_config,
         conversation_id=conversation_id,
         provider_sources=provider_sources,
     )
+    # Inject R_prelim into the dom's history so it can see its own
+    # earlier thinking alongside the sub responses.
+    if dom_prelim:
+        final_bundle.history.append({"role": "user", "content": user_message})
+        final_bundle.history.append({"role": "assistant", "content": dom_prelim})
 
     api_url = primary_config.get("api_url", "")
     if "anthropic.com" in api_url:
@@ -1301,28 +1348,56 @@ def process_chat(
         if eid in derived and abs(derived[eid] - entry.get("certainty", 0.0)) > 1e-9:
             entry["_derived_certainty"] = derived[eid]
 
-    # ── Step 1: resolve dynamic <provider> truth entries ──
-    # Each <provider> truth entry references an external LLM endpoint.
-    # We call those endpoints now; their responses are passed to
-    # build_query as provider_sources (they are NOT written back into
-    # state.truth — truth only flows client → server).  The API key
-    # for each dynamic provider can come from the truth entry itself
-    # or from the matching provider in config.yaml.
+    # ── Voting diamond: R_dom_prelim → R_sub_* → R_dom_final ──
     #
-    # call_chain: the voting call chain for cycle prevention.  At the
-    # top level (process_chat) the chain is empty — no ancestors.
-    call_chain: list = []
+    # When dynamic <provider> entries exist, the UI-selected provider
+    # acts as dom and the dynamic providers act as subs:
+    #   1. Dom preliminary: call the UI provider with Q → R_prelim
+    #   2. Sub fan-out: evaluate dynamic providers with Q + R_prelim
+    #   3. Dom final: call the UI provider again with R_prelim + R_sub_*
+    #
+    # When there are no dynamic providers, this collapses to a single
+    # call (steps 1 and 3 merge into one).
+
     dyn_providers = get_provider_entries(truth_list)
     provider_sources: list = []
+    dom_prelim: str | None = None
+
+    context_text = strip_xhtml(state.get("context", ""))
+    print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
+          f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
+          f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
+    truth_count = len(state.get("truth") or [])
+    rag_flag = query_config.get("chat", {}).get("rag", "MISSING")
+
+    client_api_key = ""
+    if config_mod.STATELESS_MODE:
+        rc_providers = runtime_cfg.get("providers", {})
+        rc_pcfg = rc_providers.get(provider, {})
+        client_api_key = rc_pcfg.get("api_key", "")
+
+    # ── Step 1: dom preliminary response ──
     if dyn_providers:
-        print(f"[WikiOracle] Resolving {len(dyn_providers)} dynamic <provider> truth "
-              f"entr{'y' if len(dyn_providers) == 1 else 'ies'} before chat")
+        print(f"[WikiOracle] Voting: {len(dyn_providers)} dynamic provider(s) — "
+              f"calling dom (UI provider) for preliminary response")
+        prelim_bundle = build_query(state, user_msg, query_config,
+                                    conversation_id=context_conv_id)
+        dom_prelim = _call_provider(
+            cfg, prelim_bundle, temperature, provider, client_api_key, client_model,
+        )
+        if dom_prelim.startswith("[Error"):
+            dom_prelim = None  # Fall back to single-shot if prelim fails
+
+    # ── Step 2: sub fan-out with Q + R_prelim ──
+    if dyn_providers:
+        print(f"[WikiOracle] Voting: fan out to {len(dyn_providers)} sub(s) "
+              f"with dom preliminary {'(steering)' if dom_prelim else '(no steering — prelim failed)'}")
         base_bundle = _build_bundle(state, user_msg, query_config, context_conv_id)
-        secondaries = dyn_providers  # all dynamic providers are evaluated
+        call_chain: list = []
         def _call_for_eval(pconfig, messages):
             return _call_dynamic_provider(pconfig, messages, temperature, cfg)
         provider_sources = evaluate_providers(
-            secondaries,
+            dyn_providers,
             system=base_bundle.system,
             history=base_bundle.history,
             query=base_bundle.query,
@@ -1330,20 +1405,17 @@ def process_chat(
             call_fn=_call_for_eval,
             timeout_s=max(int(cfg.timeout_s), 60),
             call_chain=call_chain,
+            dom_prelim=dom_prelim,
         )
-        # provider_sources are passed to build_query below — they are NOT
-        # written back into state.truth.  Truth only flows client → server.
 
-    # ── Step 2: call the UI-selected provider ──
-    context_text = strip_xhtml(state.get("context", ""))
-    print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
-          f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
-          f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
-    truth_count = len(state.get("truth") or [])
-    rag_flag = query_config.get("chat", {}).get("rag", "MISSING")
+    # ── Step 3: dom final response ──
     bundle = build_query(state, user_msg, query_config,
                          conversation_id=context_conv_id,
                          provider_sources=provider_sources or None)
+    # Inject R_prelim so the dom can see its earlier thinking
+    if dom_prelim:
+        bundle.history.append({"role": "user", "content": user_msg})
+        bundle.history.append({"role": "assistant", "content": dom_prelim})
     print(f"[WikiOracle] RAG: rag={rag_flag}, truth_entries={truth_count}, "
           f"bundle.sources={len(bundle.sources)}")
     if config_mod.DEBUG_MODE:
@@ -1356,11 +1428,6 @@ def process_chat(
             role = m.get("role", "?")
             content = m.get("content", "")
             print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
-    client_api_key = ""
-    if config_mod.STATELESS_MODE:
-        rc_providers = runtime_cfg.get("providers", {})
-        rc_pcfg = rc_providers.get(provider, {})
-        client_api_key = rc_pcfg.get("api_key", "")
     response_text = _call_provider(cfg, bundle, temperature, provider, client_api_key, client_model)
     if config_mod.DEBUG_MODE:
         print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")

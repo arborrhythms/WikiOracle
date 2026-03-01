@@ -61,11 +61,11 @@ See the [documentation](doc/README.md) for the full design.
 
 The initial prototype is intentionally modest and low-cost:
 
-- Extends Andrej Karpathy's [NanoChat](https://github.com/karpathy/nanochat) with Retrieval-Augmented Generation (RAG) over trusted corpora
-- User-specified trust sets (configurable source whitelists)
-- Online learning constrained by trust and grounding requirements
-- Experiments in symbolic computation for grounding truth
-- Training feasible on rented compute (~$100 scale)
+- Hierarchical, multi-LLM architecture for runtime-configurable Hierarchical Mixture of Experts.
+- User-specified truth sets (facts, collections, LLMs, authorities, ...)
+- Online learning constrained by trust and epistemic grounding
+- Extends [NanoChat](https://github.com/karpathy/nanochat) with Retrieval-Augmented Generation (RAG)
+- Allows feasible experiments in LLM architectures on rented compute (~$100 scale)
 
 ## Longer-Term Direction
 

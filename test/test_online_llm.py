@@ -3,10 +3,8 @@
 
 These tests make REAL network calls to OpenAI and Anthropic APIs using
 the API keys in config.yaml.  They are slow (~5-20s each) and require
-valid credentials, so they are NOT included in the default `make test`
-target.  Run explicitly:
-
-    python3 -m unittest test.test_online_llm -v
+valid credentials.  Failures are treated as warnings in `make test`
+(non-blocking).  Tests without matching API keys are skipped automatically.
 """
 
 import os

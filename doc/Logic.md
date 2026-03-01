@@ -1,4 +1,4 @@
-# Operator
+# Logic
 
 ## Logical operators in WikiOracle's truth system
 
@@ -21,9 +21,11 @@ The four operators:
 - **and(a, b, …)** = min(certainty_a, certainty_b, …) — conjunction is only as strong as the weakest operand.
 - **or(a, b, …)** = max(certainty_a, certainty_b, …) — disjunction takes the strongest operand.
 - **not(a)** = −certainty_a — negation flips the sign (affirming negation).
-- **non(a)** = sign(a) × (1 − |a|) — non-affirming negation. Drains certainty toward zero without crossing the sign boundary. A strong belief (+0.9) becomes weak belief (+0.1); a strong disbelief (−0.9) becomes weak disbelief (−0.1).
+- **non(a)** = 1 − 2|a| — non-affirming negation. Measures epistemic openness: how much certainty room remains. Full certainty in either direction (±1) yields −1 (fully closed); ignorance (0) yields +1 (fully open). See `doc/non.md` for the Buddhist philosophical motivation.
 
-These compose: material implication A → B can be encoded as `or(not(A), B)`, i.e. ¬A ∨ B.
+These operators compose freely — for instance, material implication (A → B) falls out as `or(not(A), B)`.
+
+The key insight behind `non`: Kleene logic cannot detect uncertainty; it can only transmit it. `non` introduces uncertainty as a first-class observable. If WikiOracle needs to reason about openness rather than merely propagate it, then `non` is not ornamental — it is structurally necessary. See [`doc/non.md`](non.md) for the proof and the Buddhist philosophical motivation.
 
 ---
 
@@ -85,9 +87,8 @@ Operators can reference other operator entries, forming chains (e.g., an OR whos
 
 The current operator set covers propositional logic under Strong Kleene semantics. Planned extensions:
 
-- **Strict implication** (□(¬A ∨ B)) — necessity-loaded conditionals evaluated across admissible contexts/theories.
-- **Relevant implication** — requiring a relevance predicate (shared entities, citations, provenance) in addition to truth-functional entailment.
-- **Nested composition** — allowing operator tags within operator tags in a single content string (e.g., `<or id="impl" certainty="0.0"><not id="_" certainty="0.0"><child id="A"/></not><child id="B"/></or>` for material implication in one entry).
+- **Nested composition** — allowing operator tags within operator tags in a single content string, reducing multi-entry boilerplate for compound expressions.
+- **Implication encodings** — the current operators already express material implication via `or(not(A), B)`. Richer conditionals (strict implication, relevance-gated implication) may follow if use cases warrant them.
 
 ---
 

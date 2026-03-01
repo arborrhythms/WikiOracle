@@ -213,53 +213,65 @@ def test_not_double_negation():
 
 
 def test_non_positive():
-    """NON of positive certainty: sign(0.8)*(1-0.8) = 0.2"""
+    """NON of positive certainty: 1 - 2*0.8 = -0.6"""
     entries = [
         _make_trust("a", 0.8),
         _make_non("op", "a"),
     ]
     derived = compute_derived_truth(entries)
-    assert abs(derived["op"] - 0.2) < 1e-9
+    assert abs(derived["op"] - (-0.6)) < 1e-9
 
 
 def test_non_negative():
-    """NON of negative certainty: sign(-0.9)*(1-0.9) = -0.1"""
+    """NON of negative certainty: 1 - 2*0.9 = -0.8"""
     entries = [
         _make_trust("a", -0.9),
         _make_non("op", "a"),
     ]
     derived = compute_derived_truth(entries)
-    assert abs(derived["op"] - (-0.1)) < 1e-9
+    assert abs(derived["op"] - (-0.8)) < 1e-9
 
 
 def test_non_zero():
-    """NON of zero certainty should be zero."""
+    """NON of zero certainty should be +1.0 (maximum openness)."""
     entries = [
         _make_trust("a", 0.0),
         _make_non("op", "a"),
     ]
     derived = compute_derived_truth(entries)
-    assert abs(derived["op"] - 0.0) < 1e-9
+    assert abs(derived["op"] - 1.0) < 1e-9
 
 
 def test_non_full_belief():
-    """NON of +1.0 should be 0.0 (fully believed → no residual doubt)."""
+    """NON of +1.0 should be -1.0 (fully certain → fully closed)."""
     entries = [
         _make_trust("a", 1.0),
         _make_non("op", "a"),
     ]
     derived = compute_derived_truth(entries)
-    assert abs(derived["op"] - 0.0) < 1e-9
+    assert abs(derived["op"] - (-1.0)) < 1e-9
 
 
 def test_non_full_disbelief():
-    """NON of -1.0 should be -0.0 (magnitude 0, sign negative)."""
+    """NON of -1.0 should be -1.0 (fully certain → fully closed)."""
     entries = [
         _make_trust("a", -1.0),
         _make_non("op", "a"),
     ]
     derived = compute_derived_truth(entries)
-    assert abs(derived["op"]) < 1e-9
+    assert abs(derived["op"] - (-1.0)) < 1e-9
+
+
+def test_non_symmetry():
+    """NON should be symmetric: non(+x) == non(-x) for any x."""
+    entries = [
+        _make_trust("pos", 0.7),
+        _make_trust("neg", -0.7),
+        _make_non("op_pos", "pos"),
+        _make_non("op_neg", "neg"),
+    ]
+    derived = compute_derived_truth(entries)
+    assert abs(derived["op_pos"] - derived["op_neg"]) < 1e-9
 
 
 # ─── Chaining ───

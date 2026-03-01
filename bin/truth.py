@@ -769,7 +769,7 @@ def _eval_operator(op: dict, certainty: dict) -> float | None:
       and(a, b, ...) = min(a, b, ...)
       or(a, b, ...)  = max(a, b, ...)
       not(a)         = -a
-      non(a)         = sign(a) * (1 - |a|)   (non-affirming negation)
+      non(a)         = 1 - 2|a|   (non-affirming negation)
     Returns None if any referenced ID is missing from the certainty table.
     """
     refs = op["refs"]
@@ -786,10 +786,7 @@ def _eval_operator(op: dict, certainty: dict) -> float | None:
     elif operator == "not":
         return -values[0]
     elif operator == "non":
-        x = values[0]
-        if x == 0.0:
-            return 0.0
-        return (1.0 if x > 0 else -1.0) * (1.0 - abs(x))
+        return 1.0 - 2.0 * abs(values[0])
     return None
 
 

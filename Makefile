@@ -411,7 +411,10 @@ debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
 test:
-	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle -v
+	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle test.test_derived_truth test.test_authority test.test_stateless_contract test.test_hme_inference test.test_voting -v
+	@echo ""
+	@echo "── online LLM tests (warnings only) ──"
+	@$(SHIM_ACTIVATE) && python3 -m unittest test.test_online_llm -v 2>&1 || echo "⚠  online LLM tests had failures (non-blocking)"
 
 run-cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \

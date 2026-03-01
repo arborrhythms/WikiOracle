@@ -47,7 +47,7 @@ A distributed truth network prevents appropriation. Anyone who tries to capture 
 WikiOracle implements a **Hierarchical Mixture of Experts (HME)** architecture for evaluating claims:
 
 - **Trust entries** carry certainty values in [-1, +1] using Kleene ternary logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
-- **Logical operators** (and/or/not under Strong Kleene semantics) compute derived certainty over the truth table.
+- **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the truth table.
 - **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
 - **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
 
@@ -104,7 +104,8 @@ The full design and governance documentation lives in [`doc/`](doc/README.md):
 | [WhatIsTruth](doc/WhatIsTruth.md) | Plural truth, POVs, empathy, certainty semantics |
 | [HierarchicalMixtureOfExperts](doc/HierarchicalMixtureOfExperts.md) | HME logic, distributed truth, conceptual spaces |
 | [Authority](doc/Authority.md) | Transitive trust and authority import format |
-| [Implication](doc/Implication.md) | Logical operators under Strong Kleene semantics |
+| [Logic](doc/Logic.md) | Logical operators (and/or/not/non) under Strong Kleene semantics |
+| [Non](doc/non.md) | Non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity |
 | [FreedomEmpathyTruth](doc/FreedomEmpathyTruth.md) | Freedom, Empathy, and Truth — safety principles |
 | [Architecture](doc/Architecture.md) | Local-first software architecture |
 | [Security](doc/Security.md) | Security considerations |

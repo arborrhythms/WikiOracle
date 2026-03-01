@@ -1218,7 +1218,7 @@ function _openSearch() {
         (function(r) {
           var div = document.createElement("div");
           div.className = "search-result";
-          div.innerHTML = '<div class="search-result-title">' + escapeHtml(r.convTitle) + ' <span style="color:var(--fg-muted);font-weight:normal">(' + r.role + ')</span></div>' +
+          div.innerHTML = '<div class="search-result-title">' + escapeHtml(r.convTitle) + ' <span style="color:var(--fg-muted);font-weight:normal">(' + escapeHtml(r.role) + ')</span></div>' +
             '<div class="search-result-snippet">' + r.snippet + '</div>';
           div.addEventListener("click", function() {
             dlg.close();

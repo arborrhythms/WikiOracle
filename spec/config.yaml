@@ -68,6 +68,18 @@ ui:
 server:
   stateless: false
   url_prefix: ""
+  # URL prefixes allowed for authority and dynamic provider fetches.
+  # file:// URLs are always blocked.  Only https:// URLs matching one of
+  # these prefixes are permitted.
+  allowed_urls:
+    - "https://api.openai.com/"
+    - "https://api.anthropic.com/"
+    - "https://generativelanguage.googleapis.com/"
+    - "https://api.x.ai/"
+    - "https://en.wikipedia.org/"
+    - "https://wikioracle.org/"
+    - "https://127.0.0.1:"
+    - "https://localhost:"
 
 # --- SSH keys ----------------------------------------------------------------
 # Referenced by the Makefile for remote operations.

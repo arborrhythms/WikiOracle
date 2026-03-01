@@ -328,6 +328,7 @@ CONFIG_SCHEMA = [
     ("server",                      "Runtime parameters (usually set via CLI flags)"),
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
+    ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
     ("ssh.wikioracle.key_file",     "Web-server deployment key"),
     ("ssh.wikioracle.user",         "SSH user"),
     ("ssh.wikioracle.host",         "SSH host"),
@@ -477,6 +478,48 @@ def config_to_yaml(data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Allowed URL prefixes for authority/provider fetches
+# ---------------------------------------------------------------------------
+def _default_allowed_urls() -> list:
+    """Default URL prefixes that authority and dynamic provider fetches may target.
+
+    Only https:// URLs whose prefix matches one of these entries are allowed.
+    file:// URLs are always blocked.
+    """
+    return [
+        "https://api.openai.com/",
+        "https://api.anthropic.com/",
+        "https://generativelanguage.googleapis.com/",
+        "https://api.x.ai/",
+        "https://en.wikipedia.org/",
+        "https://wikioracle.org/",
+        "https://127.0.0.1:",
+        "https://localhost:",
+    ]
+
+
+def get_allowed_urls() -> list:
+    """Return the configured allowed URL prefixes, falling back to defaults."""
+    return _CONFIG_YAML.get("server", {}).get("allowed_urls", _default_allowed_urls())
+
+
+def is_url_allowed(url: str) -> bool:
+    """Check whether a URL is permitted by the allowed_urls whitelist.
+
+    file:// URLs are always rejected.  Only https:// URLs matching a
+    configured prefix are accepted.
+    """
+    if not isinstance(url, str):
+        return False
+    if url.startswith("file://"):
+        return False
+    if not url.startswith("https://"):
+        return False
+    allowed = get_allowed_urls()
+    return any(url.startswith(prefix) for prefix in allowed)
+
+
+# ---------------------------------------------------------------------------
 # Config normalization (fill defaults, keep YAML shape)
 # ---------------------------------------------------------------------------
 def _normalize_config(cfg_yaml: dict) -> dict:
@@ -501,6 +544,7 @@ def _normalize_config(cfg_yaml: dict) -> dict:
     server = cfg.setdefault("server", {})
     server.setdefault("stateless", False)
     server.setdefault("url_prefix", "")
+    server.setdefault("allowed_urls", _default_allowed_urls())
     # Non-secret provider metadata for UI dropdowns / key-status badges
     prov_meta = {}
     for key, pcfg in PROVIDERS.items():

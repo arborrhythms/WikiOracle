@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import copy
+import html as html_mod
 import json
 import os
 import re
@@ -280,15 +281,16 @@ def evaluate_providers(
         try:
             response = call_fn(pconfig, messages)
             if response and not response.startswith("[Error"):
-                pname = pconfig.get("name", "")
+                pname = html_mod.escape(pconfig.get("name", ""), quote=True)
+                safe_response = html_mod.escape(response[:4000])
                 return Source(
                     source_id=entry.get("id", ""),
-                    title=pname,
+                    title=pconfig.get("name", ""),
                     certainty=entry.get("certainty", 0),
                     content=(
                         f'<div class="provider-response" '
                         f'data-provider="{pname}">'
-                        f'{response[:4000]}</div>'
+                        f'{safe_response}</div>'
                     ),
                     kind="provider",
                     time=entry.get("time", ""),
@@ -917,7 +919,7 @@ def _call_gemini(bundle: ProviderBundle | None, temperature: float,
     model = provider_cfg.get("default_model", "gemini-2.5-flash")
     base_url = provider_cfg.get("url", "https://generativelanguage.googleapis.com/v1beta/models")
     api_key = provider_cfg.get("api_key", "")
-    url = f"{base_url}/{model}:generateContent?key={api_key}"
+    url = f"{base_url}/{model}:generateContent"
 
     if bundle is not None:
         payload = to_gemini_payload(bundle, model=model, temperature=temperature)
@@ -941,7 +943,7 @@ def _call_gemini(bundle: ProviderBundle | None, temperature: float,
             text = c.get("parts", [{}])[0].get("text", "")
             print(f"  [{i}] {c.get('role', '?')}: {text[:200]}{'...' if len(text) > 200 else ''}")
 
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     resp = requests.post(url, json=payload, headers=headers, timeout=120)
     if resp.status_code >= 400:
         return f"[Error from Gemini: HTTP {resp.status_code}] {resp.text[:500]}"
@@ -1079,7 +1081,11 @@ def _call_dynamic_provider(
     provider_config: dict, messages: List[Dict], temperature: float, cfg: Config,
 ) -> str:
     """Route a trust-entry provider config to Anthropic, NanoChat, or OpenAI path."""
+    from config import is_url_allowed
+
     api_url = provider_config.get("api_url", "")
+    if api_url and not is_url_allowed(api_url):
+        return f"[Error: URL not in allowed_urls whitelist: {api_url}]"
     raw_key = provider_config.get("api_key", "")
     model = provider_config.get("model", "")
     timeout = provider_config.get("timeout") or int(cfg.timeout_s)

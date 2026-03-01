@@ -41,11 +41,38 @@ function repairXhtml(content) {
   return repaired;
 }
 
+function sanitizeHtml(html) {
+  // Whitelist-based sanitization: strip event handlers, javascript: URIs,
+  // and dangerous elements while preserving safe XHTML structure.
+  if (typeof DOMPurify !== "undefined") {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        "p", "br", "hr", "div", "span", "pre", "code", "blockquote",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "ul", "ol", "li", "dl", "dt", "dd",
+        "a", "em", "strong", "b", "i", "u", "s", "sub", "sup", "mark",
+        "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption",
+        "img", "figure", "figcaption", "details", "summary",
+        "abbr", "cite", "q", "time", "var", "kbd", "samp", "small",
+        "ruby", "rt", "rp", "wbr",
+      ],
+      ALLOWED_ATTR: [
+        "href", "src", "alt", "title", "class", "id", "colspan", "rowspan",
+        "width", "height", "style", "target", "rel", "datetime", "lang",
+        "dir", "data-provider",
+      ],
+      ALLOW_DATA_ATTR: false,
+    });
+  }
+  // Fallback when DOMPurify is unavailable: escape everything.
+  return "<p>" + escapeHtml(html) + "</p>";
+}
+
 function ensureXhtml(content) {
   if (!content) return "<div/>";
-  if (validateXhtml(content)) return content;
+  if (validateXhtml(content)) return sanitizeHtml(content);
   const repaired = repairXhtml(content);
-  if (validateXhtml(repaired)) return repaired;
+  if (validateXhtml(repaired)) return sanitizeHtml(repaired);
   // Last resort: escape and wrap
   return `<p>${escapeHtml(content)}</p>`;
 }

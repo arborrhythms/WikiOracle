@@ -46,7 +46,7 @@ A distributed truth network prevents appropriation. Anyone who tries to capture 
 
 WikiOracle implements a **Hierarchical Mixture of Experts (HME)** architecture for evaluating claims:
 
-- **Trust entries** carry certainty values in [-1, +1] using Kleene ternary logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
+- **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
 - **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the truth table.
 - **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
 - **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
@@ -69,7 +69,7 @@ The initial prototype is intentionally modest and low-cost:
 
 ## Longer-Term Direction
 
-If grounding-based truthfulness proves viable at small scale, the architecture can be evaluated and extended to larger open models. The broader aim is to explore whether architectural commitments to truth can enable honest self-explanation, reduce the need for ad-hoc guardrails, and support AI systems that function as durable public goods.
+If WikiOracle proves viable at small scale, the architecture can be evaluated and extended to larger open models. The broader aim is to explore whether architectural commitments to truth can enable honest self-explanation, reduce the need for ad-hoc guardrails, and support AI systems that function as durable public goods.
 
 ---
 

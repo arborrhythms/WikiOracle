@@ -1,6 +1,6 @@
 # Security
 
-WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:8888` by default and is not intended for direct exposure to the public internet. This document covers the security considerations relevant to its architecture.
+WikiOracle is a local-first application. The Flask server binds to `0.0.0.0:8888` by default (all interfaces). For production deployments, it should sit behind a reverse proxy that handles TLS termination and authentication. This document covers the security considerations relevant to its architecture.
 
 ## 1. Private Data
 

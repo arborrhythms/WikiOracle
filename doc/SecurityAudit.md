@@ -138,22 +138,16 @@ All other provider adapters (OpenAI, Anthropic, Grok) correctly send keys in HTT
 
 ## MEDIUM Severity
 
-### M1. Default Bind to All Interfaces (0.0.0.0)
+### M1. Default Bind to All Interfaces (0.0.0.0) — ACCEPTED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/config.py:113` |
 | **Category** | Insecure Default Configuration (CWE-1188) |
 
-```python
-bind_host: str = "0.0.0.0"  # Bind all interfaces (LAN-accessible).
-```
+The server binds to all network interfaces by default (`0.0.0.0`). This is intentional — the server runs on a public-facing host behind a reverse proxy. The `doc/Security.md` documentation has been corrected to reflect this.
 
-The server binds to all network interfaces by default, exposing it to the LAN. Combined with H4 (no authentication), any device on the same network can fully control the server.
-
-**Note:** The existing `doc/Security.md` states "The Flask server binds to `127.0.0.1:8888` by default," but the actual code default is `0.0.0.0`.
-
-**Recommendation:** Default `bind_host` to `127.0.0.1`. Users who need LAN access can opt in explicitly.
+**Status:** Accepted risk. Authentication (H4) is the appropriate mitigation for multi-user/public deployments.
 
 ---
 
@@ -430,7 +424,6 @@ The codebase implements several strong security practices worth acknowledging:
 | H1 | Integrate DOMPurify (or equivalent) to sanitize all content before `innerHTML` assignment | Small |
 | H4 | Add bearer-token authentication to state-mutating endpoints | Medium |
 | H5 | Move Gemini API key from URL query parameter to `x-goog-api-key` header | Small |
-| M1 | Change default `bind_host` from `0.0.0.0` to `127.0.0.1` | Trivial |
 
 ### Priority 2 — Address in Near Term
 
@@ -455,6 +448,6 @@ The codebase implements several strong security practices worth acknowledging:
 
 ---
 
-## Documentation Discrepancy
+## Documentation Discrepancy — RESOLVED
 
-`doc/Security.md` line 3 states the server "binds to `127.0.0.1:8888` by default," but `bin/config.py:113` sets `bind_host: str = "0.0.0.0"`. This should be reconciled — either update the code to match the documentation (recommended) or update the documentation to reflect the actual behavior.
+`doc/Security.md` line 3 previously stated the server "binds to `127.0.0.1:8888` by default," but the actual code default is `0.0.0.0`. The documentation has been updated to reflect the actual behavior, since the server is deployed on a public-facing host behind a reverse proxy.

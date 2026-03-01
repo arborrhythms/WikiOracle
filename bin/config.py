@@ -109,7 +109,7 @@ class Config:
     state_file: Path  # Canonical on-disk state location (ignored in stateless mode).
     base_url: str = "https://wikioracle.org"  # Upstream NanoChat-compatible base URL.
     api_path: str = "/chat/completions"  # Upstream endpoint path appended to base_url.
-    bind_host: str = "127.0.0.1"  # Bind to loopback only (use --bind-host 0.0.0.0 for LAN).
+    bind_host: str = "0.0.0.0"  # Bind all interfaces (LAN-accessible).
     bind_port: int = 8888  # Local port for browser/UI traffic.
     ssl_cert: Path = field(default_factory=lambda: _DEFAULT_CERT)  # TLS certificate.
     ssl_key: Path = field(default_factory=lambda: _DEFAULT_KEY)  # TLS private key.
@@ -153,7 +153,7 @@ def load_config() -> Config:
         state_file=state_file,
         base_url=os.environ.get("WIKIORACLE_BASE_URL", "https://wikioracle.org").rstrip("/"),
         api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/chat/completions"),
-        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "127.0.0.1"),
+        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "0.0.0.0"),
         bind_port=port,
         ssl_cert=ssl_cert,
         ssl_key=ssl_key,

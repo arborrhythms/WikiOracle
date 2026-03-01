@@ -456,6 +456,7 @@ def parse_provider_block(content: str) -> dict | None:
         "api_url": _val("api_url"),
         "api_key": _val("api_key"),
         "model": _val("model"),
+        "truth_url": _val("truth_url"),
         "timeout": 0,
         "max_tokens": 0,
     }

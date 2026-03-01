@@ -1,0 +1,2 @@
+{"type": "truth", "id": "sub_private_01", "title": "Eiffel Tower height", "trust": 0.95, "content": "<fact id=\"sub_private_01\" trust=\"0.95\" title=\"Eiffel Tower height\">The Eiffel Tower is 330 metres tall.</fact>", "time": "2026-03-01T00:00:01Z"}
+{"type": "truth", "id": "sub_private_02", "title": "Eiffel Tower material", "trust": 0.9, "content": "<fact id=\"sub_private_02\" trust=\"0.9\" title=\"Eiffel Tower material\">The Eiffel Tower is made of puddled iron.</fact>", "time": "2026-03-01T00:00:02Z"}

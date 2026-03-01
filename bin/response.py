@@ -22,6 +22,7 @@ import requests
 
 from config import Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config_yaml, _PROVIDER_MODELS
 from truth import (
+    _fetch_authority_jsonl,
     _has_operator_tag,
     compute_derived_truth,
     ensure_xhtml,
@@ -140,6 +141,50 @@ def _build_provider_query_bundle(
     )
 
 
+def resolve_provider_truth(
+    provider_config: dict,
+    provider_entry: dict,
+    *,
+    allowed_data_dir: str | None = None,
+) -> List[Source]:
+    """Resolve a provider's private truth table from its truth_url.
+
+    Uses the same JSONL format and fetch logic as authority resolution.
+    Certainty is scaled by the provider entry's certainty.
+    Returns Source objects ready for injection into the provider's bundle.
+    """
+    truth_url = provider_config.get("truth_url", "")
+    if not truth_url:
+        return []
+
+    raw_entries = _fetch_authority_jsonl(
+        truth_url, timeout_s=30,
+        allowed_data_dir=allowed_data_dir,
+    )
+
+    provider_id = provider_entry.get("id", "unknown")
+    provider_certainty = provider_entry.get("certainty", 0.0)
+    sources = []
+    for entry in raw_entries:
+        # JSONL files may use "trust" or "certainty" as the key
+        remote_certainty = entry.get("certainty", entry.get("trust", 0.0))
+        try:
+            remote_certainty = float(remote_certainty)
+        except (TypeError, ValueError):
+            remote_certainty = 0.0
+        scaled = min(1.0, max(-1.0, provider_certainty * remote_certainty))
+        remote_id = entry.get("id", "")
+        sources.append(Source(
+            source_id=f"{provider_id}:{remote_id}" if remote_id else provider_id,
+            title=entry.get("title", "untitled"),
+            certainty=scaled,
+            content=entry.get("content", ""),
+            kind="fact",
+            time=entry.get("time", ""),
+        ))
+    return sources
+
+
 def evaluate_providers(
     provider_entries: List[tuple],
     system: str,
@@ -149,6 +194,7 @@ def evaluate_providers(
     call_fn: Callable[[dict, List[Dict[str, str]]], str],
     *,
     timeout_s: int = 60,
+    call_chain: Optional[List[str]] = None,
 ) -> List[Source]:
     """Evaluate <provider> trust entries by sending each a RAG-free bundle.
 
@@ -162,6 +208,9 @@ def evaluate_providers(
         call_fn:  callable(provider_config, messages) -> str
                   Caller-supplied function that calls the provider API.
         timeout_s:  per-provider wall-clock timeout.
+        call_chain: ordered list of provider IDs that have acted as dom
+                    in the current vote ancestry.  A provider whose ID
+                    appears in this chain stays silent (cycle prevention).
 
     Returns:
         List of Source objects with kind="provider", whose content is
@@ -170,16 +219,36 @@ def evaluate_providers(
     if not provider_entries:
         return []
 
-    query_bundle = _build_provider_query_bundle(
+    chain = set(call_chain) if call_chain else set()
+
+    # Base RAG-free bundle (shared when no per-provider truth)
+    base_bundle = _build_provider_query_bundle(
         system, history, query, output,
     )
-    messages = to_nanochat_messages(query_bundle)
+    base_messages = to_nanochat_messages(base_bundle)
 
     results: List[Source] = []
 
     def _evaluate_one(pair):
         """Evaluate one provider entry and convert output to a Source object."""
         entry, pconfig = pair
+
+        # Cycle prevention: if this provider is in the call chain, stay silent
+        if entry.get("id", "") in chain:
+            return None
+
+        # Per-provider truth: if truth_url, build custom messages with
+        # the provider's private facts; otherwise use shared RAG-free messages
+        prov_truth = resolve_provider_truth(pconfig, entry)
+        if prov_truth:
+            custom_bundle = _build_provider_query_bundle(
+                system, history, query, output,
+            )
+            custom_bundle.sources = prov_truth
+            messages = to_nanochat_messages(custom_bundle)
+        else:
+            messages = base_messages
+
         try:
             response = call_fn(pconfig, messages)
             if response and not response.startswith("[Error"):
@@ -1047,6 +1116,7 @@ def _fan_out_and_aggregate(
     query_config: Dict[str, Any],
     conversation_id: str | None = None,
     temperature: float = 0.7,
+    call_chain: Optional[List[str]] = None,
 ) -> tuple:
     """HME fan-out: evaluate secondary providers, feed results to primary."""
     trust_entries = state.get("truth") or []
@@ -1073,6 +1143,7 @@ def _fan_out_and_aggregate(
             output=base_bundle.output,
             call_fn=_call_for_eval,
             timeout_s=max(int(cfg.timeout_s), 60),
+            call_chain=call_chain,
         )
 
     final_bundle = build_query(
@@ -1237,6 +1308,10 @@ def process_chat(
     # state.truth — truth only flows client → server).  The API key
     # for each dynamic provider can come from the truth entry itself
     # or from the matching provider in config.yaml.
+    #
+    # call_chain: the voting call chain for cycle prevention.  At the
+    # top level (process_chat) the chain is empty — no ancestors.
+    call_chain: list = []
     dyn_providers = get_provider_entries(truth_list)
     provider_sources: list = []
     if dyn_providers:
@@ -1254,6 +1329,7 @@ def process_chat(
             output=base_bundle.output,
             call_fn=_call_for_eval,
             timeout_s=max(int(cfg.timeout_s), 60),
+            call_chain=call_chain,
         )
         # provider_sources are passed to build_query below — they are NOT
         # written back into state.truth.  Truth only flows client → server.

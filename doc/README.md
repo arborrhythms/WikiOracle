@@ -9,12 +9,13 @@ Recommended reading order:
 3. `HierarchicalMixtureOfExperts.md` (HME logic, distributed truth vs consensus, conceptual spaces)
 4. `Authority.md` (transitive trust and the authority import format)
 5. `Implication.md` (logical operators: and/or/not under Strong Kleene semantics)
-6. `FreedomEmpathyTruth.md` (Freedom, Empathy, and Truth — safety principles)
-7. `Architecture.md` (current local-first software architecture)
-8. `Security.md` (concrete security considerations)
-9. `Installation.md` (build, deploy, and runtime instructions)
-10. `FutureWork.md` (roadmap)
-11. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
+6. `Voting.md` (voting protocol: dom steering, sub fan-out, cycle prevention, truth-only output)
+7. `FreedomEmpathyTruth.md` (Freedom, Empathy, and Truth — safety principles)
+8. `Architecture.md` (current local-first software architecture)
+9. `Security.md` (concrete security considerations)
+10. `Installation.md` (build, deploy, and runtime instructions)
+11. `FutureWork.md` (roadmap)
+12. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
 
 ## Core Documents (doc/)
 
@@ -24,6 +25,7 @@ Recommended reading order:
 - [`HierarchicalMixtureOfExperts.md`](./HierarchicalMixtureOfExperts.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
 - [`Authority.md`](./Authority.md): authority blocks (`<authority>`), transitive trust, certainty scaling, namespacing, and fetch/security constraints.
 - [`Implication.md`](./Implication.md): logical operators (and/or/not); Strong Kleene evaluation; derived truth engine.
+- [`Voting.md`](./Voting.md): voting protocol — dom steering, sub fan-out, cycle prevention, `<feeling>` as truth type, truth-only output.
 - [`FreedomEmpathyTruth.md`](./FreedomEmpathyTruth.md): Freedom, Empathy, and Truth — safety principles and architectural commitments.
 - [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).
 - [`Architecture.md`](./Architecture.md): implementation architecture (Flask shim + UI + `llm.jsonl` state model).

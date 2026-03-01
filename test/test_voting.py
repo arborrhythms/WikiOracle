@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the voting protocol: cycle prevention and per-provider truth."""
+"""Tests for the voting protocol: cycle prevention, per-provider truth, and prelim control."""
 
 import json
 import sys
@@ -29,7 +29,7 @@ SPEC_DIR = Path(__file__).resolve().parent.parent / "spec"
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_provider_entry(name, entry_id, certainty=0.8, truth_url=""):
+def _make_provider_entry(name, entry_id, certainty=0.8, truth_url="", prelim=True):
     """Create a (trust_entry, provider_config) pair for testing."""
     content = (
         f'<provider id="{entry_id}" trust="{certainty}" title="{name}" '
@@ -37,6 +37,8 @@ def _make_provider_entry(name, entry_id, certainty=0.8, truth_url=""):
     )
     if truth_url:
         content += f' truth_url="{truth_url}"'
+    if not prelim:
+        content += ' prelim="false"'
     content += "/>"
 
     entry = {
@@ -52,6 +54,7 @@ def _make_provider_entry(name, entry_id, certainty=0.8, truth_url=""):
         "api_key": "k",
         "model": "test",
         "truth_url": truth_url,
+        "prelim": prelim,
         "timeout": 30,
         "max_tokens": 1024,
     }
@@ -177,55 +180,55 @@ class TestVotingCyclePrevention(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Dom/sub mutual reference scenario
+# Alpha/beta mutual reference scenario
 # ---------------------------------------------------------------------------
 
-class TestDomSubMutualReference(unittest.TestCase):
-    """Simulate the dom→sub→dom cycle from the spec files."""
+class TestAlphaBetaMutualReference(unittest.TestCase):
+    """Simulate the alpha→beta→alpha cycle from the spec files."""
 
-    def test_dom_calls_sub_sub_calls_dom_dom_is_silent(self):
-        """Dom initiates vote → sub is called → sub tries to call dom → dom
-        finds itself in chain → keeps quiet.
+    def test_alpha_calls_beta_beta_calls_alpha_alpha_is_silent(self):
+        """Alpha initiates vote → beta is called → beta tries to call alpha →
+        alpha finds itself in chain → keeps quiet.
 
         Simulated as two rounds of evaluate_providers.
         """
-        dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
-        sub = _make_provider_entry("sub", "provider_sub1", certainty=0.8)
+        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
+        beta = _make_provider_entry("beta", "provider_beta1", certainty=0.8)
 
-        # Round 1: dom initiates vote, calls sub as secondary.
-        # call_chain starts empty (dom is the root).
+        # Round 1: alpha initiates vote, calls beta as secondary.
+        # call_chain starts empty (alpha is the root).
         round1_results = evaluate_providers(
-            [sub],  # secondaries
+            [beta],  # secondaries
             "", [], "What is the Eiffel Tower?", "",
-            lambda p, m: "Sub says: it is a tower in Paris",
+            lambda p, m: "Beta says: it is a tower in Paris",
         )
         self.assertEqual(len(round1_results), 1)
-        self.assertEqual(round1_results[0].title, "sub")
+        self.assertEqual(round1_results[0].title, "beta")
 
-        # Round 2: sub initiates its own nested vote, tries to call dom.
-        # call_chain now includes dom (the root) AND sub (the nested dom).
-        round2_chain = ["provider_dom", "provider_sub1"]
+        # Round 2: beta initiates its own nested vote, tries to call alpha.
+        # call_chain now includes alpha (the root) AND beta (the nested alpha).
+        round2_chain = ["provider_alpha", "provider_beta1"]
         round2_results = evaluate_providers(
-            [dom],  # sub tries to call dom as its secondary
+            [alpha],  # beta tries to call alpha as its secondary
             "", [], "What is the Eiffel Tower?", "",
-            lambda p, m: "Dom would respond — but should be silenced",
+            lambda p, m: "Alpha would respond — but should be silenced",
             call_chain=round2_chain,
         )
-        # Dom must stay silent — it's in the chain
+        # Alpha must stay silent — it's in the chain
         self.assertEqual(len(round2_results), 0)
 
 
 # ---------------------------------------------------------------------------
-# Branching: dom calls sub1 AND sub2
+# Branching: alpha calls beta1 AND beta2
 # ---------------------------------------------------------------------------
 
 class TestBranchingVote(unittest.TestCase):
-    """Dom fans out to sub1 and sub2; both try to call dom back."""
+    """Alpha fans out to beta1 and beta2; both try to call alpha back."""
 
-    def test_dom_fans_out_to_two_subs(self):
-        """Dom calls sub1 and sub2 in parallel — both respond."""
-        sub1 = _make_provider_entry("sub1", "provider_sub1", certainty=0.8)
-        sub2 = _make_provider_entry("sub2", "provider_sub2", certainty=0.7)
+    def test_alpha_fans_out_to_two_betas(self):
+        """Alpha calls beta1 and beta2 in parallel — both respond."""
+        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
+        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
 
         call_log = []
 
@@ -234,70 +237,70 @@ class TestBranchingVote(unittest.TestCase):
             return f"Response from {pconfig['name']}"
 
         results = evaluate_providers(
-            [sub1, sub2],
+            [beta1, beta2],
             "", [], "Tell me about Paris landmarks", "",
             mock_call,
         )
         self.assertEqual(len(results), 2)
         names = {r.title for r in results}
-        self.assertEqual(names, {"sub1", "sub2"})
-        self.assertEqual(set(call_log), {"sub1", "sub2"})
+        self.assertEqual(names, {"beta1", "beta2"})
+        self.assertEqual(set(call_log), {"beta1", "beta2"})
 
-    def test_both_subs_try_to_call_dom_back_dom_silent(self):
-        """After dom fans out, each sub tries to call dom — dom stays silent
-        in both cases because it's in the call chain.
+    def test_both_betas_try_to_call_alpha_back_alpha_silent(self):
+        """After alpha fans out, each beta tries to call alpha — alpha stays
+        silent in both cases because it's in the call chain.
 
-        Sub1's nested vote: chain = [dom, sub1] → dom silenced
-        Sub2's nested vote: chain = [dom, sub2] → dom silenced
+        Beta1's nested vote: chain = [alpha, beta1] → alpha silenced
+        Beta2's nested vote: chain = [alpha, beta2] → alpha silenced
         """
-        dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
+        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
 
-        # Sub1's nested vote tries to call dom
-        results_sub1 = evaluate_providers(
-            [dom],
+        # Beta1's nested vote tries to call alpha
+        results_beta1 = evaluate_providers(
+            [alpha],
             "", [], "q", "",
-            lambda p, m: "dom should be silent",
-            call_chain=["provider_dom", "provider_sub1"],
+            lambda p, m: "alpha should be silent",
+            call_chain=["provider_alpha", "provider_beta1"],
         )
-        self.assertEqual(len(results_sub1), 0, "Dom must be silent in sub1's vote")
+        self.assertEqual(len(results_beta1), 0, "Alpha must be silent in beta1's vote")
 
-        # Sub2's nested vote tries to call dom
-        results_sub2 = evaluate_providers(
-            [dom],
+        # Beta2's nested vote tries to call alpha
+        results_beta2 = evaluate_providers(
+            [alpha],
             "", [], "q", "",
-            lambda p, m: "dom should be silent",
-            call_chain=["provider_dom", "provider_sub2"],
+            lambda p, m: "alpha should be silent",
+            call_chain=["provider_alpha", "provider_beta2"],
         )
-        self.assertEqual(len(results_sub2), 0, "Dom must be silent in sub2's vote")
+        self.assertEqual(len(results_beta2), 0, "Alpha must be silent in beta2's vote")
 
-    def test_sub1_can_call_sub2_in_nested_vote(self):
-        """Sub1 initiates a nested vote and calls sub2 — sub2 is NOT in the
-        chain (only dom and sub1 are), so sub2 responds normally."""
-        sub2 = _make_provider_entry("sub2", "provider_sub2", certainty=0.7)
+    def test_beta1_can_call_beta2_in_nested_vote(self):
+        """Beta1 initiates a nested vote and calls beta2 — beta2 is NOT in the
+        chain (only alpha and beta1 are), so beta2 responds normally."""
+        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
 
         results = evaluate_providers(
-            [sub2],
+            [beta2],
             "", [], "q", "",
-            lambda p, m: "sub2 responds in sub1's nested vote",
-            call_chain=["provider_dom", "provider_sub1"],
+            lambda p, m: "beta2 responds in beta1's nested vote",
+            call_chain=["provider_alpha", "provider_beta1"],
         )
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].title, "sub2")
+        self.assertEqual(results[0].title, "beta2")
 
     def test_full_branching_scenario(self):
-        """Complete branching vote: dom → {sub1, sub2}, both subs try to call
-        dom back, dom stays silent; subs can still call each other.
+        """Complete branching vote: alpha → {beta1, beta2}, both betas try to
+        call alpha back, alpha stays silent; betas can still call each other.
 
         Verifies the diamond topology:
-              dom
+              alpha
              /   \\
-          sub1   sub2
+          beta1   beta2
              \\   /
-           dom_final
+           alpha_final
         """
-        dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
-        sub1 = _make_provider_entry("sub1", "provider_sub1", certainty=0.8)
-        sub2 = _make_provider_entry("sub2", "provider_sub2", certainty=0.7)
+        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
+        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
+        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
 
         call_log = []
 
@@ -305,39 +308,39 @@ class TestBranchingVote(unittest.TestCase):
             call_log.append(pconfig["name"])
             return f"Response from {pconfig['name']}"
 
-        # Step 1: dom fans out to sub1 and sub2 (no call chain yet)
+        # Step 1: alpha fans out to beta1 and beta2 (no call chain yet)
         fan_out_results = evaluate_providers(
-            [sub1, sub2],
+            [beta1, beta2],
             "", [], "Tell me about Paris", "",
             mock_call,
         )
         self.assertEqual(len(fan_out_results), 2)
 
-        # Step 2: sub1 initiates nested vote, tries dom + sub2
+        # Step 2: beta1 initiates nested vote, tries alpha + beta2
         call_log.clear()
-        sub1_nested = evaluate_providers(
-            [dom, sub2],
+        beta1_nested = evaluate_providers(
+            [alpha, beta2],
             "", [], "Tell me about Paris", "",
             mock_call,
-            call_chain=["provider_dom", "provider_sub1"],
+            call_chain=["provider_alpha", "provider_beta1"],
         )
-        # dom is silenced; sub2 responds
-        self.assertEqual(len(sub1_nested), 1)
-        self.assertEqual(sub1_nested[0].title, "sub2")
-        self.assertEqual(call_log, ["sub2"])
+        # alpha is silenced; beta2 responds
+        self.assertEqual(len(beta1_nested), 1)
+        self.assertEqual(beta1_nested[0].title, "beta2")
+        self.assertEqual(call_log, ["beta2"])
 
-        # Step 3: sub2 initiates nested vote, tries dom + sub1
+        # Step 3: beta2 initiates nested vote, tries alpha + beta1
         call_log.clear()
-        sub2_nested = evaluate_providers(
-            [dom, sub1],
+        beta2_nested = evaluate_providers(
+            [alpha, beta1],
             "", [], "Tell me about Paris", "",
             mock_call,
-            call_chain=["provider_dom", "provider_sub2"],
+            call_chain=["provider_alpha", "provider_beta2"],
         )
-        # dom is silenced; sub1 responds
-        self.assertEqual(len(sub2_nested), 1)
-        self.assertEqual(sub2_nested[0].title, "sub1")
-        self.assertEqual(call_log, ["sub1"])
+        # alpha is silenced; beta1 responds
+        self.assertEqual(len(beta2_nested), 1)
+        self.assertEqual(beta2_nested[0].title, "beta1")
+        self.assertEqual(call_log, ["beta1"])
 
 
 # ---------------------------------------------------------------------------
@@ -352,11 +355,11 @@ class TestPerProviderTruth(unittest.TestCase):
         content = (
             '<provider id="p1" trust="0.8" title="Test" '
             'name="test" api_url="http://test" model="m" '
-            'truth_url="file://spec/sub_truth.jsonl"/>'
+            'truth_url="file://spec/beta_truth.jsonl"/>'
         )
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
-        self.assertEqual(result["truth_url"], "file://spec/sub_truth.jsonl")
+        self.assertEqual(result["truth_url"], "file://spec/beta_truth.jsonl")
 
     def test_truth_url_empty_when_absent(self):
         """parse_provider_block returns empty truth_url when not present."""
@@ -401,126 +404,126 @@ class TestPerProviderTruth(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSpecFiles(unittest.TestCase):
-    """Verify the dom/sub/sub2 spec files parse correctly."""
+    """Verify the alpha/beta1/beta2 spec files parse correctly."""
 
-    def test_dom_has_two_provider_subs(self):
-        """dom.jsonl contains provider entries pointing to sub1 and sub2."""
-        entries = _load_truth_entries("dom.jsonl")
+    def test_alpha_has_two_provider_betas(self):
+        """alpha.jsonl contains provider entries pointing to beta1 and beta2."""
+        entries = _load_truth_entries("alpha.jsonl")
         providers = get_provider_entries(entries)
         self.assertEqual(len(providers), 2)
         names = {p[1]["name"] for p in providers}
-        self.assertEqual(names, {"sub1", "sub2"})
+        self.assertEqual(names, {"beta1", "beta2"})
 
-    def test_dom_has_own_facts(self):
-        """dom.jsonl has facts that sub1/sub2 don't have."""
-        entries = _load_truth_entries("dom.jsonl")
+    def test_alpha_has_own_facts(self):
+        """alpha.jsonl has facts that beta1/beta2 don't have."""
+        entries = _load_truth_entries("alpha.jsonl")
         fact_titles = {e["title"] for e in entries
                        if "<fact" in e.get("content", "")}
         self.assertIn("Capital of France", fact_titles)
         self.assertIn("France is in Europe", fact_titles)
 
-    def test_sub1_has_provider_dom(self):
-        """sub.jsonl contains a provider entry pointing to dom."""
-        entries = _load_truth_entries("sub.jsonl")
+    def test_beta1_has_provider_alpha(self):
+        """beta1.jsonl contains a provider entry pointing to alpha."""
+        entries = _load_truth_entries("beta1.jsonl")
         providers = get_provider_entries(entries)
         self.assertEqual(len(providers), 1)
-        self.assertEqual(providers[0][1]["name"], "dom")
+        self.assertEqual(providers[0][1]["name"], "alpha")
 
-    def test_sub1_has_own_facts(self):
-        """sub.jsonl has its own facts (Eiffel Tower)."""
-        entries = _load_truth_entries("sub.jsonl")
+    def test_beta1_has_own_facts(self):
+        """beta1.jsonl has its own facts (Eiffel Tower)."""
+        entries = _load_truth_entries("beta1.jsonl")
         fact_titles = {e["title"] for e in entries
                        if "<fact" in e.get("content", "")}
         self.assertIn("Eiffel Tower location", fact_titles)
         self.assertIn("Eiffel Tower height", fact_titles)
         self.assertIn("Eiffel Tower material", fact_titles)
 
-    def test_sub2_has_provider_dom(self):
-        """sub2.jsonl contains a provider entry pointing to dom."""
-        entries = _load_truth_entries("sub2.jsonl")
+    def test_beta2_has_provider_alpha(self):
+        """beta2.jsonl contains a provider entry pointing to alpha."""
+        entries = _load_truth_entries("beta2.jsonl")
         providers = get_provider_entries(entries)
         self.assertEqual(len(providers), 1)
-        self.assertEqual(providers[0][1]["name"], "dom")
+        self.assertEqual(providers[0][1]["name"], "alpha")
 
-    def test_sub2_has_own_facts(self):
-        """sub2.jsonl has its own facts (Louvre)."""
-        entries = _load_truth_entries("sub2.jsonl")
+    def test_beta2_has_own_facts(self):
+        """beta2.jsonl has its own facts (Louvre)."""
+        entries = _load_truth_entries("beta2.jsonl")
         fact_titles = {e["title"] for e in entries
                        if "<fact" in e.get("content", "")}
         self.assertIn("Louvre Museum location", fact_titles)
         self.assertIn("Mona Lisa location", fact_titles)
 
     def test_mutual_reference_cycle_scenario(self):
-        """dom→sub1, sub1→dom: dom is silenced when in call chain."""
-        sub_entries = _load_truth_entries("sub.jsonl")
-        sub_providers = get_provider_entries(sub_entries)
-        dom_entry = sub_providers[0]  # sub's reference to dom
+        """alpha→beta1, beta1→alpha: alpha is silenced when in call chain."""
+        beta_entries = _load_truth_entries("beta1.jsonl")
+        beta_providers = get_provider_entries(beta_entries)
+        alpha_entry = beta_providers[0]  # beta's reference to alpha
 
         results = evaluate_providers(
-            [dom_entry],
+            [alpha_entry],
             "", [], "test question", "",
-            lambda p, m: "dom should not respond",
-            call_chain=["provider_dom"],
+            lambda p, m: "alpha should not respond",
+            call_chain=["provider_alpha"],
         )
-        self.assertEqual(len(results), 0, "Dom must stay silent when in call chain")
+        self.assertEqual(len(results), 0, "Alpha must stay silent when in call chain")
 
     def test_branching_cycle_from_spec_files(self):
         """Load all three spec files, verify the branching cycle scenario.
 
-        dom calls sub1 and sub2. Both subs reference dom back.
-        dom should be silenced in both subs' nested votes.
+        Alpha calls beta1 and beta2. Both betas reference alpha back.
+        Alpha should be silenced in both betas' nested votes.
         """
-        dom_entries = _load_truth_entries("dom.jsonl")
-        sub1_entries = _load_truth_entries("sub.jsonl")
-        sub2_entries = _load_truth_entries("sub2.jsonl")
+        alpha_entries = _load_truth_entries("alpha.jsonl")
+        beta1_entries = _load_truth_entries("beta1.jsonl")
+        beta2_entries = _load_truth_entries("beta2.jsonl")
 
-        dom_providers = get_provider_entries(dom_entries)
-        sub1_providers = get_provider_entries(sub1_entries)
-        sub2_providers = get_provider_entries(sub2_entries)
+        alpha_providers = get_provider_entries(alpha_entries)
+        beta1_providers = get_provider_entries(beta1_entries)
+        beta2_providers = get_provider_entries(beta2_entries)
 
-        # dom fans out to sub1 and sub2
-        self.assertEqual(len(dom_providers), 2)
-        dom_sub_names = {p[1]["name"] for p in dom_providers}
-        self.assertEqual(dom_sub_names, {"sub1", "sub2"})
+        # alpha fans out to beta1 and beta2
+        self.assertEqual(len(alpha_providers), 2)
+        alpha_beta_names = {p[1]["name"] for p in alpha_providers}
+        self.assertEqual(alpha_beta_names, {"beta1", "beta2"})
 
-        # Both subs reference dom back
-        self.assertEqual(sub1_providers[0][1]["name"], "dom")
-        self.assertEqual(sub2_providers[0][1]["name"], "dom")
+        # Both betas reference alpha back
+        self.assertEqual(beta1_providers[0][1]["name"], "alpha")
+        self.assertEqual(beta2_providers[0][1]["name"], "alpha")
 
-        # Sub1 tries to call dom — silenced
+        # Beta1 tries to call alpha — silenced
         r1 = evaluate_providers(
-            [sub1_providers[0]],
+            [beta1_providers[0]],
             "", [], "q", "",
             lambda p, m: "should be silent",
-            call_chain=["provider_dom", "provider_sub1"],
+            call_chain=["provider_alpha", "provider_beta1"],
         )
         self.assertEqual(len(r1), 0)
 
-        # Sub2 tries to call dom — silenced
+        # Beta2 tries to call alpha — silenced
         r2 = evaluate_providers(
-            [sub2_providers[0]],
+            [beta2_providers[0]],
             "", [], "q", "",
             lambda p, m: "should be silent",
-            call_chain=["provider_dom", "provider_sub2"],
+            call_chain=["provider_alpha", "provider_beta2"],
         )
         self.assertEqual(len(r2), 0)
 
 
 # ---------------------------------------------------------------------------
-# Diamond voting protocol: dom_prelim steering
+# Diamond voting protocol: prelim_response steering
 # ---------------------------------------------------------------------------
 
 class TestDiamondVoting(unittest.TestCase):
-    """Verify the two-round diamond: R_dom_prelim → R_sub_* → R_dom_final."""
+    """Verify the two-round diamond: R_alpha_prelim → R_beta_* → R_alpha_final."""
 
-    def test_build_bundle_with_dom_prelim(self):
-        """_build_provider_query_bundle injects Q → R_dom into history."""
+    def test_build_bundle_with_prelim_response(self):
+        """_build_provider_query_bundle injects Q → R_alpha into history."""
         bundle = _build_provider_query_bundle(
             "system ctx", [{"role": "user", "content": "old msg"}],
             "What is Paris?", "output fmt",
-            dom_prelim="Paris is the capital of France.",
+            prelim_response="Paris is the capital of France.",
         )
-        # Original history preserved + Q→R_dom appended
+        # Original history preserved + Q→R_alpha appended
         self.assertEqual(len(bundle.history), 3)
         self.assertEqual(bundle.history[0]["content"], "old msg")
         self.assertEqual(bundle.history[1]["role"], "user")
@@ -528,54 +531,54 @@ class TestDiamondVoting(unittest.TestCase):
         self.assertEqual(bundle.history[2]["role"], "assistant")
         self.assertEqual(bundle.history[2]["content"], "Paris is the capital of France.")
 
-    def test_build_bundle_without_dom_prelim(self):
-        """Without dom_prelim, history is unchanged."""
+    def test_build_bundle_without_prelim_response(self):
+        """Without prelim_response, history is unchanged."""
         bundle = _build_provider_query_bundle(
             "ctx", [{"role": "user", "content": "hi"}],
             "query", "out",
-            dom_prelim=None,
+            prelim_response=None,
         )
         self.assertEqual(len(bundle.history), 1)
         self.assertEqual(bundle.history[0]["content"], "hi")
 
-    def test_build_bundle_empty_dom_prelim(self):
-        """Empty string dom_prelim is treated as falsy — no injection."""
+    def test_build_bundle_empty_prelim_response(self):
+        """Empty string prelim_response is treated as falsy — no injection."""
         bundle = _build_provider_query_bundle(
             "ctx", [], "query", "out",
-            dom_prelim="",
+            prelim_response="",
         )
         self.assertEqual(len(bundle.history), 0)
 
-    def test_subs_see_dom_prelim_in_messages(self):
-        """When dom_prelim is passed to evaluate_providers, subs see
-        Q → R_dom in their messages (steering signal)."""
+    def test_betas_see_prelim_response_in_messages(self):
+        """When prelim_response is passed to evaluate_providers, betas see
+        Q → R_alpha in their messages (steering signal)."""
         captured_messages = {}
 
         def mock_call(pconfig, messages):
             captured_messages[pconfig["name"]] = messages
-            return f"Sub response from {pconfig['name']}"
+            return f"Beta response from {pconfig['name']}"
 
-        sub1 = _make_provider_entry("sub1", "prov_sub1")
-        sub2 = _make_provider_entry("sub2", "prov_sub2")
+        beta1 = _make_provider_entry("beta1", "prov_beta1")
+        beta2 = _make_provider_entry("beta2", "prov_beta2")
 
         results = evaluate_providers(
-            [sub1, sub2],
+            [beta1, beta2],
             "system context", [], "What is Paris?", "",
             mock_call,
-            dom_prelim="Paris is the capital of France.",
+            prelim_response="Paris is the capital of France.",
         )
 
         self.assertEqual(len(results), 2)
-        # Both subs should have been called
-        self.assertIn("sub1", captured_messages)
-        self.assertIn("sub2", captured_messages)
+        # Both betas should have been called
+        self.assertIn("beta1", captured_messages)
+        self.assertIn("beta2", captured_messages)
 
-        # Each sub's messages should contain the dom's preliminary response
-        for name in ("sub1", "sub2"):
+        # Each beta's messages should contain the alpha's preliminary response
+        for name in ("beta1", "beta2"):
             msgs = captured_messages[name]
             all_text = " ".join(m["content"] for m in msgs)
             self.assertIn("Paris is the capital of France.", all_text,
-                          f"{name} should see dom's preliminary response")
+                          f"{name} should see alpha's preliminary response")
             # The query appears both in the injected history pair AND
             # as the final user message
             query_count = sum(1 for m in msgs
@@ -583,24 +586,24 @@ class TestDiamondVoting(unittest.TestCase):
             self.assertGreaterEqual(query_count, 1,
                                     f"{name} should see the query")
 
-    def test_subs_get_standard_messages_without_dom_prelim(self):
-        """Without dom_prelim, subs get RAG-free messages with no steering."""
+    def test_betas_get_standard_messages_without_prelim_response(self):
+        """Without prelim_response, betas get RAG-free messages with no steering."""
         captured_messages = {}
 
         def mock_call(pconfig, messages):
             captured_messages[pconfig["name"]] = messages
             return "response"
 
-        sub = _make_provider_entry("sub1", "prov_sub1")
+        beta = _make_provider_entry("beta1", "prov_beta1")
 
         evaluate_providers(
-            [sub],
+            [beta],
             "system context", [], "question", "",
             mock_call,
-            dom_prelim=None,
+            prelim_response=None,
         )
 
-        msgs = captured_messages["sub1"]
+        msgs = captured_messages["beta1"]
         all_text = " ".join(m["content"] for m in msgs)
         self.assertIn("system context", all_text)
         self.assertIn("question", all_text)
@@ -608,107 +611,245 @@ class TestDiamondVoting(unittest.TestCase):
         assistant_msgs = [m for m in msgs if m["role"] == "assistant"
                           and m["content"] != "Understood. I have the project context and reference documents."]
         self.assertEqual(len(assistant_msgs), 0,
-                         "No dom_prelim means no steering assistant message")
+                         "No prelim_response means no steering assistant message")
 
     def test_diamond_full_sequence(self):
-        """Simulate the complete diamond: dom prelim → sub fan-out → dom final.
+        """Simulate the complete diamond: alpha prelim → beta fan-out → alpha final.
 
         Topology:
-              dom
+              alpha
              / \\
-          sub1   sub2
+          beta1   beta2
              \\ /
-           dom_final
+           alpha_final
 
         Verifies:
-        1. Dom is called first (prelim)
-        2. Subs see dom's prelim response
-        3. Dom is called again (final) seeing sub responses
+        1. Alpha is called first (prelim)
+        2. Betas see alpha's prelim response
+        3. Alpha is called again (final) seeing beta responses
         """
         call_sequence = []
 
-        dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
-        sub1 = _make_provider_entry("sub1", "provider_sub1", certainty=0.8)
-        sub2 = _make_provider_entry("sub2", "provider_sub2", certainty=0.7)
+        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
+        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
+        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
 
-        # Step 1: Dom preliminary
-        dom_prelim = "Dom says: Paris is the capital"
-        call_sequence.append(("dom", "prelim"))
+        # Step 1: Alpha preliminary
+        prelim_response = "Alpha says: Paris is the capital"
+        call_sequence.append(("alpha", "prelim"))
 
-        # Step 2: Fan out to subs with dom_prelim as steering
-        captured_sub_msgs = {}
+        # Step 2: Fan out to betas with prelim_response as steering
+        captured_beta_msgs = {}
 
-        def mock_sub_call(pconfig, messages):
+        def mock_beta_call(pconfig, messages):
             name = pconfig["name"]
-            call_sequence.append((name, "sub_response"))
-            captured_sub_msgs[name] = messages
+            call_sequence.append((name, "beta_response"))
+            captured_beta_msgs[name] = messages
             return f"{name}: I agree about Paris"
 
-        sub_results = evaluate_providers(
-            [sub1, sub2],
+        beta_results = evaluate_providers(
+            [beta1, beta2],
             "system", [], "What is the capital of France?", "",
-            mock_sub_call,
-            call_chain=["provider_dom"],
-            dom_prelim=dom_prelim,
+            mock_beta_call,
+            call_chain=["provider_alpha"],
+            prelim_response=prelim_response,
         )
 
-        # Both subs responded (neither is in call chain)
-        self.assertEqual(len(sub_results), 2)
+        # Both betas responded (neither is in call chain)
+        self.assertEqual(len(beta_results), 2)
 
-        # Both subs saw dom_prelim in their messages
-        for name in ("sub1", "sub2"):
-            all_text = " ".join(m["content"] for m in captured_sub_msgs[name])
-            self.assertIn(dom_prelim, all_text)
+        # Both betas saw prelim_response in their messages
+        for name in ("beta1", "beta2"):
+            all_text = " ".join(m["content"] for m in captured_beta_msgs[name])
+            self.assertIn(prelim_response, all_text)
 
-        # Step 3: Dom final (we simulate by calling evaluate_providers again,
+        # Step 3: Alpha final (we simulate by calling evaluate_providers again,
         # but in real code this is a direct call to the UI provider)
-        call_sequence.append(("dom", "final"))
+        call_sequence.append(("alpha", "final"))
 
         # Verify call sequence
-        self.assertEqual(call_sequence[0], ("dom", "prelim"))
-        self.assertEqual(call_sequence[-1], ("dom", "final"))
-        # Subs were called between prelim and final
-        sub_calls = [c for c in call_sequence if c[1] == "sub_response"]
-        self.assertEqual(len(sub_calls), 2)
+        self.assertEqual(call_sequence[0], ("alpha", "prelim"))
+        self.assertEqual(call_sequence[-1], ("alpha", "final"))
+        # Betas were called between prelim and final
+        beta_calls = [c for c in call_sequence if c[1] == "beta_response"]
+        self.assertEqual(len(beta_calls), 2)
 
     def test_diamond_with_cycle_prevention(self):
-        """In the diamond, subs try to call dom back — dom stays silent due to
-        cycle prevention, but subs still produce their own responses."""
-        dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
-        sub1 = _make_provider_entry("sub1", "provider_sub1", certainty=0.8)
+        """In the diamond, betas try to call alpha back — alpha stays silent due
+        to cycle prevention, but betas still produce their own responses."""
+        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
+        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
 
-        # Step 2 simulation: sub1 is called with dom in call chain
-        sub_results = evaluate_providers(
-            [sub1],
+        # Step 2 simulation: beta1 is called with alpha in call chain
+        beta_results = evaluate_providers(
+            [beta1],
             "system", [], "query", "",
-            lambda p, m: "sub1 responds normally",
-            call_chain=["provider_dom"],
-            dom_prelim="Dom's preliminary thoughts",
+            lambda p, m: "beta1 responds normally",
+            call_chain=["provider_alpha"],
+            prelim_response="Alpha's preliminary thoughts",
         )
-        # sub1 is NOT in the chain, so it responds
-        self.assertEqual(len(sub_results), 1)
+        # beta1 is NOT in the chain, so it responds
+        self.assertEqual(len(beta_results), 1)
 
-        # Sub1 tries to call dom in a nested vote — dom is silenced
+        # Beta1 tries to call alpha in a nested vote — alpha is silenced
         nested_results = evaluate_providers(
-            [dom],
+            [alpha],
             "system", [], "query", "",
-            lambda p, m: "dom should NOT be called",
-            call_chain=["provider_dom", "provider_sub1"],
+            lambda p, m: "alpha should NOT be called",
+            call_chain=["provider_alpha", "provider_beta1"],
         )
         self.assertEqual(len(nested_results), 0)
 
-    def test_dom_prelim_does_not_mutate_original_history(self):
+    def test_prelim_response_does_not_mutate_original_history(self):
         """_build_provider_query_bundle must not mutate the original history."""
         original_history = [{"role": "user", "content": "hello"}]
         history_copy = list(original_history)
 
         _build_provider_query_bundle(
             "sys", original_history, "q", "out",
-            dom_prelim="dom says something",
+            prelim_response="alpha says something",
         )
 
         # Original should be unchanged
         self.assertEqual(original_history, history_copy)
+
+
+# ---------------------------------------------------------------------------
+# Per-provider prelim control
+# ---------------------------------------------------------------------------
+
+class TestPrelimControl(unittest.TestCase):
+    """Verify that prelim attribute controls per-beta steering."""
+
+    def test_parse_provider_block_prelim_default_true(self):
+        """parse_provider_block defaults prelim to True when absent."""
+        content = '<provider name="test" api_url="http://test" model="m"/>'
+        result = parse_provider_block(content)
+        self.assertIsNotNone(result)
+        self.assertTrue(result["prelim"])
+
+    def test_parse_provider_block_prelim_explicit_true(self):
+        """parse_provider_block reads prelim="true"."""
+        content = '<provider name="test" api_url="http://test" model="m" prelim="true"/>'
+        result = parse_provider_block(content)
+        self.assertIsNotNone(result)
+        self.assertTrue(result["prelim"])
+
+    def test_parse_provider_block_prelim_false(self):
+        """parse_provider_block reads prelim="false"."""
+        content = '<provider name="test" api_url="http://test" model="m" prelim="false"/>'
+        result = parse_provider_block(content)
+        self.assertIsNotNone(result)
+        self.assertFalse(result["prelim"])
+
+    def test_parse_provider_block_prelim_zero(self):
+        """parse_provider_block treats prelim="0" as False."""
+        content = '<provider name="test" api_url="http://test" model="m" prelim="0"/>'
+        result = parse_provider_block(content)
+        self.assertIsNotNone(result)
+        self.assertFalse(result["prelim"])
+
+    def test_parse_provider_block_prelim_no(self):
+        """parse_provider_block treats prelim="no" as False."""
+        content = '<provider name="test" api_url="http://test" model="m" prelim="no"/>'
+        result = parse_provider_block(content)
+        self.assertIsNotNone(result)
+        self.assertFalse(result["prelim"])
+
+    def test_beta_with_prelim_false_gets_cold_messages(self):
+        """Beta with prelim=False does not see the alpha's preliminary response."""
+        captured_messages = {}
+
+        def mock_call(pconfig, messages):
+            captured_messages[pconfig["name"]] = messages
+            return "response"
+
+        cold_beta = _make_provider_entry("cold", "prov_cold", prelim=False)
+
+        evaluate_providers(
+            [cold_beta],
+            "system", [], "question", "",
+            mock_call,
+            prelim_response="Alpha's preliminary thoughts",
+        )
+
+        msgs = captured_messages["cold"]
+        all_text = " ".join(m["content"] for m in msgs)
+        self.assertNotIn("Alpha's preliminary thoughts", all_text,
+                         "Beta with prelim=False must not see preliminary response")
+
+    def test_beta_with_prelim_true_gets_steered_messages(self):
+        """Beta with prelim=True sees the alpha's preliminary response."""
+        captured_messages = {}
+
+        def mock_call(pconfig, messages):
+            captured_messages[pconfig["name"]] = messages
+            return "response"
+
+        steered_beta = _make_provider_entry("steered", "prov_steered", prelim=True)
+
+        evaluate_providers(
+            [steered_beta],
+            "system", [], "question", "",
+            mock_call,
+            prelim_response="Alpha's preliminary thoughts",
+        )
+
+        msgs = captured_messages["steered"]
+        all_text = " ".join(m["content"] for m in msgs)
+        self.assertIn("Alpha's preliminary thoughts", all_text,
+                       "Beta with prelim=True should see preliminary response")
+
+    def test_mixed_prelim_betas(self):
+        """When betas have different prelim settings, only prelim=True betas
+        see the alpha's preliminary response."""
+        captured_messages = {}
+
+        def mock_call(pconfig, messages):
+            captured_messages[pconfig["name"]] = messages
+            return f"Response from {pconfig['name']}"
+
+        steered = _make_provider_entry("steered", "prov_steered", prelim=True)
+        cold = _make_provider_entry("cold", "prov_cold", prelim=False)
+
+        results = evaluate_providers(
+            [steered, cold],
+            "system", [], "question", "",
+            mock_call,
+            prelim_response="Alpha's preliminary thoughts",
+        )
+
+        self.assertEqual(len(results), 2)
+
+        # Steered beta sees prelim
+        steered_text = " ".join(m["content"] for m in captured_messages["steered"])
+        self.assertIn("Alpha's preliminary thoughts", steered_text)
+
+        # Cold beta does NOT see prelim
+        cold_text = " ".join(m["content"] for m in captured_messages["cold"])
+        self.assertNotIn("Alpha's preliminary thoughts", cold_text)
+
+    def test_prelim_false_with_no_prelim_response_is_fine(self):
+        """Beta with prelim=False when no prelim_response exists — no crash."""
+        captured_messages = {}
+
+        def mock_call(pconfig, messages):
+            captured_messages[pconfig["name"]] = messages
+            return "response"
+
+        cold_beta = _make_provider_entry("cold", "prov_cold", prelim=False)
+
+        evaluate_providers(
+            [cold_beta],
+            "system", [], "question", "",
+            mock_call,
+            prelim_response=None,
+        )
+
+        self.assertIn("cold", captured_messages)
+        self.assertEqual(len([r for r in evaluate_providers(
+            [cold_beta], "system", [], "q", "", mock_call,
+        )]), 1)
 
 
 if __name__ == "__main__":

@@ -451,12 +451,14 @@ def parse_provider_block(content: str) -> dict | None:
             return text
         # Fall back to attribute on the <provider> element itself
         return prov.get(tag, default)
+    prelim_raw = _val("prelim", "true").lower()
     result = {
         "name": _val("name", "unknown"),
         "api_url": _val("api_url"),
         "api_key": _val("api_key"),
         "model": _val("model"),
         "truth_url": _val("truth_url"),
+        "prelim": prelim_raw not in ("false", "0", "no"),
         "timeout": 0,
         "max_tokens": 0,
     }

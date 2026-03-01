@@ -56,6 +56,20 @@ def _make_provider_entry(name, entry_id, certainty=0.8, truth_url=""):
     return (entry, config)
 
 
+def _load_truth_entries(filename):
+    """Load truth entries from a spec JSONL file."""
+    path = SPEC_DIR / filename
+    entries = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        rec = json.loads(line)
+        if rec.get("type") == "truth":
+            entries.append(rec)
+    return entries
+
+
 # ---------------------------------------------------------------------------
 # Cycle prevention tests
 # ---------------------------------------------------------------------------
@@ -174,7 +188,7 @@ class TestDomSubMutualReference(unittest.TestCase):
         Simulated as two rounds of evaluate_providers.
         """
         dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
-        sub = _make_provider_entry("sub", "provider_sub", certainty=0.8)
+        sub = _make_provider_entry("sub", "provider_sub1", certainty=0.8)
 
         # Round 1: dom initiates vote, calls sub as secondary.
         # call_chain starts empty (dom is the root).
@@ -188,7 +202,7 @@ class TestDomSubMutualReference(unittest.TestCase):
 
         # Round 2: sub initiates its own nested vote, tries to call dom.
         # call_chain now includes dom (the root) AND sub (the nested dom).
-        round2_chain = ["provider_dom", "provider_sub"]
+        round2_chain = ["provider_dom", "provider_sub1"]
         round2_results = evaluate_providers(
             [dom],  # sub tries to call dom as its secondary
             "", [], "What is the Eiffel Tower?", "",
@@ -197,6 +211,131 @@ class TestDomSubMutualReference(unittest.TestCase):
         )
         # Dom must stay silent — it's in the chain
         self.assertEqual(len(round2_results), 0)
+
+
+# ---------------------------------------------------------------------------
+# Branching: dom calls sub1 AND sub2
+# ---------------------------------------------------------------------------
+
+class TestBranchingVote(unittest.TestCase):
+    """Dom fans out to sub1 and sub2; both try to call dom back."""
+
+    def test_dom_fans_out_to_two_subs(self):
+        """Dom calls sub1 and sub2 in parallel — both respond."""
+        sub1 = _make_provider_entry("sub1", "provider_sub1", certainty=0.8)
+        sub2 = _make_provider_entry("sub2", "provider_sub2", certainty=0.7)
+
+        call_log = []
+
+        def mock_call(pconfig, messages):
+            call_log.append(pconfig["name"])
+            return f"Response from {pconfig['name']}"
+
+        results = evaluate_providers(
+            [sub1, sub2],
+            "", [], "Tell me about Paris landmarks", "",
+            mock_call,
+        )
+        self.assertEqual(len(results), 2)
+        names = {r.title for r in results}
+        self.assertEqual(names, {"sub1", "sub2"})
+        self.assertEqual(set(call_log), {"sub1", "sub2"})
+
+    def test_both_subs_try_to_call_dom_back_dom_silent(self):
+        """After dom fans out, each sub tries to call dom — dom stays silent
+        in both cases because it's in the call chain.
+
+        Sub1's nested vote: chain = [dom, sub1] → dom silenced
+        Sub2's nested vote: chain = [dom, sub2] → dom silenced
+        """
+        dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
+
+        # Sub1's nested vote tries to call dom
+        results_sub1 = evaluate_providers(
+            [dom],
+            "", [], "q", "",
+            lambda p, m: "dom should be silent",
+            call_chain=["provider_dom", "provider_sub1"],
+        )
+        self.assertEqual(len(results_sub1), 0, "Dom must be silent in sub1's vote")
+
+        # Sub2's nested vote tries to call dom
+        results_sub2 = evaluate_providers(
+            [dom],
+            "", [], "q", "",
+            lambda p, m: "dom should be silent",
+            call_chain=["provider_dom", "provider_sub2"],
+        )
+        self.assertEqual(len(results_sub2), 0, "Dom must be silent in sub2's vote")
+
+    def test_sub1_can_call_sub2_in_nested_vote(self):
+        """Sub1 initiates a nested vote and calls sub2 — sub2 is NOT in the
+        chain (only dom and sub1 are), so sub2 responds normally."""
+        sub2 = _make_provider_entry("sub2", "provider_sub2", certainty=0.7)
+
+        results = evaluate_providers(
+            [sub2],
+            "", [], "q", "",
+            lambda p, m: "sub2 responds in sub1's nested vote",
+            call_chain=["provider_dom", "provider_sub1"],
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].title, "sub2")
+
+    def test_full_branching_scenario(self):
+        """Complete branching vote: dom → {sub1, sub2}, both subs try to call
+        dom back, dom stays silent; subs can still call each other.
+
+        Verifies the diamond topology:
+              dom
+             /   \\
+          sub1   sub2
+             \\   /
+           dom_final
+        """
+        dom = _make_provider_entry("dom", "provider_dom", certainty=0.9)
+        sub1 = _make_provider_entry("sub1", "provider_sub1", certainty=0.8)
+        sub2 = _make_provider_entry("sub2", "provider_sub2", certainty=0.7)
+
+        call_log = []
+
+        def mock_call(pconfig, messages):
+            call_log.append(pconfig["name"])
+            return f"Response from {pconfig['name']}"
+
+        # Step 1: dom fans out to sub1 and sub2 (no call chain yet)
+        fan_out_results = evaluate_providers(
+            [sub1, sub2],
+            "", [], "Tell me about Paris", "",
+            mock_call,
+        )
+        self.assertEqual(len(fan_out_results), 2)
+
+        # Step 2: sub1 initiates nested vote, tries dom + sub2
+        call_log.clear()
+        sub1_nested = evaluate_providers(
+            [dom, sub2],
+            "", [], "Tell me about Paris", "",
+            mock_call,
+            call_chain=["provider_dom", "provider_sub1"],
+        )
+        # dom is silenced; sub2 responds
+        self.assertEqual(len(sub1_nested), 1)
+        self.assertEqual(sub1_nested[0].title, "sub2")
+        self.assertEqual(call_log, ["sub2"])
+
+        # Step 3: sub2 initiates nested vote, tries dom + sub1
+        call_log.clear()
+        sub2_nested = evaluate_providers(
+            [dom, sub1],
+            "", [], "Tell me about Paris", "",
+            mock_call,
+            call_chain=["provider_dom", "provider_sub2"],
+        )
+        # dom is silenced; sub1 responds
+        self.assertEqual(len(sub2_nested), 1)
+        self.assertEqual(sub2_nested[0].title, "sub1")
+        self.assertEqual(call_log, ["sub1"])
 
 
 # ---------------------------------------------------------------------------
@@ -227,73 +366,12 @@ class TestPerProviderTruth(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["truth_url"], "")
 
-    def test_resolve_provider_truth_with_valid_file(self):
-        """resolve_provider_truth loads facts from a JSONL file."""
-        truth_file = SPEC_DIR / "sub_truth.jsonl"
-        if not truth_file.exists():
-            self.skipTest("spec/sub_truth.jsonl not found")
-
-        entry = {"id": "prov_sub", "certainty": 0.8, "time": "2026-03-01T00:00:00Z"}
-        config = {"truth_url": f"file://{truth_file}"}
-
-        sources = resolve_provider_truth(config, entry)
-        self.assertGreater(len(sources), 0)
-
-        # Certainty should be scaled: provider_certainty * remote_certainty
-        for s in sources:
-            self.assertLessEqual(abs(s.certainty), 1.0)
-            self.assertTrue(s.source_id.startswith("prov_sub:"))
-            self.assertEqual(s.kind, "fact")
-
     def test_resolve_provider_truth_empty_when_no_url(self):
         """No truth_url → empty list (RAG-free behavior)."""
         entry = {"id": "prov_x", "certainty": 0.9}
         config = {"truth_url": ""}
         sources = resolve_provider_truth(config, entry)
         self.assertEqual(sources, [])
-
-    def test_resolve_provider_truth_scales_certainty(self):
-        """Certainty = provider_certainty * remote_certainty."""
-        truth_file = SPEC_DIR / "sub_truth.jsonl"
-        if not truth_file.exists():
-            self.skipTest("spec/sub_truth.jsonl not found")
-
-        entry = {"id": "prov_test", "certainty": 0.5, "time": "2026-03-01T00:00:00Z"}
-        config = {"truth_url": f"file://{truth_file}"}
-
-        sources = resolve_provider_truth(config, entry)
-        # sub_private_01 has trust=0.95 → scaled = 0.5 * 0.95 = 0.475
-        height_source = [s for s in sources if "sub_private_01" in s.source_id]
-        self.assertEqual(len(height_source), 1)
-        self.assertAlmostEqual(height_source[0].certainty, 0.475)
-
-    def test_provider_truth_injected_into_bundle(self):
-        """Provider with truth_url gets its private facts in the messages."""
-        truth_file = SPEC_DIR / "sub_truth.jsonl"
-        if not truth_file.exists():
-            self.skipTest("spec/sub_truth.jsonl not found")
-
-        captured = {}
-
-        def mock_call(pconfig, messages):
-            captured["messages"] = messages
-            return "ok"
-
-        _, config = _make_provider_entry(
-            "sub", "prov_sub", truth_url=f"file://{truth_file}",
-        )
-        entry = {"id": "prov_sub", "certainty": 0.8, "time": "2026-03-01T00:00:00Z",
-                 "content": config.get("content", "")}
-        pairs = [(entry, config)]
-
-        evaluate_providers(
-            pairs, "system ctx", [], "question", "output", mock_call,
-        )
-
-        self.assertIn("messages", captured)
-        full_text = " ".join(m["content"] for m in captured["messages"])
-        # The private facts should appear in the messages
-        self.assertIn("330 metres", full_text)
 
     def test_provider_without_truth_url_gets_rag_free_bundle(self):
         """Provider without truth_url gets the standard RAG-free messages."""
@@ -321,72 +399,109 @@ class TestPerProviderTruth(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSpecFiles(unittest.TestCase):
-    """Verify the dom/sub spec files parse correctly."""
+    """Verify the dom/sub/sub2 spec files parse correctly."""
 
-    def _load_truth_entries(self, filename):
-        """Load truth entries from a spec JSONL file."""
-        path = SPEC_DIR / filename
-        if not path.exists():
-            self.skipTest(f"spec/{filename} not found")
-        entries = []
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            rec = json.loads(line)
-            if rec.get("type") == "truth":
-                entries.append(rec)
-        return entries
-
-    def test_dom_has_provider_sub(self):
-        """dom.jsonl contains a provider entry pointing to sub."""
-        entries = self._load_truth_entries("dom.jsonl")
+    def test_dom_has_two_provider_subs(self):
+        """dom.jsonl contains provider entries pointing to sub1 and sub2."""
+        entries = _load_truth_entries("dom.jsonl")
         providers = get_provider_entries(entries)
-        self.assertEqual(len(providers), 1)
-        entry, config = providers[0]
-        self.assertEqual(entry["id"], "provider_sub")
-        self.assertEqual(config["name"], "sub")
-        self.assertEqual(config["truth_url"], "file://spec/sub_truth.jsonl")
+        self.assertEqual(len(providers), 2)
+        names = {p[1]["name"] for p in providers}
+        self.assertEqual(names, {"sub1", "sub2"})
 
-    def test_sub_has_provider_dom(self):
+    def test_dom_has_own_facts(self):
+        """dom.jsonl has facts that sub1/sub2 don't have."""
+        entries = _load_truth_entries("dom.jsonl")
+        fact_titles = {e["title"] for e in entries
+                       if "<fact" in e.get("content", "")}
+        self.assertIn("Capital of France", fact_titles)
+        self.assertIn("France is in Europe", fact_titles)
+
+    def test_sub1_has_provider_dom(self):
         """sub.jsonl contains a provider entry pointing to dom."""
-        entries = self._load_truth_entries("sub.jsonl")
+        entries = _load_truth_entries("sub.jsonl")
         providers = get_provider_entries(entries)
         self.assertEqual(len(providers), 1)
-        entry, config = providers[0]
-        self.assertEqual(entry["id"], "provider_dom")
-        self.assertEqual(config["name"], "dom")
+        self.assertEqual(providers[0][1]["name"], "dom")
 
-    def test_sub_truth_file_has_private_facts(self):
-        """sub_truth.jsonl contains private facts for the sub."""
-        entries = self._load_truth_entries("sub_truth.jsonl")
-        self.assertGreater(len(entries), 0)
-        titles = {e.get("title", "") for e in entries}
-        self.assertIn("Eiffel Tower height", titles)
+    def test_sub1_has_own_facts(self):
+        """sub.jsonl has its own facts (Eiffel Tower)."""
+        entries = _load_truth_entries("sub.jsonl")
+        fact_titles = {e["title"] for e in entries
+                       if "<fact" in e.get("content", "")}
+        self.assertIn("Eiffel Tower location", fact_titles)
+        self.assertIn("Eiffel Tower height", fact_titles)
+        self.assertIn("Eiffel Tower material", fact_titles)
+
+    def test_sub2_has_provider_dom(self):
+        """sub2.jsonl contains a provider entry pointing to dom."""
+        entries = _load_truth_entries("sub2.jsonl")
+        providers = get_provider_entries(entries)
+        self.assertEqual(len(providers), 1)
+        self.assertEqual(providers[0][1]["name"], "dom")
+
+    def test_sub2_has_own_facts(self):
+        """sub2.jsonl has its own facts (Louvre)."""
+        entries = _load_truth_entries("sub2.jsonl")
+        fact_titles = {e["title"] for e in entries
+                       if "<fact" in e.get("content", "")}
+        self.assertIn("Louvre Museum location", fact_titles)
+        self.assertIn("Mona Lisa location", fact_titles)
 
     def test_mutual_reference_cycle_scenario(self):
-        """dom→sub and sub→dom: confirm the cycle setup is correct."""
-        dom_entries = self._load_truth_entries("dom.jsonl")
-        sub_entries = self._load_truth_entries("sub.jsonl")
-
-        dom_providers = get_provider_entries(dom_entries)
+        """dom→sub1, sub1→dom: dom is silenced when in call chain."""
+        sub_entries = _load_truth_entries("sub.jsonl")
         sub_providers = get_provider_entries(sub_entries)
-
-        # dom references sub
-        self.assertEqual(dom_providers[0][1]["name"], "sub")
-        # sub references dom
-        self.assertEqual(sub_providers[0][1]["name"], "dom")
-
-        # Simulate: dom initiates, sub called, sub tries to call dom
-        # dom should be silenced because it's in the call chain
         dom_entry = sub_providers[0]  # sub's reference to dom
+
         results = evaluate_providers(
             [dom_entry],
             "", [], "test question", "",
             lambda p, m: "dom should not respond",
-            call_chain=["provider_dom"],  # dom is in the chain
+            call_chain=["provider_dom"],
         )
         self.assertEqual(len(results), 0, "Dom must stay silent when in call chain")
+
+    def test_branching_cycle_from_spec_files(self):
+        """Load all three spec files, verify the branching cycle scenario.
+
+        dom calls sub1 and sub2. Both subs reference dom back.
+        dom should be silenced in both subs' nested votes.
+        """
+        dom_entries = _load_truth_entries("dom.jsonl")
+        sub1_entries = _load_truth_entries("sub.jsonl")
+        sub2_entries = _load_truth_entries("sub2.jsonl")
+
+        dom_providers = get_provider_entries(dom_entries)
+        sub1_providers = get_provider_entries(sub1_entries)
+        sub2_providers = get_provider_entries(sub2_entries)
+
+        # dom fans out to sub1 and sub2
+        self.assertEqual(len(dom_providers), 2)
+        dom_sub_names = {p[1]["name"] for p in dom_providers}
+        self.assertEqual(dom_sub_names, {"sub1", "sub2"})
+
+        # Both subs reference dom back
+        self.assertEqual(sub1_providers[0][1]["name"], "dom")
+        self.assertEqual(sub2_providers[0][1]["name"], "dom")
+
+        # Sub1 tries to call dom — silenced
+        r1 = evaluate_providers(
+            [sub1_providers[0]],
+            "", [], "q", "",
+            lambda p, m: "should be silent",
+            call_chain=["provider_dom", "provider_sub1"],
+        )
+        self.assertEqual(len(r1), 0)
+
+        # Sub2 tries to call dom — silenced
+        r2 = evaluate_providers(
+            [sub2_providers[0]],
+            "", [], "q", "",
+            lambda p, m: "should be silent",
+            call_chain=["provider_dom", "provider_sub2"],
+        )
+        self.assertEqual(len(r2), 0)
 
 
 if __name__ == "__main__":

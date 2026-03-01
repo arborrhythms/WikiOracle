@@ -95,12 +95,18 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     # Store url_prefix in module-level config so all modules can read it
     config_mod.URL_PREFIX = url_prefix
 
-    # Write CLI-supplied runtime values into _CONFIG_YAML so they
-    # round-trip through config like everything else — no per-response
-    # patching needed.
-    config_mod._CONFIG_YAML.setdefault("server", {})
-    config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-    config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+    def _inject_server_runtime() -> None:
+        """Re-inject CLI runtime fields after a config reload from disk.
+
+        ``stateless`` and ``url_prefix`` are set via CLI flags and must
+        survive disk reloads.  ``allowed_urls`` is left as-is since it
+        is authoritative from disk (admin-only).
+        """
+        srv = config_mod._CONFIG_YAML.setdefault("server", {})
+        srv["stateless"] = config_mod.STATELESS_MODE
+        srv["url_prefix"] = url_prefix
+
+    _inject_server_runtime()
 
     # Security headers (CORS + CSP)
     @app.after_request
@@ -155,10 +161,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         fresh = _load_config_yaml()
         if fresh:
             config_mod._CONFIG_YAML = fresh
-            # Re-inject runtime fields lost by disk reload
-            config_mod._CONFIG_YAML.setdefault("server", {})
-            config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-            config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+            _inject_server_runtime()
         result["config"] = _normalize_config(config_mod._CONFIG_YAML)
 
         return jsonify(result)
@@ -246,6 +249,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             fresh = _load_config_yaml()
             if fresh:
                 config_mod._CONFIG_YAML = fresh
+                _inject_server_runtime()
             runtime_cfg = config_mod._CONFIG_YAML
 
         path_only = isinstance(body.get("state"), dict) and body["state"].get("_path_only", False)
@@ -353,10 +357,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         fresh = _load_config_yaml()
         if fresh:
             config_mod._CONFIG_YAML = fresh
-            # Re-inject runtime fields lost by disk reload
-            config_mod._CONFIG_YAML.setdefault("server", {})
-            config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-            config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+            _inject_server_runtime()
 
         if flask_request.method == "GET":
             return jsonify({"config": _normalize_config(config_mod._CONFIG_YAML)})
@@ -375,12 +376,16 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     return jsonify({"ok": False, "error": "missing config dict"}), 400
 
                 data = body["config"]
+                # Preserve the on-disk allowed_urls — clients must not
+                # override this server-level security setting.
+                disk_allowed = config_mod._CONFIG_YAML.get("server", {}).get("allowed_urls")
+                if isinstance(data.get("server"), dict):
+                    data["server"].pop("allowed_urls", None)
+                if disk_allowed is not None:
+                    data.setdefault("server", {})["allowed_urls"] = disk_allowed
                 cfg_path.write_text(config_to_yaml(data), encoding="utf-8")
                 config_mod._CONFIG_YAML = _load_config_yaml()
-                # Re-inject runtime fields lost by disk reload
-                config_mod._CONFIG_YAML.setdefault("server", {})
-                config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-                config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+                _inject_server_runtime()
                 PROVIDERS.clear()
                 PROVIDERS.update(_build_providers())
                 normalized = _normalize_config(config_mod._CONFIG_YAML)

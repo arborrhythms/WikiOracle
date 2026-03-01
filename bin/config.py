@@ -536,6 +536,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("--stateless", action="store_true",
                         help="Run in stateless mode (no writes to disk; editors disabled)")
+    parser.add_argument("--no-ssl", action="store_true",
+                        help="Serve over plain HTTP (skip TLS)")
     parser.add_argument("--url-prefix", default="",
                         help="URL path prefix (e.g. /chat) for reverse-proxy deployments")
     sub = parser.add_subparsers(dest="cmd")

@@ -74,8 +74,7 @@ html, body { height: 100%; font-family: ui-sans-serif, -apple-system, system-ui,
 body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disable native pinch-zoom and double-tap zoom; d3.zoom handles zoom in tree + chat */ }
 
 /* Header */
-.header { background: var(--header-bg); border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
-.header h1 { font-size: 1.1rem; font-weight: 600; flex: 1; }
+.header { background: var(--header-bg); border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
 .header-btn { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg-muted); cursor: pointer; padding: 0.4rem 0.7rem; font-size: 0.8rem; transition: all 0.15s; }
 .header-btn:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 
@@ -140,7 +139,7 @@ body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disa
 
 .message { display: flex; flex-direction: column; margin-bottom: 0.25rem; position: relative; }
 .msg-meta { font-size: 0.75rem; color: var(--fg-muted); margin-bottom: 0.15rem; padding: 0 0.25rem; }
-.msg-bubble { padding: 0.7rem 1rem; border-radius: 12px; max-width: 85%; line-height: 1.5; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
+.msg-bubble { padding: 0.7rem 1rem; border-radius: 12px; line-height: 1.5; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
 .message.user .msg-bubble { background: var(--bubble-user); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; border-left: 3px solid var(--accent); }
 .message.assistant .msg-bubble { background: var(--bubble-assistant); border: 1px solid var(--border); align-self: flex-start; border-bottom-left-radius: 4px; border-left: 3px solid #059669; }
 /* Restore list indentation stripped by global * { padding:0 } reset —
@@ -204,7 +203,7 @@ body.layout-flat .resize-divider { display: block; }
 body.layout-vertical .main-area { flex-direction: row; }
 body.layout-vertical .tree-container { height: auto; width: 280px; min-width: 0; min-height: auto; border-bottom: none; border-right: 1px solid var(--border); overflow: hidden; }
 body.layout-vertical .tree-container.tree-collapsed { border-right: none; }
-body.layout-vertical .resize-divider { height: auto; width: 6px; cursor: col-resize; }
+body.layout-vertical .resize-divider { height: auto; width: 6px; cursor: col-resize; align-self: stretch; }
 body.layout-vertical .resize-divider::after { width: 2px; height: 32px; }
 body.layout-vertical .chat-container { flex: 1; }
 
@@ -233,7 +232,6 @@ body.layout-vertical .chat-container { flex: 1; }
 .offline-page .retry:hover { background: #1a4a7a; }
 
 /* ═══ Utility classes (replacing inline style= attributes) ═══ */
-.header-link   { color: inherit; text-decoration: none; }
 .settings-sep  { margin-top: 1.2rem; border-top: 1px solid var(--border); padding-top: 0.8rem; }
 .btn-full      { width: 100%; }
 .hidden        { display: none; }
@@ -278,5 +276,4 @@ body.layout-vertical .chat-container { flex: 1; }
 
 /* ── Mobile: pinch-zoomed layout ── */
 @media (pointer: coarse) {
-  .msg-bubble { max-width: 90%; }
 }

@@ -1334,6 +1334,7 @@ def process_chat(
                     "title": first_words,
                     "messages": [query_entry, response_entry],
                     "children": [],
+                    "parentId": branch_from,
                 }
                 ensure_conversation_id(new_conv)
                 add_child_conversation(conversations, branch_from, new_conv)
@@ -1344,6 +1345,7 @@ def process_chat(
                 "title": first_words,
                 "messages": [query_entry, response_entry],
                 "children": [],
+                "parentId": branch_from,
             }
             ensure_conversation_id(new_conv)
             add_child_conversation(conversations, branch_from, new_conv)
@@ -1361,6 +1363,7 @@ def process_chat(
                     "title": first_words,
                     "messages": [query_entry, response_entry],
                     "children": [],
+                    "parentId": None,
                 }
                 ensure_conversation_id(new_conv)
                 conversations.append(normalize_conversation(new_conv))
@@ -1371,6 +1374,7 @@ def process_chat(
                 "title": first_words,
                 "messages": [query_entry, response_entry],
                 "children": [],
+                "parentId": None,
             }
             ensure_conversation_id(new_conv)
             conversations.append(normalize_conversation(new_conv))

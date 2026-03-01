@@ -439,15 +439,21 @@ def main() -> int:
             initial = ensure_minimal_state({}, strict=False)
             atomic_write_jsonl(cfg.state_file, initial, reject_symlinks=cfg.reject_symlinks)
 
+    use_ssl = not args.no_ssl
+
     # Ensure TLS certificate exists
-    _ensure_self_signed_cert(cfg.ssl_cert, cfg.ssl_key)
+    if use_ssl:
+        _ensure_self_signed_cert(cfg.ssl_cert, cfg.ssl_key)
+
+    scheme = "https" if use_ssl else "http"
 
     print(f"\n{'='*60}")
     print(f"  WikiOracle Local Shim")
     print(f"{'='*60}")
     print(f"  State file : {cfg.state_file}{' (STATELESS — no writes)' if config_mod.STATELESS_MODE else ''}")
     print(f"  Bind       : {cfg.bind_host}:{cfg.bind_port}")
-    print(f"  TLS cert   : {cfg.ssl_cert}")
+    if use_ssl:
+        print(f"  TLS cert   : {cfg.ssl_cert}")
     if url_prefix:
         print(f"  URL prefix : {url_prefix}")
     prov_info = []
@@ -467,7 +473,7 @@ def main() -> int:
     print(f"  Config YAML: {_CONFIG_YAML_STATUS}")
     print(f"  Stateless  : {'ON' if config_mod.STATELESS_MODE else 'off'}")
     print(f"  Debug      : {'ON' if config_mod.DEBUG_MODE else 'off'}")
-    print(f"  UI         : https://{cfg.bind_host}:{cfg.bind_port}{url_prefix}/")
+    print(f"  UI         : {scheme}://{cfg.bind_host}:{cfg.bind_port}{url_prefix}/")
     if cfg.bind_host == "0.0.0.0":
         import socket
         try:
@@ -475,13 +481,15 @@ def main() -> int:
             s.connect(("10.255.255.255", 1))  # doesn't actually send anything
             lan_ip = s.getsockname()[0]
             s.close()
-            print(f"  LAN        : https://{lan_ip}:{cfg.bind_port}{url_prefix}/")
+            print(f"  LAN        : {scheme}://{lan_ip}:{cfg.bind_port}{url_prefix}/")
         except Exception:
             pass
     print(f"{'='*60}\n")
 
-    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_ctx.load_cert_chain(str(cfg.ssl_cert), str(cfg.ssl_key))
+    ssl_ctx = None
+    if use_ssl:
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_ctx.load_cert_chain(str(cfg.ssl_cert), str(cfg.ssl_key))
 
     app = create_app(cfg, url_prefix=url_prefix)
     app.run(host=cfg.bind_host, port=cfg.bind_port, debug=False, ssl_context=ssl_ctx)

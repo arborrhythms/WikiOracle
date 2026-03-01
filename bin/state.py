@@ -135,7 +135,7 @@ def _derive_conversation_title(messages: list) -> str:
     return "(untitled)"
 
 
-def normalize_conversation(raw: Any) -> dict:
+def normalize_conversation(raw: Any, parent_id: str | None = None) -> dict:
     """Normalize a conversation node."""
     item = dict(raw) if isinstance(raw, dict) else {}
     ensure_conversation_id(item)
@@ -145,10 +145,14 @@ def normalize_conversation(raw: Any) -> dict:
     item["messages"] = [_normalize_inner_message(m) for m in msgs]
     # Title is always derived from messages (never stored in JSONL)
     item["title"] = _derive_conversation_title(item["messages"])
+    # parentId: use explicit value if already present, otherwise derive from tree
+    if "parentId" not in item:
+        item["parentId"] = parent_id
     children = item.get("children", [])
     if not isinstance(children, list):
         children = []
-    item["children"] = [normalize_conversation(c) for c in children]
+    conv_id = item["id"]
+    item["children"] = [normalize_conversation(c, parent_id=conv_id) for c in children]
     # Strip JSONL-only fields
     item.pop("parent", None)
     item.pop("type", None)
@@ -255,6 +259,7 @@ def _nest_conversations(flat_records: list) -> list:
             "id": cid,
             "messages": rec.get("messages", []),
             "children": [],
+            "parentId": rec.get("parent", None),
         }
 
     # Second pass: link parents
@@ -478,7 +483,7 @@ def add_child_conversation(conversations: list, parent_conv_id: str, new_conv: d
     parent = find_conversation(conversations, parent_conv_id)
     if parent is None:
         return False
-    parent.setdefault("children", []).append(normalize_conversation(new_conv))
+    parent.setdefault("children", []).append(normalize_conversation(new_conv, parent_id=parent_conv_id))
     return True
 
 

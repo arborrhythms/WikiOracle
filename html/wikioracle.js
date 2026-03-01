@@ -179,10 +179,12 @@ function _pasteConversation(targetId) {
     // Move: reparent srcId under targetId
     removeFromTree(state.conversations, srcId);
     if (targetId === "root") {
+      src.parentId = null;
       state.conversations.push(src);
     } else {
       var tgt = findConversation(state.conversations, targetId);
       if (!tgt) return;
+      src.parentId = targetId;
       if (!tgt.children) tgt.children = [];
       tgt.children.push(src);
     }
@@ -195,10 +197,12 @@ function _pasteConversation(targetId) {
     // Duplicate: deep-clone src and add as child of target
     var clone = _deepCloneConversation(src);
     if (targetId === "root") {
+      clone.parentId = null;
       state.conversations.push(clone);
     } else {
       var tgt = findConversation(state.conversations, targetId);
       if (!tgt) return;
+      clone.parentId = targetId;
       if (!tgt.children) tgt.children = [];
       tgt.children.push(clone);
     }
@@ -211,12 +215,13 @@ function _pasteConversation(targetId) {
 
 function _deepCloneConversation(conv) {
   var clone = JSON.parse(JSON.stringify(conv));
-  function _reassignIds(c) {
+  function _reassignIds(c, newParentId) {
     c.id = generateUUID();
+    c.parentId = newParentId;
     (c.messages || []).forEach(function(m) { m.id = generateUUID(); });
-    (c.children || []).forEach(_reassignIds);
+    (c.children || []).forEach(function(ch) { _reassignIds(ch, c.id); });
   }
-  _reassignIds(clone);
+  _reassignIds(clone, null);
   return clone;
 }
 
@@ -270,7 +275,10 @@ function _splitAfterMessage(msgIdx) {
     title: newTitle,
     messages: tailMessages,
     children: conv.children || [],  // existing children follow the tail
+    parentId: conv.id,
   };
+  // Update moved children's parentId to point to the new conv
+  (newConv.children || []).forEach(function(c) { c.parentId = newConv.id; });
   conv.children = [newConv];
 
   state.selected_conversation = newConv.id;
@@ -875,6 +883,7 @@ async function sendMessage() {
       title: text.slice(0, 50),
       messages: [userEntry],
       children: [],
+      parentId: branchFrom || null,
     };
     if (branchFrom) {
       const parent = findConversation(state.conversations, branchFrom);
@@ -1075,7 +1084,7 @@ function bindEvents() {
           const byId = {};
           const roots = [];
           for (const rec of convRecords) {
-            byId[rec.id] = { ...rec, children: [] };
+            byId[rec.id] = { ...rec, children: [], parentId: rec.parent || null };
           }
           for (const rec of convRecords) {
             const node = byId[rec.id];
@@ -1576,6 +1585,7 @@ init();
 (function() {
   const divider = document.getElementById("resizeDivider");
   const tree = document.getElementById("treeContainer");
+  const mainArea = document.getElementById("mainArea");
   let dragging = false, startPos = 0, startSize = 0;
 
   function isVertical() {
@@ -1594,12 +1604,12 @@ init();
   function moveDrag(clientX, clientY) {
     if (!dragging) return;
     if (isVertical()) {
-      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
-      const newW = Math.max(0, Math.min(window.innerWidth * 0.8, startSize + (clientX - startPos)));
+      const max = mainArea.clientWidth - divider.offsetWidth;
+      const newW = Math.max(0, Math.min(max, startSize + (clientX - startPos)));
       tree.style.width = newW + "px";
     } else {
-      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
-      const newH = Math.max(0, Math.min(window.innerHeight * 0.8, startSize + (clientY - startPos)));
+      const max = mainArea.clientHeight - divider.offsetHeight;
+      const newH = Math.max(0, Math.min(max, startSize + (clientY - startPos)));
       tree.style.height = newH + "px";
     }
   }

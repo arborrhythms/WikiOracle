@@ -31,14 +31,27 @@ This is a directed acyclic graph (DAG), not a tree — the dom node appears at b
 
 ### Cycle prevention
 
-No dom may participate as a sub in a vote that it has called for. More precisely: the call graph must remain acyclic. If provider A calls provider B as a sub, B must not call A (directly or transitively) during the same vote.
+A dom must not participate in any vote that exists as a consequence of a vote it initiated. This is stronger than "don't appear as a sub in your own vote" — it covers the entire downstream call tree. If A initiates a vote and one of its subs (B) triggers a nested vote, A must not appear as a sub in B's vote either, because B's vote only exists because A's vote caused it.
 
-Implementation: each vote carries a **participation set** — the set of provider IDs that have already acted as dom in the current call chain. Before invoking a sub, the orchestrator checks that the sub's ID is not in the set. This prevents:
+The contract: when a provider is asked to participate in a vote, it walks the call chain to root. If it finds itself anywhere in that ancestry — as a dom at any level — it keeps quiet (returns no response). Silence is the correct behaviour, not an error; it simply means the provider has nothing to add that isn't already represented by its dom-role output higher in the chain.
 
-- **Direct cycles**: A calls B, B calls A
-- **Transitive cycles**: A calls B, B calls C, C calls A
+```
+A initiates vote
+├── B (sub) → B initiates nested vote
+│   ├── C (sub of B) — ok
+│   ├── A (sub of B) — A finds itself in ancestry → keeps quiet
+│   └── D (sub of B) — ok
+├── C (sub) — ok
+└── E (sub) — ok
+```
 
-The participation set is passed as context with each sub invocation and grows monotonically through the call chain. A sub that attempts to initiate its own vote (becoming a dom in a nested diamond) adds itself to the set before calling its own subs.
+Implementation: each vote carries a **call chain** — the ordered list of provider IDs that have acted as dom from the root vote down to the current one. Before a provider responds as a sub, it checks whether its own ID appears anywhere in the call chain. If so, it stays silent. When a sub initiates its own nested vote, it appends its ID to the chain before calling its own subs.
+
+The call chain grows monotonically and is threaded through every invocation, so the check is a simple walk-to-root membership test. This prevents:
+
+- **Direct cycles**: A calls B, B calls A — A sees itself in the chain
+- **Transitive cycles**: A calls B, B calls C, C calls A — A sees itself in the chain
+- **Deep nesting**: A calls B, B calls C, C initiates a nested vote — A and B are both excluded from C's vote
 
 There is no "ultimate dom" — any node may take the dom role in a given vote. The cycle constraint is the only structural restriction.
 
@@ -71,6 +84,6 @@ The current `evaluate_providers()` in `response.py` implements the single-shot f
 2. **Sub fan-out**: call secondaries with `Q + R_dom` (modified `_build_provider_query_bundle` injects `R_dom` into the chain)
 3. **Dom final pass**: call the primary again with `Q + R_dom + R_sub_*`
 
-The cycle constraint is enforced by adding a `participation_set` parameter to `evaluate_providers()` and checking it before each sub invocation. A sub that wishes to initiate its own nested vote passes the augmented set to its own call to `evaluate_providers()`.
+The cycle constraint is enforced by threading a `call_chain` (list of dom provider IDs) through `evaluate_providers()`. Before a sub responds, it checks whether its own ID appears in the chain; if so, it stays silent. A sub that initiates its own nested vote appends its ID to the chain before calling its own subs.
 
 The output format is amended to encourage providers to append trust statements as escaped XHTML, so that the dom's final synthesis has a richer trust surface to draw from.

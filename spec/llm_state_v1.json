@@ -44,7 +44,7 @@
       "properties": {
         "trust": {
           "type": "array",
-          "description": "Trust entries: curated knowledge snippets with certainty scores.",
+          "description": "Trust entries: curated knowledge snippets with trust scores.",
           "items": { "$ref": "#/$defs/trustEntry" }
         },
         "retrieval_prefs": { "$ref": "#/$defs/retrievalPrefs" }
@@ -85,7 +85,7 @@
     },
     "trustEntry": {
       "type": "object",
-      "required": ["id", "title", "timestamp", "certainty", "content"],
+      "required": ["id", "title", "timestamp", "trust", "content"],
       "properties": {
         "id": {
           "type": "string",
@@ -100,7 +100,7 @@
           "format": "date-time",
           "description": "ISO-8601 UTC timestamp."
         },
-        "certainty": {
+        "trust": {
           "type": "number",
           "minimum": 0.0,
           "maximum": 1.0,
@@ -121,23 +121,23 @@
           "default": 8,
           "description": "Maximum trust entries returned per query."
         },
-        "min_certainty": {
+        "min_trust": {
           "type": "number",
           "minimum": 0.0,
           "maximum": 1.0,
           "default": 0.0,
           "description": "Filter threshold."
         },
-        "prefer_higher_certainty": {
+        "prefer_higher_trust": {
           "type": "boolean",
           "default": true
         },
-        "certainty_weight": {
+        "trust_weight": {
           "type": "number",
           "minimum": 0.0,
           "maximum": 1.0,
           "default": 0.7,
-          "description": "Ranking weight for certainty. certainty_weight + recency_weight should equal 1.0."
+          "description": "Ranking weight for trust. trust_weight + recency_weight should equal 1.0."
         },
         "recency_weight": {
           "type": "number",

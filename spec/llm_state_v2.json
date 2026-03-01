@@ -101,13 +101,13 @@
     },
     "truthEntry": {
       "type": "object",
-      "required": ["id", "title", "time", "certainty", "content"],
+      "required": ["id", "title", "time", "trust", "content"],
       "properties": {
         "id": { "type": "string", "description": "Unique truth entry ID (UUID recommended)." },
         "title": { "type": "string" },
         "time": { "type": "string", "format": "date-time" },
-        "certainty": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
-        "content": { "type": "string", "description": "Self-describing XHTML element with id, certainty, and title attributes on the root tag. Recognized root tags: <fact> (plain assertion), <reference href> (external link), <and>/<or>/<not>/<non> with <child id> children (Strong Kleene operators), <provider> (LLM config), <authority> (external trust table, DID/ORCID + URL to remote llm.jsonl). Envelope id/certainty/title are synced from content during normalization." }
+        "trust": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
+        "content": { "type": "string", "description": "Self-describing XHTML element with id, trust, and title attributes on the root tag. Recognized root tags: <fact> (plain assertion), <reference href> (external link), <and>/<or>/<not>/<non> with <child id> children (Strong Kleene operators), <provider> (LLM config), <authority> (external trust table, DID/ORCID + URL to remote llm.jsonl). Envelope id/trust/title are synced from content during normalization." }
       }
     }
   }

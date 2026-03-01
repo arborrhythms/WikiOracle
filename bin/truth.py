@@ -717,29 +717,29 @@ def _fetch_authority_jsonl(
 
     entries = []
     try:
+        # file:// authority URLs are not supported — to reference a local
+        # file as an authority, add it via the merge endpoint or CLI instead.
         if url.startswith("file://"):
-            # Local file read (within allowed data dir)
-            rel_path = url[len("file://"):]
-            file_path = Path(rel_path).expanduser().resolve()
-            if allowed_data_dir:
-                allowed = Path(allowed_data_dir).resolve()
-                try:
-                    file_path.relative_to(allowed)
-                except ValueError:
-                    print(f"[WikiOracle] Authority file outside allowlist: {file_path}")
-                    return []
-            if not file_path.exists():
-                print(f"[WikiOracle] Authority file not found: {file_path}")
-                return []
-            raw = file_path.read_text(encoding="utf-8")
-        elif url.startswith("https://"):
-            import urllib.request
-            req = urllib.request.Request(url, headers={"User-Agent": "WikiOracle/1.0"})
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                raw = resp.read(_AUTHORITY_MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
-        else:
+            print(f"[WikiOracle] file:// authority URLs are blocked: {url}")
+            return []
+
+        if not url.startswith("https://"):
             print(f"[WikiOracle] Authority URL scheme not allowed: {url}")
             return []
+
+        # Validate URL against the configured whitelist
+        try:
+            from config import is_url_allowed
+            if not is_url_allowed(url):
+                print(f"[WikiOracle] Authority URL not in allowed_urls whitelist: {url}")
+                return []
+        except ImportError:
+            pass  # standalone usage without config module
+
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "WikiOracle/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read(_AUTHORITY_MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
 
         for line in raw.splitlines():
             line = line.strip()

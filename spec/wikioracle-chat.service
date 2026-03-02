@@ -6,8 +6,9 @@
 # Apache ProxyPass /chat http://127.0.0.1:8787/chat
 # Apache ProxyPassReverse /chat http://127.0.0.1:8787/chat
 #
-# IMPORTANT: Only /chat should be proxied. Do NOT proxy /nanochat — the
-# NanoChat inference endpoint must remain internal (127.0.0.1 only).
+# IMPORTANT: Only /chat should be proxied. /nanochat is NOT proxied — the
+# NanoChat inference endpoint is internal-only (127.0.0.1:8000). The shim
+# calls it directly via WIKIORACLE_BASE_URL.
 
 [Unit]
 Description=WikiOracle Chat Shim (stateless Flask)
@@ -23,7 +24,8 @@ Restart=on-failure
 RestartSec=5
 Environment=WIKIORACLE_BIND_HOST=127.0.0.1
 Environment=WIKIORACLE_BIND_PORT=8787
-Environment=WIKIORACLE_API_PATH=/nanochat/chat/completions
+Environment=WIKIORACLE_BASE_URL=http://127.0.0.1:8000
+Environment=WIKIORACLE_API_PATH=/chat/completions
 Environment=WIKIORACLE_STATE_FILE=/opt/bitnami/wordpress/files/wikiOracle.org/chat/llm.jsonl
 # Set WIKIORACLE_API_TOKEN to require bearer-token auth on all endpoints.
 # Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"

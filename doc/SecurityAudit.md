@@ -327,4 +327,4 @@ The codebase implements several strong security practices worth acknowledging:
 
 ## Documentation Discrepancy — RESOLVED
 
-`doc/Security.md` and `bin/config.py` now both reflect `127.0.0.1` as the default bind address. Apache ProxyPass handles external traffic routing.
+`doc/Security.md` and `bin/config.py` now both reflect `127.0.0.1` as the default bind address. Apache ProxyPass routes only `/chat` to the Flask shim. The `/nanochat` ProxyPass has been removed; the Flask shim now calls NanoChat directly on `127.0.0.1:8000` via `WIKIORACLE_BASE_URL`.

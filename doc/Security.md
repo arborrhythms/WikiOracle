@@ -36,7 +36,7 @@ For multi-user or public deployments, WikiOracle should sit behind a reverse pro
 
 ## 3a. Reverse Proxy
 
-In production, Apache ProxyPass routes `/chat` to the local Flask process. The NanoChat inference endpoint (`/nanochat/chat/completions`) must **not** be exposed via the reverse proxy — it should remain accessible only on `127.0.0.1`. Only the `/chat` prefix should be proxied.
+In production, Apache ProxyPass routes `/chat` to the local Flask process on `127.0.0.1:8787`. Only the `/chat` prefix is proxied. The NanoChat inference endpoint (`/chat/completions` on port 8000) is **not** exposed via the reverse proxy — the Flask shim calls it directly on `127.0.0.1:8000` via `WIKIORACLE_BASE_URL`.
 
 ## 4. Cross-Site Scripting (XSS)
 

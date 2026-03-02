@@ -1093,9 +1093,10 @@ def _call_dynamic_provider(
 
     api_key = _resolve_dynamic_api_key(raw_key, api_url)
 
-    if "anthropic.com" in api_url:
+    api_url_lower = api_url.lower()
+    if "anthropic.com" in api_url_lower:
         return _call_dynamic_anthropic(api_url, api_key, model, messages, temperature, timeout, max_tokens)
-    elif "wikioracle.org" in api_url:
+    elif "wikioracle.org" in api_url_lower:
         return _call_nanochat(cfg, messages, temperature)
     else:
         return _call_dynamic_openai(api_url, api_key, model, messages, temperature, timeout, max_tokens)

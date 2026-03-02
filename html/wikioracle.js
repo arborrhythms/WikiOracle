@@ -634,6 +634,25 @@ function renderMessages() {
     });
     summary.appendChild(h2);
 
+    // NanoChat server status (async — updates after fetch completes)
+    var ncStatus = document.createElement("div");
+    ncStatus.className = "root-nanochat-status";
+    ncStatus.textContent = "NanoChat: checking\u2026";
+    summary.appendChild(ncStatus);
+    api("GET", "/nanochat_status").then(function(data) {
+      if (data && data.ok) {
+        ncStatus.textContent = "NanoChat: online";
+        ncStatus.classList.add("status-online");
+      } else {
+        ncStatus.textContent = "NanoChat: " + (data && data.status ? data.status : "offline");
+        ncStatus.classList.add("status-offline");
+      }
+      if (data && data.url) ncStatus.title = data.url;
+    }).catch(function() {
+      ncStatus.textContent = "NanoChat: unknown";
+      ncStatus.classList.add("status-offline");
+    });
+
     // Stat grid
     var grid = document.createElement("div");
     grid.className = "root-summary-grid";

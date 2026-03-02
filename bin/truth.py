@@ -5,7 +5,8 @@ Foundational module for trust-table interpretation:
   - Timestamp, hashing, and UUID helpers
   - Trust entry normalization and ID generation
   - Subtypes (all self-describing XHTML with id/certainty/title attrs):
-      <fact>       — plain text assertion
+      <fact>       — plain text assertion (penalizable if incorrect)
+      <feeling>    — subjective claim (not penalizable if incorrect)
       <reference>  — external link (href attr)
       <and>/<or>/<not>/<non> — operators with <child id="..."/> refs
       <provider>   — LLM provider config (name, api_url, model attrs)
@@ -222,7 +223,7 @@ def _has_operator_tag(content: str) -> bool:
 
 
 # Recognized XHTML root tags for trust entries.
-_RECOGNIZED_TAGS = frozenset({"fact", "reference", "and", "or", "not", "non", "provider", "authority"})
+_RECOGNIZED_TAGS = frozenset({"fact", "feeling", "reference", "and", "or", "not", "non", "provider", "authority"})
 
 
 def _parse_root_attrs(content: str) -> dict | None:

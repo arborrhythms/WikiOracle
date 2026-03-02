@@ -11,12 +11,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 from response import (
     Source,
+    _build_bundle,
     _build_provider_query_bundle,
     evaluate_providers,
     resolve_provider_truth,
+    static_truth,
     to_nanochat_messages,
 )
 from truth import (
+    _normalize_trust_entry,
+    _parse_root_attrs,
     get_provider_entries,
     parse_provider_block,
 )
@@ -850,6 +854,203 @@ class TestPrelimControl(unittest.TestCase):
         self.assertEqual(len([r for r in evaluate_providers(
             [cold_beta], "system", [], "q", "", mock_call,
         )]), 1)
+
+
+# ---------------------------------------------------------------------------
+# <feeling> truth type
+# ---------------------------------------------------------------------------
+
+class TestFeelingTruthType(unittest.TestCase):
+    """Verify that <feeling> is recognized as a truth type and handled correctly."""
+
+    def test_feeling_recognized_by_parse_root_attrs(self):
+        """_parse_root_attrs recognizes <feeling> as a valid root tag."""
+        content = '<feeling id="f1" certainty="0.5" title="A hunch">Just a guess.</feeling>'
+        parsed = _parse_root_attrs(content)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["tag"], "feeling")
+        self.assertEqual(parsed["id"], "f1")
+        self.assertAlmostEqual(parsed["certainty"], 0.5)
+        self.assertEqual(parsed["title"], "A hunch")
+
+    def test_feeling_normalized_as_truth_entry(self):
+        """_normalize_trust_entry preserves <feeling> content and syncs envelope."""
+        raw = {
+            "type": "truth",
+            "id": "feel_01",
+            "title": "Subjective opinion",
+            "certainty": 0.4,
+            "content": '<feeling id="feel_01" certainty="0.4" title="Subjective opinion">I think this is nice.</feeling>',
+            "time": "2026-03-01T00:00:00Z",
+        }
+        entry = _normalize_trust_entry(raw)
+        self.assertEqual(entry["id"], "feel_01")
+        self.assertAlmostEqual(entry["certainty"], 0.4)
+        self.assertIn("<feeling", entry["content"])
+
+    def test_feeling_not_filtered_by_static_truth(self):
+        """static_truth() includes <feeling> entries (they are propositional content)."""
+        entries = [
+            {"id": "fact_01", "content": '<fact id="fact_01" certainty="0.9" title="A">A fact.</fact>'},
+            {"id": "feel_01", "content": '<feeling id="feel_01" certainty="0.5" title="B">A feeling.</feeling>'},
+            {"id": "prov_01", "content": '<provider id="prov_01" name="x" api_url="http://x" model="m"/>'},
+        ]
+        result = static_truth(entries)
+        ids = [e["id"] for e in result]
+        self.assertIn("fact_01", ids)
+        self.assertIn("feel_01", ids)
+        self.assertNotIn("prov_01", ids)
+
+    def test_feeling_gets_kind_feeling_in_bundle(self):
+        """When building a bundle, <feeling> entries get kind='feeling'."""
+        from state import ensure_minimal_state
+        state = ensure_minimal_state({}, strict=False)
+        state["truth"] = [
+            {
+                "type": "truth",
+                "id": "feel_01",
+                "title": "A feeling",
+                "certainty": 0.5,
+                "content": '<feeling id="feel_01" certainty="0.5" title="A feeling">Just vibes.</feeling>',
+                "time": "2026-03-01T00:00:00Z",
+            },
+            {
+                "type": "truth",
+                "id": "fact_01",
+                "title": "A fact",
+                "certainty": 0.9,
+                "content": '<fact id="fact_01" certainty="0.9" title="A fact">The sky is blue.</fact>',
+                "time": "2026-03-01T00:00:00Z",
+            },
+        ]
+        bundle = _build_bundle(state, "Hello", {"rag": True})
+        feeling_sources = [s for s in bundle.sources if s.kind == "feeling"]
+        fact_sources = [s for s in bundle.sources if s.kind == "fact"]
+        self.assertEqual(len(feeling_sources), 1)
+        self.assertEqual(feeling_sources[0].source_id, "feel_01")
+        self.assertGreaterEqual(len(fact_sources), 1)
+
+    def test_feeling_in_spec_file(self):
+        """hme.jsonl contains a <feeling> entry that normalizes correctly."""
+        spec_file = SPEC_DIR / "hme.jsonl"
+        self.assertTrue(spec_file.exists(), f"{spec_file} must exist")
+        found_feeling = False
+        with open(spec_file) as f:
+            for line in f:
+                rec = json.loads(line)
+                if rec.get("type") != "truth":
+                    continue
+                content = rec.get("content", "")
+                if "<feeling" in content:
+                    found_feeling = True
+                    entry = _normalize_trust_entry(dict(rec))
+                    parsed = _parse_root_attrs(entry["content"])
+                    self.assertIsNotNone(parsed)
+                    self.assertEqual(parsed["tag"], "feeling")
+                    break
+        self.assertTrue(found_feeling, "hme.jsonl should contain at least one <feeling> entry")
+
+
+# ---------------------------------------------------------------------------
+# <feeling> truth type
+# ---------------------------------------------------------------------------
+
+class TestFeelingTruthType(unittest.TestCase):
+    """Verify that <feeling> entries are recognized, normalized, and classified."""
+
+    def test_parse_root_attrs_recognizes_feeling(self):
+        """_parse_root_attrs should recognize <feeling> as a valid root tag."""
+        content = '<feeling id="f1" certainty="0.5" title="Intuition">Some intuition.</feeling>'
+        parsed = _parse_root_attrs(content)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["tag"], "feeling")
+        self.assertEqual(parsed["id"], "f1")
+        self.assertAlmostEqual(parsed["certainty"], 0.5)
+        self.assertEqual(parsed["title"], "Intuition")
+
+    def test_normalize_trust_entry_preserves_feeling(self):
+        """_normalize_trust_entry should preserve <feeling> content as-is."""
+        entry = {
+            "type": "truth",
+            "id": "f1",
+            "title": "Intuition",
+            "certainty": 0.5,
+            "content": '<feeling id="f1" certainty="0.5" title="Intuition">Some intuition.</feeling>',
+            "time": "2026-03-01T00:00:00Z",
+        }
+        result = _normalize_trust_entry(entry)
+        self.assertEqual(result["id"], "f1")
+        self.assertAlmostEqual(result["certainty"], 0.5)
+        self.assertIn("<feeling", result["content"])
+
+    def test_static_truth_includes_feeling(self):
+        """static_truth should include <feeling> entries (they are content, not structure)."""
+        entries = [
+            {"id": "f1", "content": '<fact id="f1" certainty="1.0" title="A">A.</fact>'},
+            {"id": "f2", "content": '<feeling id="f2" certainty="0.5" title="B">B.</feeling>'},
+            {"id": "p1", "content": '<provider id="p1" name="x" api_url="http://x" model="m"/>'},
+        ]
+        result = static_truth(entries)
+        ids = [e["id"] for e in result]
+        self.assertIn("f1", ids)
+        self.assertIn("f2", ids)
+        self.assertNotIn("p1", ids)
+
+    def test_feeling_kind_in_build_bundle(self):
+        """_build_bundle should classify <feeling> entries as kind='feeling'."""
+        from state import ensure_minimal_state
+        state = ensure_minimal_state({}, strict=False)
+        state["truth"] = [
+            {
+                "type": "truth",
+                "id": "f1",
+                "title": "Intuition",
+                "certainty": 0.5,
+                "content": '<feeling id="f1" certainty="0.5" title="Intuition">Some opinion.</feeling>',
+                "time": "2026-03-01T00:00:00Z",
+            },
+            {
+                "type": "truth",
+                "id": "fact1",
+                "title": "A fact",
+                "certainty": 0.9,
+                "content": '<fact id="fact1" certainty="0.9" title="A fact">Verified claim.</fact>',
+                "time": "2026-03-01T00:00:01Z",
+            },
+        ]
+        bundle = _build_bundle(
+            state, "test question",
+            {"rag": True, "temperature": 0.7},
+            conversation_id=None,
+        )
+        feeling_sources = [s for s in bundle.sources if s.kind == "feeling"]
+        fact_sources = [s for s in bundle.sources if s.kind == "fact"]
+        self.assertEqual(len(feeling_sources), 1)
+        self.assertEqual(feeling_sources[0].source_id, "f1")
+        self.assertGreaterEqual(len(fact_sources), 1)
+
+    def test_feeling_not_filtered_by_static_truth(self):
+        """Feelings should pass through static_truth just like facts."""
+        entries = [
+            {"id": "feel", "content": '<feeling id="feel" certainty="0.3" title="Hunch">A hunch.</feeling>'},
+            {"id": "op1", "content": '<and id="op1" certainty="0.0" title="Op"><child id="a"/><child id="b"/></and>'},
+            {"id": "auth1", "content": '<authority id="auth1" did="did:web:x" url="http://x"/>'},
+        ]
+        result = static_truth(entries)
+        ids = [e["id"] for e in result]
+        self.assertIn("feel", ids)
+        self.assertNotIn("op1", ids)
+        self.assertNotIn("auth1", ids)
+
+    def test_feeling_in_spec_file(self):
+        """The hme.jsonl spec should contain at least one <feeling> entry."""
+        hme_path = SPEC_DIR / "hme.jsonl"
+        self.assertTrue(hme_path.exists(), "hme.jsonl should exist")
+        with open(hme_path) as f:
+            lines = [json.loads(line) for line in f if line.strip()]
+        feeling_entries = [e for e in lines if "<feeling" in e.get("content", "")]
+        self.assertGreaterEqual(len(feeling_entries), 1,
+                                "hme.jsonl should have at least one <feeling> entry")
 
 
 if __name__ == "__main__":

@@ -124,6 +124,10 @@ body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disa
 .root-summary-title { font-size: 1.3rem; font-weight: 700; margin: 0 0 0.2rem; color: var(--fg); }
 .root-summary-subtitle { font-size: 0.82rem; color: var(--fg-muted); margin: 0 0 1.4rem; }
 
+.root-nanochat-status { font-size: 0.78rem; color: var(--fg-muted); margin: 0.2rem 0 1rem; }
+.root-nanochat-status.status-online { color: #2a9d2a; }
+.root-nanochat-status.status-offline { color: #c44; }
+
 .root-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-bottom: 1.4rem; }
 .root-stat { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.3rem; }
 .root-stat-value { display: block; font-size: 1.4rem; font-weight: 700; color: var(--accent); }

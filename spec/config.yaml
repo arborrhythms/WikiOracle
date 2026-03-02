@@ -50,7 +50,6 @@ providers:
 
 chat:
   temperature: 0.7
-  output_format: XHTML                    # appended as "output_format: <value>" line
   rag: false                              # use truth entries for retrieval
   url_fetch: false                       # allow URL fetching in responses
   confirm_actions: true                  # prompt before deletes, merges, etc.
@@ -62,12 +61,14 @@ ui:
   layout: horizontal                      # flat | horizontal | vertical
   theme: system                           # system | light | dark
   splitter_pct: 0                         # tree panel height (0 = collapsed)
+  swipe_nav_horizontal: true  # Swipe left/right to navigate siblings
+  swipe_nav_vertical: false  # Swipe up/down to navigate siblings
 
 # --- Server ------------------------------------------------------------------
 # Runtime parameters — usually set via CLI flags; YAML values are defaults.
 
 server:
-  stateless: false
+  stateless: true
   url_prefix: ""
   # URL prefixes allowed for authority and dynamic provider fetches.
   # file:// URLs are always blocked.  Only https:// URLs matching one of

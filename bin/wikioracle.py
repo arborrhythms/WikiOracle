@@ -166,7 +166,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         """One-shot seed for stateless clients: state + config + providers."""
         result: Dict[str, Any] = {}
 
-        # Seed state from disk (or empty minimal state)
+        # Seed state from disk (read-only).  In stateless mode the truth
+        # table is loaded once from disk but never written back.
         try:
             seed_state = _load_state(cfg)
         except Exception:
@@ -399,6 +400,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     return jsonify({"ok": False, "error": "missing config dict"}), 400
 
                 data = body["config"]
+                # Strip runtime-only fields injected by _normalize_config
+                # (server.providers, defaults) — these are not user config.
+                if isinstance(data.get("server"), dict):
+                    data["server"].pop("providers", None)
+                data.pop("defaults", None)
                 # Preserve the on-disk allowed_urls — clients must not
                 # override this server-level security setting.
                 disk_allowed = config_mod._CONFIG_YAML.get("server", {}).get("allowed_urls")

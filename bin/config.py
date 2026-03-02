@@ -331,7 +331,6 @@ CONFIG_SCHEMA = [
     ("providers.grok.api_key",      "API key (or set XAI_API_KEY env var)"),
     ("providers.grok.default_model", "Default model"),
     ("chat.temperature",            "Sampling temperature (0.0–2.0)"),
-    ("chat.output_format",          'Appended as "output_format: <value>" line'),
     ("chat.rag",                    "Use truth entries for retrieval"),
     ("chat.url_fetch",              "Allow URL fetching in responses"),
     ("chat.confirm_actions",        "Prompt before deletes, merges, etc."),
@@ -402,6 +401,16 @@ def config_to_yaml(data: dict) -> str:
     """
     if not isinstance(data, dict):
         return ""
+
+    # Strip runtime-only fields injected by _normalize_config — these
+    # must not be persisted to config.yaml.
+    data = dict(data)  # shallow copy to avoid mutating caller's dict
+    data.pop("defaults", None)
+    srv = data.get("server")
+    if isinstance(srv, dict):
+        srv = dict(srv)
+        srv.pop("providers", None)
+        data["server"] = srv
 
     lines: list[str] = []
     emitted: set[str] = set()  # Track dotted paths already written

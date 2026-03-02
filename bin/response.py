@@ -1242,16 +1242,6 @@ def _fan_out_and_aggregate(
         final_messages = to_nanochat_messages(final_bundle)
         response_text = _call_dynamic_provider(primary_config, final_messages, temperature, cfg)
 
-    if response_text.startswith("[Error"):
-        fallback_messages = to_nanochat_messages(final_bundle)
-        for entry, pconfig in secondaries:
-            try:
-                fallback_text = _call_dynamic_provider(pconfig, fallback_messages, temperature, cfg)
-                if not fallback_text.startswith("[Error"):
-                    return fallback_text, provider_sources
-            except Exception:
-                continue
-
     return response_text, provider_sources
 
 

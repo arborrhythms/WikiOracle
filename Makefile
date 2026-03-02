@@ -262,6 +262,7 @@ wo-chat-deploy:
 		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
 		--files-from=<(git ls-files -- bin html spec requirements.txt; echo $(WO_CHAT_EXTRA)) \
 		. $(WO_USER)@$(WO_HOST):$(WO_CHAT_DEST)/
+	$(WO_SSH) "sudo cp $(WO_CHAT_DEST)/spec/wikioracle-chat.service /etc/systemd/system/ && sudo systemctl daemon-reload"
 	@echo "Chat shim deployed. Run 'make wo-chat-restart' to apply."
 
 wo-chat-start:

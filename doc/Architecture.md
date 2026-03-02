@@ -133,8 +133,8 @@ In detail:
 
 ```
 1. st = static_truth(state.truth)
-   - Extract the evaluable subset: <fact> and <reference> entries
-   - These carry propositional content (claims, citations, URLs)
+   - Extract the evaluable subset: <fact>, <feeling>, and <reference> entries
+   - These carry propositional content (claims, opinions, citations, URLs)
    - Structural entries (<provider>, <operator>, <authority>) are
      excluded from this subset (they are evaluated, not consumed)
 

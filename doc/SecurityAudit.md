@@ -89,24 +89,14 @@ WikiOracle's local-first architecture provides a strong privacy baseline — sta
 
 ---
 
-### M2. HTML Injection in Provider Response Assembly
+### M2. HTML Injection in Provider Response Assembly — FIXED
 
 | Field | Value |
 |-------|-------|
-| **File** | `bin/response.py:289–292` |
+| **File** | `bin/response.py:284–293` |
 | **Category** | Improper Output Encoding (CWE-116) |
 
-```python
-content=(
-    f'<div class="provider-response" '
-    f'data-provider="{pname}">'
-    f'{response[:4000]}</div>'
-),
-```
-
-Provider names and response text are embedded in HTML strings without escaping. A malicious provider name like `"><script>alert(1)</script>` breaks out of the attribute. Response text could contain arbitrary HTML/script payloads. This content flows into the HME evaluation pipeline and eventually to client rendering.
-
-**Recommendation:** HTML-escape both `pname` and `response` before embedding in markup. Use `html.escape()` from the standard library.
+**Fix:** Both the provider name and response text are now HTML-escaped with `html.escape()` before embedding in markup. The provider name uses `quote=True` to prevent attribute breakout.
 
 ---
 
@@ -316,7 +306,7 @@ The codebase implements several strong security practices worth acknowledging:
 |---|--------|--------|--------|
 | ~~H2~~ | ~~Validate/restrict authority and provider URLs; block internal address ranges~~ | ~~Medium~~ | **Fixed** |
 | ~~H3~~ | ~~Always pass `allowed_data_dir` to `resolve_authority_entries()`~~ | ~~Small~~ | **Fixed** |
-| M2 | HTML-escape provider names and responses in HME assembly | Small | Open |
+| ~~M2~~ | ~~HTML-escape provider names and responses in HME assembly~~ | ~~Small~~ | **Fixed** |
 | ~~M3~~ | ~~Add CSRF protection (custom header check or token)~~ | ~~Medium~~ | **Fixed** |
 | ~~M4~~ | ~~Reject filenames with `..` or `/` in merge endpoint~~ | ~~Trivial~~ | **Fixed** |
 | ~~M5~~ | ~~Apply `escapeHtml()` to `r.role` in search results~~ | ~~Trivial~~ | **Already fixed** |

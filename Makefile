@@ -142,6 +142,7 @@ help:
 	@echo "  make wo-chat-restart       Restart chat shim on WikiOracle"
 	@echo "  make wo-chat-status        Check chat shim status on WikiOracle"
 	@echo "  make wo-chat-logs          Tail chat shim logs on WikiOracle"
+	@echo "  make wo-fix-proxy          Remove /nanochat from Apache ProxyPass"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              Remove Python caches"
@@ -254,7 +255,7 @@ WO_CHAT_DEST     := $(WO_DEST)
 # Extra untracked files the server needs (e.g. runtime config with secrets).
 WO_CHAT_EXTRA    := config.yaml
 
-.PHONY: wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs
+.PHONY: wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs wo-fix-proxy
 
 wo-chat-deploy:
 	@echo "Deploying WikiOracle chat shim to $(WO_HOST):$(WO_CHAT_DEST) ..."
@@ -281,6 +282,20 @@ wo-chat-status:
 
 wo-chat-logs:
 	$(WO_SSH) "sudo journalctl -u wikioracle-chat -f --no-pager"
+
+# Remove /nanochat ProxyPass from Apache config (security fix — NanoChat must
+# remain internal-only on 127.0.0.1).  Scans all Apache vhost configs for
+# ProxyPass lines containing /nanochat and comments them out, then restarts
+# Apache to apply the change.
+wo-fix-proxy:
+	$(WO_SSH) "\
+	  sudo grep -rl '/nanochat' /opt/bitnami/apache/conf/ 2>/dev/null | while read f; do \
+	    echo \"Patching $$f ...\"; \
+	    sudo sed -i '/ProxyPass.*\/nanochat/s/^/#/' \"$$f\"; \
+	  done && \
+	  sudo /opt/bitnami/ctlscript.sh restart apache && \
+	  echo 'Apache restarted — /nanochat proxy rules removed.'"
+	@echo "Done.  Verify with:  make wo-chat-status"
 
 # --- Setup --------------------------------------------------------------------
 

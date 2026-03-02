@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import ssl
 import sys
@@ -89,18 +90,25 @@ from response import (
 # ---------------------------------------------------------------------------
 def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     """Create and configure the WikiOracle Flask application instance."""
+    log = logging.getLogger("wikioracle")
     app = Flask(__name__, static_folder=None)
     startup_merge_report = _scan_and_merge_imports(cfg) if not config_mod.STATELESS_MODE else {}
 
     # Store url_prefix in module-level config so all modules can read it
     config_mod.URL_PREFIX = url_prefix
 
-    # Write CLI-supplied runtime values into _CONFIG_YAML so they
-    # round-trip through config like everything else — no per-response
-    # patching needed.
-    config_mod._CONFIG_YAML.setdefault("server", {})
-    config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-    config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+    def _inject_server_runtime() -> None:
+        """Re-inject CLI runtime fields after a config reload from disk.
+
+        ``stateless`` and ``url_prefix`` are set via CLI flags and must
+        survive disk reloads.  ``allowed_urls`` is left as-is since it
+        is authoritative from disk (admin-only).
+        """
+        srv = config_mod._CONFIG_YAML.setdefault("server", {})
+        srv["stateless"] = config_mod.STATELESS_MODE
+        srv["url_prefix"] = url_prefix
+
+    _inject_server_runtime()
 
     # Security headers (CORS + CSP)
     @app.after_request
@@ -110,12 +118,12 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if origin and origin in cfg.allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Requested-With"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         # Content Security Policy (enforcing)
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' https://d3js.org https://cdnjs.cloudflare.com; "
+            "script-src 'self' https://cdnjs.cloudflare.com; "
             "style-src 'self'; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
@@ -125,6 +133,20 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             "form-action 'self'"
         )
         return response
+
+    @app.before_request
+    def auth_check():
+        """Enforce bearer-token auth (if configured) and CSRF header on POSTs."""
+        # Bearer-token auth — skip for OPTIONS and /health
+        if cfg.api_token and flask_request.method != "OPTIONS":
+            if flask_request.endpoint != "health":
+                auth = flask_request.headers.get("Authorization", "")
+                if auth != f"Bearer {cfg.api_token}":
+                    return jsonify({"ok": False, "error": "unauthorized"}), 401
+        # CSRF header on POSTs
+        if flask_request.method == "POST":
+            if flask_request.headers.get("X-Requested-With") != "WikiOracle":
+                return jsonify({"ok": False, "error": "missing_csrf_header"}), 403
 
     @app.route(url_prefix + "/health", methods=["GET"])
     def health():
@@ -155,10 +177,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         fresh = _load_config_yaml()
         if fresh:
             config_mod._CONFIG_YAML = fresh
-            # Re-inject runtime fields lost by disk reload
-            config_mod._CONFIG_YAML.setdefault("server", {})
-            config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-            config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+            _inject_server_runtime()
         result["config"] = _normalize_config(config_mod._CONFIG_YAML)
 
         return jsonify(result)
@@ -178,7 +197,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 "startup_merge": startup_merge_report,
             })
         except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
+            log.exception("GET /info failed")
+            return jsonify({"ok": False, "error": "Failed to load server info"}), 400
 
     @app.route(url_prefix + "/state", methods=["GET", "POST"])
     def state_endpoint():
@@ -194,7 +214,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     response_mod._MEMORY_STATE = state
                 return jsonify({"state": state})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("GET /state failed")
+                return jsonify({"ok": False, "error": "Failed to load state"}), 400
         else:
             data = flask_request.get_json(force=True, silent=True)
             if not isinstance(data, dict):
@@ -207,7 +228,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 _save_state(cfg, data)
                 return jsonify({"ok": True})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("POST /state failed")
+                return jsonify({"ok": False, "error": "Failed to save state"}), 400
 
     @app.route(url_prefix + "/state_size", methods=["GET"])
     def state_size_endpoint():
@@ -217,7 +239,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 return jsonify({"ok": True, "size": cfg.state_file.stat().st_size})
             return jsonify({"ok": True, "size": 0})
         except Exception as exc:
-            return jsonify({"ok": False, "size": 0, "error": str(exc)})
+            log.exception("GET /state_size failed")
+            return jsonify({"ok": False, "size": 0, "error": "Failed to check state size"})
 
     @app.route(url_prefix + "/chat", methods=["POST", "OPTIONS"])
     def chat():
@@ -246,6 +269,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             fresh = _load_config_yaml()
             if fresh:
                 config_mod._CONFIG_YAML = fresh
+                _inject_server_runtime()
             runtime_cfg = config_mod._CONFIG_YAML
 
         path_only = isinstance(body.get("state"), dict) and body["state"].get("_path_only", False)
@@ -287,7 +311,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 }
                 return jsonify({"ok": True, "text": response_text, "state": response_state})
         except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 502
+            log.exception("POST /chat failed")
+            return jsonify({"ok": False, "error": "Chat request failed"}), 502
 
     @app.route(url_prefix + "/merge", methods=["POST", "OPTIONS"])
     def merge_endpoint():
@@ -315,11 +340,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 _save_state(cfg, merged)
                 return jsonify({"ok": True, "meta": meta, "state": merged})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("POST /merge failed")
+                return jsonify({"ok": False, "error": "Merge failed"}), 400
         else:
             filenames = body.get("files", [])
             import_files = [cfg.state_file.parent / f for f in filenames
-                          if f.endswith(".jsonl") or f.endswith(".json")]
+                          if (f.endswith(".jsonl") or f.endswith(".json"))
+                          and ".." not in f and "/" not in f and "\\" not in f]
 
         base = _load_state(cfg)
         merged_count = 0
@@ -353,10 +380,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         fresh = _load_config_yaml()
         if fresh:
             config_mod._CONFIG_YAML = fresh
-            # Re-inject runtime fields lost by disk reload
-            config_mod._CONFIG_YAML.setdefault("server", {})
-            config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-            config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+            _inject_server_runtime()
 
         if flask_request.method == "GET":
             return jsonify({"config": _normalize_config(config_mod._CONFIG_YAML)})
@@ -375,18 +399,23 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     return jsonify({"ok": False, "error": "missing config dict"}), 400
 
                 data = body["config"]
+                # Preserve the on-disk allowed_urls — clients must not
+                # override this server-level security setting.
+                disk_allowed = config_mod._CONFIG_YAML.get("server", {}).get("allowed_urls")
+                if isinstance(data.get("server"), dict):
+                    data["server"].pop("allowed_urls", None)
+                if disk_allowed is not None:
+                    data.setdefault("server", {})["allowed_urls"] = disk_allowed
                 cfg_path.write_text(config_to_yaml(data), encoding="utf-8")
                 config_mod._CONFIG_YAML = _load_config_yaml()
-                # Re-inject runtime fields lost by disk reload
-                config_mod._CONFIG_YAML.setdefault("server", {})
-                config_mod._CONFIG_YAML["server"]["stateless"] = config_mod.STATELESS_MODE
-                config_mod._CONFIG_YAML["server"]["url_prefix"] = url_prefix
+                _inject_server_runtime()
                 PROVIDERS.clear()
                 PROVIDERS.update(_build_providers())
                 normalized = _normalize_config(config_mod._CONFIG_YAML)
                 return jsonify({"ok": True, "config": normalized})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("POST /config failed")
+                return jsonify({"ok": False, "error": "Configuration update failed"}), 400
 
     # Static file serving — all UI assets live in html/ subdirectory
     project_root = Path(__file__).resolve().parent.parent

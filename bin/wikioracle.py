@@ -123,7 +123,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         # Content Security Policy (enforcing)
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' https://d3js.org https://cdnjs.cloudflare.com; "
+            "script-src 'self' https://cdnjs.cloudflare.com; "
             "style-src 'self'; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
@@ -135,8 +135,15 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         return response
 
     @app.before_request
-    def csrf_check():
-        """Reject POST requests missing the X-Requested-With header (CSRF guard)."""
+    def auth_check():
+        """Enforce bearer-token auth (if configured) and CSRF header on POSTs."""
+        # Bearer-token auth — skip for OPTIONS and /health
+        if cfg.api_token and flask_request.method != "OPTIONS":
+            if flask_request.endpoint != "health":
+                auth = flask_request.headers.get("Authorization", "")
+                if auth != f"Bearer {cfg.api_token}":
+                    return jsonify({"ok": False, "error": "unauthorized"}), 401
+        # CSRF header on POSTs
         if flask_request.method == "POST":
             if flask_request.headers.get("X-Requested-With") != "WikiOracle":
                 return jsonify({"ok": False, "error": "missing_csrf_header"}), 403

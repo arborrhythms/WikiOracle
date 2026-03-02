@@ -18,6 +18,7 @@ Dependency: stdlib only (no imports from config, state, or oracle).
 
 from __future__ import annotations
 
+import collections
 import copy
 import hashlib
 import html
@@ -625,7 +626,8 @@ def get_authority_entries(trust_entries: list) -> list:
 
 
 # In-memory cache for fetched authority JSONL: { url: (timestamp, entries) }
-_AUTHORITY_CACHE: dict = {}
+_AUTHORITY_CACHE_MAX = 64  # Maximum number of cached authority URLs.
+_AUTHORITY_CACHE: collections.OrderedDict = collections.OrderedDict()
 _AUTHORITY_MAX_RESPONSE_BYTES = 1_048_576  # 1 MB
 _AUTHORITY_MAX_ENTRIES = 1000
 
@@ -665,12 +667,15 @@ def resolve_authority_entries(
         cached = _AUTHORITY_CACHE.get(url)
         if cached and (now - cached[0]) < refresh:
             raw_entries = cached[1]
+            _AUTHORITY_CACHE.move_to_end(url)  # refresh LRU position
         else:
             raw_entries = _fetch_authority_jsonl(
                 url, timeout_s=timeout_s,
                 allowed_data_dir=allowed_data_dir,
             )
             _AUTHORITY_CACHE[url] = (now, raw_entries)
+            if len(_AUTHORITY_CACHE) > _AUTHORITY_CACHE_MAX:
+                _AUTHORITY_CACHE.popitem(last=False)  # evict oldest
 
         # Scale certainty and namespace IDs
         scaled = []

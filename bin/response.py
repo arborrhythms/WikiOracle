@@ -721,7 +721,7 @@ def _bundle_to_messages(bundle: ProviderBundle, provider: str) -> List[Dict[str,
 # ---------------------------------------------------------------------------
 def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str:
     """Call NanoChat /chat/completions (SSE streaming, buffered)."""
-    url = cfg.base_url + cfg.api_path
+    url = PROVIDERS.get("wikioracle", {}).get("url") or (cfg.base_url + cfg.api_path)
     if DEBUG_MODE:
         print(f"[DEBUG] NanoChat → {url}")
         print(f"[DEBUG] NanoChat messages ({len(messages)}):")

@@ -108,7 +108,7 @@ class Config:
     """Runtime configuration for the local shim process."""
 
     state_file: Path  # Canonical on-disk state location (ignored in stateless mode).
-    base_url: str = "https://wikioracle.org"  # Upstream NanoChat-compatible base URL.
+    base_url: str = "http://127.0.0.1:8000"  # Upstream NanoChat-compatible base URL.
     api_path: str = "/chat/completions"  # Upstream endpoint path appended to base_url.
     bind_host: str = "127.0.0.1"  # Loopback only; reverse proxy handles external traffic.
     bind_port: int = 8888  # Local port for browser/UI traffic.
@@ -166,8 +166,8 @@ def load_config() -> Config:
 
     return Config(
         state_file=state_file,
-        base_url=os.environ.get("WIKIORACLE_BASE_URL", "https://wikioracle.org").rstrip("/"),
-        api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/chat/completions"),
+        base_url=os.environ.get("WIKIORACLE_BASE_URL", "http://127.0.0.1:8000").rstrip("/"),
+        api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/completions"),
         bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "127.0.0.1"),
         bind_port=port,
         ssl_cert=ssl_cert,
@@ -508,7 +508,7 @@ def _default_allowed_urls() -> list:
         "https://generativelanguage.googleapis.com/",
         "https://api.x.ai/",
         "https://en.wikipedia.org/",
-        "https://wikioracle.org/",
+        "http://127.0.0.1:8000/",
         "https://127.0.0.1:",
         "https://localhost:",
     ]

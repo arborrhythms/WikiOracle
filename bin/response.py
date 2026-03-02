@@ -982,7 +982,7 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
 
     if provider == "wikioracle":
         if DEBUG_MODE:
-            print(f"[DEBUG] → _call_nanochat (wikioracle.org)")
+            print(f"[DEBUG] → _call_nanochat (127.0.0.1)")
         nano_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
         return _call_nanochat(cfg, nano_msgs, temperature)
     pcfg = PROVIDERS.get(provider)
@@ -1096,7 +1096,7 @@ def _call_dynamic_provider(
     api_url_lower = api_url.lower()
     if "anthropic.com" in api_url_lower:
         return _call_dynamic_anthropic(api_url, api_key, model, messages, temperature, timeout, max_tokens)
-    elif "wikioracle.org" in api_url_lower:
+    elif "127.0.0.1" in api_url_lower:
         return _call_nanochat(cfg, messages, temperature)
     else:
         return _call_dynamic_openai(api_url, api_key, model, messages, temperature, timeout, max_tokens)

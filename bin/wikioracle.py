@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import ssl
 import sys
@@ -89,6 +90,7 @@ from response import (
 # ---------------------------------------------------------------------------
 def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     """Create and configure the WikiOracle Flask application instance."""
+    log = logging.getLogger("wikioracle")
     app = Flask(__name__, static_folder=None)
     startup_merge_report = _scan_and_merge_imports(cfg) if not config_mod.STATELESS_MODE else {}
 
@@ -116,7 +118,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if origin and origin in cfg.allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Requested-With"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         # Content Security Policy (enforcing)
         response.headers["Content-Security-Policy"] = (
@@ -131,6 +133,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             "form-action 'self'"
         )
         return response
+
+    @app.before_request
+    def csrf_check():
+        """Reject POST requests missing the X-Requested-With header (CSRF guard)."""
+        if flask_request.method == "POST":
+            if flask_request.headers.get("X-Requested-With") != "WikiOracle":
+                return jsonify({"ok": False, "error": "missing_csrf_header"}), 403
 
     @app.route(url_prefix + "/health", methods=["GET"])
     def health():
@@ -181,7 +190,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 "startup_merge": startup_merge_report,
             })
         except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
+            log.exception("GET /info failed")
+            return jsonify({"ok": False, "error": "Failed to load server info"}), 400
 
     @app.route(url_prefix + "/state", methods=["GET", "POST"])
     def state_endpoint():
@@ -197,7 +207,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     response_mod._MEMORY_STATE = state
                 return jsonify({"state": state})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("GET /state failed")
+                return jsonify({"ok": False, "error": "Failed to load state"}), 400
         else:
             data = flask_request.get_json(force=True, silent=True)
             if not isinstance(data, dict):
@@ -210,7 +221,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 _save_state(cfg, data)
                 return jsonify({"ok": True})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("POST /state failed")
+                return jsonify({"ok": False, "error": "Failed to save state"}), 400
 
     @app.route(url_prefix + "/state_size", methods=["GET"])
     def state_size_endpoint():
@@ -220,7 +232,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 return jsonify({"ok": True, "size": cfg.state_file.stat().st_size})
             return jsonify({"ok": True, "size": 0})
         except Exception as exc:
-            return jsonify({"ok": False, "size": 0, "error": str(exc)})
+            log.exception("GET /state_size failed")
+            return jsonify({"ok": False, "size": 0, "error": "Failed to check state size"})
 
     @app.route(url_prefix + "/chat", methods=["POST", "OPTIONS"])
     def chat():
@@ -291,7 +304,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 }
                 return jsonify({"ok": True, "text": response_text, "state": response_state})
         except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 502
+            log.exception("POST /chat failed")
+            return jsonify({"ok": False, "error": "Chat request failed"}), 502
 
     @app.route(url_prefix + "/merge", methods=["POST", "OPTIONS"])
     def merge_endpoint():
@@ -319,11 +333,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 _save_state(cfg, merged)
                 return jsonify({"ok": True, "meta": meta, "state": merged})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("POST /merge failed")
+                return jsonify({"ok": False, "error": "Merge failed"}), 400
         else:
             filenames = body.get("files", [])
             import_files = [cfg.state_file.parent / f for f in filenames
-                          if f.endswith(".jsonl") or f.endswith(".json")]
+                          if (f.endswith(".jsonl") or f.endswith(".json"))
+                          and ".." not in f and "/" not in f and "\\" not in f]
 
         base = _load_state(cfg)
         merged_count = 0
@@ -391,7 +407,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 normalized = _normalize_config(config_mod._CONFIG_YAML)
                 return jsonify({"ok": True, "config": normalized})
             except Exception as exc:
-                return jsonify({"ok": False, "error": str(exc)}), 400
+                log.exception("POST /config failed")
+                return jsonify({"ok": False, "error": "Configuration update failed"}), 400
 
     # Static file serving — all UI assets live in html/ subdirectory
     project_root = Path(__file__).resolve().parent.parent

@@ -5,6 +5,9 @@
 # The shim runs in stateless mode behind the WordPress/Apache reverse proxy.
 # Apache ProxyPass /chat http://127.0.0.1:8787/chat
 # Apache ProxyPassReverse /chat http://127.0.0.1:8787/chat
+#
+# IMPORTANT: Only /chat should be proxied. Do NOT proxy /nanochat — the
+# NanoChat inference endpoint must remain internal (127.0.0.1 only).
 
 [Unit]
 Description=WikiOracle Chat Shim (stateless Flask)

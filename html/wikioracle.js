@@ -1065,6 +1065,31 @@ function bindEvents() {
     document.getElementById("fileImport").click();
   });
 
+  function _validateImport(st) {
+    if (!Array.isArray(st.conversations))
+      throw new Error("Invalid import: conversations must be an array");
+    for (var i = 0; i < st.conversations.length; i++) {
+      var c = st.conversations[i];
+      if (typeof c.id !== "string") throw new Error("Invalid import: conversation missing id");
+      if (!Array.isArray(c.messages)) throw new Error("Invalid import: conversation " + c.id + " missing messages array");
+      for (var j = 0; j < c.messages.length; j++) {
+        var m = c.messages[j];
+        if (typeof m.id !== "string") throw new Error("Invalid import: message missing id in conversation " + c.id);
+        if (m.role !== "user" && m.role !== "assistant") throw new Error("Invalid import: bad role '" + m.role + "' in message " + m.id);
+        if (typeof m.content !== "string") throw new Error("Invalid import: message " + m.id + " missing content");
+      }
+    }
+    if (!Array.isArray(st.truth))
+      throw new Error("Invalid import: truth must be an array");
+    for (var k = 0; k < st.truth.length; k++) {
+      var t = st.truth[k];
+      if (typeof t.id !== "string") throw new Error("Invalid import: truth entry missing id");
+      if (typeof t.trust !== "number" || t.trust < -1 || t.trust > 1)
+        throw new Error("Invalid import: truth entry " + t.id + " has invalid trust value");
+      if (typeof t.content !== "string") throw new Error("Invalid import: truth entry " + t.id + " missing content");
+    }
+  }
+
   document.getElementById("fileImport").addEventListener("change", async function(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -1130,6 +1155,7 @@ function bindEvents() {
       }
 
       if (!importState.schema || !importState.schema.includes("llm_state")) throw new Error("Not a WikiOracle state file");
+      _validateImport(importState);
 
       // Merge: client-side in stateless mode, server-side otherwise
       _showProgress(85, "Merging\u2026");

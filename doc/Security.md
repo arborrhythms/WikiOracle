@@ -1,6 +1,6 @@
 # Security
 
-WikiOracle is a local-first application. The Flask server binds to `0.0.0.0:8888` by default (all interfaces). For production deployments, it should sit behind a reverse proxy that handles TLS termination and authentication. This document covers the security considerations relevant to its architecture.
+WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:8888` by default (loopback only). In production, Apache ProxyPass routes external traffic to the local Flask process; the server itself is never directly exposed. This document covers the security considerations relevant to its architecture.
 
 ## 1. Private Data
 
@@ -33,6 +33,10 @@ WikiOracle does not implement authentication. The server trusts any request from
 - **No sessions or tokens.** There is no login, no cookies used for auth, and no per-user isolation. If multiple users share a server instance, they share the same state.
 
 For multi-user or public deployments, WikiOracle should sit behind a reverse proxy that handles authentication and maps users to separate state files.
+
+## 3a. Reverse Proxy
+
+In production, Apache ProxyPass routes `/chat` to the local Flask process. The NanoChat inference endpoint (`/nanochat/chat/completions`) must **not** be exposed via the reverse proxy — it should remain accessible only on `127.0.0.1`. Only the `/chat` prefix should be proxied.
 
 ## 4. Cross-Site Scripting (XSS)
 

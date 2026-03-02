@@ -14,7 +14,7 @@ WikiOracle's local-first architecture provides a strong privacy baseline — sta
 1. **Stored XSS** via unsanitized `innerHTML` rendering of LLM responses
 2. **SSRF** through user-controlled authority and provider URLs
 3. **Arbitrary file read** via `file://` authorities when `allowed_data_dir` is unset
-4. **No authentication** on any endpoint, combined with a default `0.0.0.0` bind
+4. **No authentication** on any endpoint
 5. **Gemini API key leaked** in URL query parameters
 
 ---
@@ -138,16 +138,14 @@ All other provider adapters (OpenAI, Anthropic, Grok) correctly send keys in HTT
 
 ## MEDIUM Severity
 
-### M1. Default Bind to All Interfaces (0.0.0.0) — ACCEPTED
+### M1. Default Bind to All Interfaces (0.0.0.0) — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/config.py:113` |
 | **Category** | Insecure Default Configuration (CWE-1188) |
 
-The server binds to all network interfaces by default (`0.0.0.0`). This is intentional — the server runs on a public-facing host behind a reverse proxy. The `doc/Security.md` documentation has been corrected to reflect this.
-
-**Status:** Accepted risk. Authentication (H4) is the appropriate mitigation for multi-user/public deployments.
+**Fix:** Default `bind_host` changed to `127.0.0.1`. The production deployment uses Apache ProxyPass to route external traffic to the local Flask process; the server itself is never directly exposed. Documentation updated accordingly.
 
 ---
 
@@ -172,120 +170,80 @@ Provider names and response text are embedded in HTML strings without escaping. 
 
 ---
 
-### M3. Missing CSRF Protection
+### M3. Missing CSRF Protection — FIXED
 
 | Field | Value |
 |-------|-------|
 | **Files** | `bin/wikioracle.py` (all POST endpoints), `html/query.js:13–23` |
 | **Category** | Cross-Site Request Forgery (CWE-352) |
 
-No CSRF tokens are used on any state-mutating endpoint. While CORS origin checks provide partial protection for `fetch`/`XMLHttpRequest`, simple HTML form submissions can bypass CORS and reach `POST /state` or `POST /config`.
-
-**Recommendation:** Add CSRF protection via a synchronizer token pattern or validate a custom request header (e.g., `X-Requested-With`) that simple forms cannot set.
+**Fix:** Added `@app.before_request` hook that rejects POST requests missing `X-Requested-With: WikiOracle` header (returns 403). The frontend `api()` function now sends this header on every request. HTML forms cannot set custom headers, so this blocks cross-site form submissions.
 
 ---
 
-### M4. Path Traversal in Merge Endpoint
+### M4. Path Traversal in Merge Endpoint — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/wikioracle.py:320–322` |
 | **Category** | Path Traversal (CWE-22) |
 
-```python
-filenames = body.get("files", [])
-import_files = [cfg.state_file.parent / f for f in filenames
-               if f.endswith(".jsonl") or f.endswith(".json")]
-```
-
-User-supplied filenames are joined to the state file's parent directory. While the extension filter limits exploitability, filenames like `../../secrets/keys.json` traverse outside the intended directory. The `load_state_file` call validates JSONL structure, further limiting the attack, but arbitrary `.jsonl`/`.json` files on the filesystem are still readable.
-
-**Recommendation:** Reject filenames containing `..` or `/` path separators. Only accept bare filenames (no directory components).
+**Fix:** Filenames containing `..`, `/`, or `\` are now rejected in the list comprehension filter. Only bare filenames with `.jsonl`/`.json` extensions are accepted.
 
 ---
 
-### M5. Unescaped `role` Field in Search Results
+### M5. Unescaped `role` Field in Search Results — ALREADY FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `html/util.js:1221` |
 | **Category** | Cross-Site Scripting (CWE-79) |
 
-```js
-'<span ...>(' + r.role + ')</span></div>' +
-```
-
-While `r.convTitle` is properly escaped with `escapeHtml()`, the `r.role` field is inserted into the HTML string without escaping. A crafted import file with a malicious `role` value (e.g., `<img src=x onerror=alert(1)>`) injects HTML into search results.
-
-**Recommendation:** Apply `escapeHtml(r.role)` before HTML insertion.
+**Status:** The current code already uses `escapeHtml(r.role)`. No change needed.
 
 ---
 
-### M6. Regex Denial-of-Service in Search
+### M6. Regex Denial-of-Service in Search — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `html/util.js:1172–1176` |
 | **Category** | Regular Expression Denial of Service (CWE-1333) |
 
-```js
-var re;
-try { re = new RegExp(query, "gi"); } catch (e) { ... }
-```
-
-User-supplied regex patterns are compiled and executed against all message content. A crafted regex like `(a+)+$` can cause catastrophic backtracking, freezing the browser UI.
-
-**Recommendation:** Use simple substring matching (`indexOf`) or escape special regex characters before compilation.
+**Fix:** Added `escapeRegExp()` utility that escapes all regex metacharacters. User input is now escaped before `new RegExp()` compilation, making search a safe literal substring match while preserving the highlight/snippet logic.
 
 ---
 
-### M7. Insecure Deserialization via File Import
+### M7. Insecure Deserialization via File Import — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `html/wikioracle.js:1041–1143` |
 | **Category** | Insecure Deserialization (CWE-502) |
 
-The file import handler parses user-supplied JSONL files and merges them into application state with minimal validation (only checks for `schema` field containing "llm_state"). A crafted import file can inject conversations with XSS payloads (exploiting H1), overwrite truth entries, and manipulate application state.
-
-**Recommendation:** Validate all imported data against the full JSON Schema. Sanitize message content before merge.
+**Fix:** Added `_validateImport()` function that validates structural integrity before merge: conversations must have `id` and `messages` array, each message must have `id`, valid `role` ("user"/"assistant"), and `content`; truth entries must have `id`, `trust` (number -1 to 1), and `content`. Throws on first violation.
 
 ---
 
-### M8. CORS Configuration Allows Overly Broad Origins
+### M8. CORS Configuration Allows Overly Broad Origins — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/config.py:143–147` |
 | **Category** | Permissive CORS Policy (CWE-942) |
 
-```python
-allowed_origins_raw = os.environ.get(
-    "WIKIORACLE_ALLOWED_ORIGINS",
-    f"https://127.0.0.1:{port},https://localhost:{port}",
-)
-```
-
-The `WIKIORACLE_ALLOWED_ORIGINS` environment variable accepts a comma-separated list with no format validation. Setting it to `*` or including overly broad origins weakens CORS protection. There is no documentation warning against this.
-
-**Recommendation:** Validate that each origin is a well-formed `https://` URL. Warn if wildcard or HTTP origins are configured.
+**Fix:** Each origin in `WIKIORACLE_ALLOWED_ORIGINS` is now validated: must start with `https://` (or `http://127.0.0.1` / `http://localhost` for local dev). Wildcard `*` is rejected. Invalid entries are logged as warnings and excluded.
 
 ---
 
-### M9. Exception Messages Leaked to Clients
+### M9. Exception Messages Leaked to Clients — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/wikioracle.py:181,197,209,289,318,389` |
 | **Category** | Information Exposure (CWE-209) |
 
-```python
-return jsonify({"ok": False, "error": str(exc)}), 400
-```
-
-Raw Python exception messages are returned to clients across multiple endpoints. These can reveal internal paths, library versions, stack trace fragments, and configuration details.
-
-**Recommendation:** Return generic error messages to clients. Log detailed exceptions server-side only.
+**Fix:** All `str(exc)` responses replaced with generic error messages (e.g., "Chat request failed", "Merge failed"). Full exceptions are now logged server-side via `log.exception()`.
 
 ---
 
@@ -427,27 +385,29 @@ The codebase implements several strong security practices worth acknowledging:
 
 ### Priority 2 — Address in Near Term
 
-| # | Action | Effort |
-|---|--------|--------|
-| H2 | Validate/restrict authority and provider URLs; block internal address ranges | Medium |
-| H3 | Always pass `allowed_data_dir` to `resolve_authority_entries()` | Small |
-| M2 | HTML-escape provider names and responses in HME assembly | Small |
-| M3 | Add CSRF protection (custom header check or token) | Medium |
-| M4 | Reject filenames with `..` or `/` in merge endpoint | Trivial |
-| M5 | Apply `escapeHtml()` to `r.role` in search results | Trivial |
+| # | Action | Effort | Status |
+|---|--------|--------|--------|
+| H2 | Validate/restrict authority and provider URLs; block internal address ranges | Medium | Open |
+| H3 | Always pass `allowed_data_dir` to `resolve_authority_entries()` | Small | Open |
+| M2 | HTML-escape provider names and responses in HME assembly | Small | Open |
+| ~~M3~~ | ~~Add CSRF protection (custom header check or token)~~ | ~~Medium~~ | **Fixed** |
+| ~~M4~~ | ~~Reject filenames with `..` or `/` in merge endpoint~~ | ~~Trivial~~ | **Fixed** |
+| ~~M5~~ | ~~Apply `escapeHtml()` to `r.role` in search results~~ | ~~Trivial~~ | **Already fixed** |
 
 ### Priority 3 — Harden Over Time
 
-| # | Action | Effort |
-|---|--------|--------|
-| M6 | Replace regex search with substring matching or escape special characters | Small |
-| M7 | Validate imported state against full JSON Schema before merge | Medium |
-| M9 | Return generic error messages; log details server-side | Small |
-| L1 | Add SRI integrity attributes to CDN scripts; pin exact versions | Small |
-| L6 | Replace `_AUTHORITY_CACHE` dict with bounded LRU cache | Small |
+| # | Action | Effort | Status |
+|---|--------|--------|--------|
+| ~~M1~~ | ~~Change default `bind_host` to `127.0.0.1`~~ | ~~Trivial~~ | **Fixed** |
+| ~~M6~~ | ~~Escape regex special characters in search~~ | ~~Small~~ | **Fixed** |
+| ~~M7~~ | ~~Validate imported state structure before merge~~ | ~~Medium~~ | **Fixed** |
+| ~~M8~~ | ~~Validate CORS origins, reject wildcards~~ | ~~Small~~ | **Fixed** |
+| ~~M9~~ | ~~Return generic error messages; log details server-side~~ | ~~Small~~ | **Fixed** |
+| L1 | Add SRI integrity attributes to CDN scripts; pin exact versions | Small | Open |
+| L6 | Replace `_AUTHORITY_CACHE` dict with bounded LRU cache | Small | Open |
 
 ---
 
 ## Documentation Discrepancy — RESOLVED
 
-`doc/Security.md` line 3 previously stated the server "binds to `127.0.0.1:8888` by default," but the actual code default is `0.0.0.0`. The documentation has been updated to reflect the actual behavior, since the server is deployed on a public-facing host behind a reverse proxy.
+`doc/Security.md` and `bin/config.py` now both reflect `127.0.0.1` as the default bind address. Apache ProxyPass handles external traffic routing.

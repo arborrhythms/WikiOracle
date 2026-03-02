@@ -11,7 +11,7 @@ function _apiPath(path) {
 }
 
 async function api(method, path, body) {
-  const headers = { "Content-Type": "application/json" };
+  const headers = { "Content-Type": "application/json", "X-Requested-With": "WikiOracle" };
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   const resp = await fetch(_apiPath(path), opts);

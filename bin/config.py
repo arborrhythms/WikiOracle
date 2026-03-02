@@ -14,6 +14,7 @@ Sections:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -109,7 +110,7 @@ class Config:
     state_file: Path  # Canonical on-disk state location (ignored in stateless mode).
     base_url: str = "https://wikioracle.org"  # Upstream NanoChat-compatible base URL.
     api_path: str = "/chat/completions"  # Upstream endpoint path appended to base_url.
-    bind_host: str = "0.0.0.0"  # Bind all interfaces (LAN-accessible).
+    bind_host: str = "127.0.0.1"  # Loopback only; reverse proxy handles external traffic.
     bind_port: int = 8888  # Local port for browser/UI traffic.
     ssl_cert: Path = field(default_factory=lambda: _DEFAULT_CERT)  # TLS certificate.
     ssl_key: Path = field(default_factory=lambda: _DEFAULT_KEY)  # TLS private key.
@@ -144,7 +145,20 @@ def load_config() -> Config:
         "WIKIORACLE_ALLOWED_ORIGINS",
         f"https://127.0.0.1:{port},https://localhost:{port}",
     )
-    allowed_origins = {v.strip() for v in allowed_origins_raw.split(",") if v.strip()}
+    allowed_origins = set()
+    for _origin in allowed_origins_raw.split(","):
+        _origin = _origin.strip()
+        if not _origin:
+            continue
+        if _origin == "*":
+            logging.warning("WIKIORACLE_ALLOWED_ORIGINS: wildcard '*' rejected")
+            continue
+        if not (_origin.startswith("https://")
+                or _origin.startswith("http://127.0.0.1")
+                or _origin.startswith("http://localhost")):
+            logging.warning("WIKIORACLE_ALLOWED_ORIGINS: non-https origin rejected: %s", _origin)
+            continue
+        allowed_origins.add(_origin)
 
     ssl_cert = Path(os.environ.get("WIKIORACLE_SSL_CERT", str(_DEFAULT_CERT))).expanduser()
     ssl_key = Path(os.environ.get("WIKIORACLE_SSL_KEY", str(_DEFAULT_KEY))).expanduser()
@@ -153,7 +167,7 @@ def load_config() -> Config:
         state_file=state_file,
         base_url=os.environ.get("WIKIORACLE_BASE_URL", "https://wikioracle.org").rstrip("/"),
         api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/chat/completions"),
-        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "0.0.0.0"),
+        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "127.0.0.1"),
         bind_port=port,
         ssl_cert=ssl_cert,
         ssl_key=ssl_key,

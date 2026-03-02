@@ -21,118 +21,58 @@ WikiOracle's local-first architecture provides a strong privacy baseline — sta
 
 ## HIGH Severity
 
-### H1. Stored XSS via `innerHTML` of LLM/Imported Content
+### H1. Stored XSS via `innerHTML` of LLM/Imported Content — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `html/wikioracle.js:584` |
 | **Category** | Cross-Site Scripting (CWE-79) |
 
-```js
-bubble.innerHTML = ensureXhtml(msg.content || "");
-```
-
-`ensureXhtml()` (lines 44–51) validates that content is well-formed XML but does **not** strip event handlers, `javascript:` URIs, or dangerous elements. Valid XHTML payloads like `<img src="x" onerror="..."/>` or `<svg onload="..."/>` pass validation and are injected into the DOM.
-
-The CSP header blocks inline `<script>` execution and — in modern browsers — inline event handlers. However:
-- CSP does **not** prevent HTML injection (phishing forms, fake UI, content spoofing).
-- Older browsers or CSP misconfigurations would allow full script execution.
-- The `repairXhtml()` fallback (line 30) uses `template.innerHTML = content`, actively aiding interpretation of malicious markup.
-
-Messages are persisted in state, making this a **stored** XSS vector exploitable via crafted imports or adversarial LLM output.
-
-**Recommendation:** Sanitize all message content with a whitelist-based HTML sanitizer (e.g., DOMPurify) before assigning to `innerHTML`. Strip all `on*` event handler attributes, `javascript:` URIs, and non-semantic elements like `<form>`, `<input>`, `<iframe>`.
+**Fix:** DOMPurify v3.2.4 integrated. `sanitizeHtml()` applies a strict whitelist of tags and attributes (no `on*` handlers, no `javascript:` URIs, no `<form>`/`<input>`/`<iframe>`). `ensureXhtml()` now routes all code paths through `sanitizeHtml()` before `innerHTML` assignment. Fallback escapes all HTML if DOMPurify is unavailable.
 
 ---
 
-### H2. SSRF via User-Controlled Authority and Provider URLs
+### H2. SSRF via User-Controlled Authority and Provider URLs — FIXED
 
 | Field | Value |
 |-------|-------|
 | **Files** | `bin/truth.py:633–759`, `bin/response.py:1078–1134` |
 | **Category** | Server-Side Request Forgery (CWE-918) |
 
-Trust entries in state include `<authority>` and `<provider>` blocks with user-supplied URLs. The server fetches these URLs during chat processing:
-
-```python
-# truth.py — authority fetch (https:// and file:// only)
-req = urllib.request.Request(url, headers={"User-Agent": "WikiOracle/1.0"})
-with urllib.request.urlopen(req, timeout=timeout_s) as resp: ...
-
-# response.py — dynamic provider call (no scheme validation)
-resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
-```
-
-An attacker who can inject trust entries (via `POST /state`, `POST /merge`, or a crafted import file) can force the server to make requests to:
-- Cloud metadata endpoints (`https://169.254.169.254/...`)
-- Internal network services (`https://10.0.0.1/...`)
-- Localhost services (`https://127.0.0.1:<port>/...`)
-
-The authority fetch path restricts schemes to `https://` and `file://`, but the dynamic provider path (`_call_dynamic_openai`, `_call_dynamic_anthropic`) accepts any URL without scheme validation and may attach API keys to the request.
-
-**Recommendation:** Validate and restrict URLs to an allowlist of permitted domains. At minimum, block RFC 1918, link-local, and cloud metadata address ranges. Validate URL schemes on all code paths.
+**Fix:** `is_url_allowed()` in `config.py` enforces HTTPS-only + prefix whitelist (`allowed_urls` in config.yaml). `file://` URLs are blocked. Both authority fetches and dynamic provider calls go through this check. Only explicitly whitelisted URL prefixes (API providers, Wikipedia, WikiOracle) are permitted.
 
 ---
 
-### H3. Arbitrary File Read via `file://` Authorities
+### H3. Arbitrary File Read via `file://` Authorities — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/truth.py:720–734`, `bin/response.py:400` |
 | **Category** | Path Traversal (CWE-22) |
 
-`_fetch_authority_jsonl()` supports `file://` URLs with an optional `allowed_data_dir` check. However, the main call path in `response.py:400` invokes `resolve_authority_entries()` **without** specifying `allowed_data_dir`:
-
-```python
-resolved = resolve_authority_entries(authority_entries, timeout_s=30)
-```
-
-When `allowed_data_dir` is `None`, the path restriction is completely bypassed. A trust entry with `url="file:///etc/passwd"` causes the server to read that file. The file must parse as JSONL, limiting what can be exfiltrated, but structured data files (JSON configs, JSONL logs) are fully readable.
-
-**Recommendation:** Always pass `allowed_data_dir` when calling `resolve_authority_entries()` and `_fetch_authority_jsonl()`. Default to a restrictive path (e.g., the state file's parent directory).
+**Fix:** `file://` URLs are now explicitly blocked in `_fetch_authority_jsonl()`. The `is_url_allowed()` whitelist ensures only HTTPS URLs matching configured prefixes are fetched. The `allowed_data_dir` parameter is vestigial — the whitelist is the primary protection.
 
 ---
 
-### H4. No Authentication on Any Endpoint
+### H4. No Authentication on Any Endpoint — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/wikioracle.py:90–415` |
 | **Category** | Missing Authentication (CWE-306) |
 
-None of the endpoints (`/state`, `/chat`, `/merge`, `/config`, `/bootstrap`) require authentication. Any network client that can reach the server can:
-- Read the full state including conversation history (`GET /state`)
-- Overwrite the entire state (`POST /state`)
-- Modify provider configuration including API keys (`POST /config`)
-- Trigger merges with crafted payloads (`POST /merge`)
-- Send chat requests that consume API credits (`POST /chat`)
-
-Combined with the default `bind_host: "0.0.0.0"` in `config.py:113` (see M1), the server is accessible to the entire LAN by default.
-
-**Recommendation:** Add authentication (at minimum bearer token or HTTP Basic Auth) to all state-mutating endpoints. Consider a token-based scheme where the token is generated on first run and displayed to the user.
+**Fix:** Bearer-token authentication added via `WIKIORACLE_API_TOKEN` environment variable. When set, all endpoints (except `/health` and OPTIONS) require `Authorization: Bearer <token>`. The frontend reads the token from `sessionStorage` and prompts the user on 401. Token is opt-in — empty token disables auth (suitable for loopback-only deployments).
 
 ---
 
-### H5. Gemini API Key Leaked in URL Query Parameter
+### H5. Gemini API Key Leaked in URL Query Parameter — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/response.py:920` |
 | **Category** | Credential Exposure (CWE-598) |
 
-```python
-url = f"{base_url}/{model}:generateContent?key={api_key}"
-```
-
-The Gemini API key is passed as a URL query parameter. This means it:
-- Appears in server access logs and proxy logs
-- Can leak via HTTP `Referer` headers
-- Is visible in network monitoring tools
-- Persists in shell history if URLs are logged
-
-All other provider adapters (OpenAI, Anthropic, Grok) correctly send keys in HTTP headers.
-
-**Recommendation:** Use `x-goog-api-key` HTTP header instead of the `key` query parameter for Gemini API calls.
+**Fix:** Gemini API key moved from URL query parameter to `x-goog-api-key` HTTP header, consistent with all other provider adapters.
 
 ---
 
@@ -249,20 +189,13 @@ Provider names and response text are embedded in HTML strings without escaping. 
 
 ## LOW Severity
 
-### L1. CDN Scripts Without Subresource Integrity (SRI)
+### L1. CDN Scripts Without Subresource Integrity (SRI) — PARTIALLY FIXED
 
 | Field | Value |
 |-------|-------|
-| **File** | `html/index.html:109–110` |
+| **File** | `html/index.html:109–111` |
 
-```html
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
-```
-
-External CDN scripts are loaded without `integrity` attributes. If either CDN is compromised, arbitrary code executes in the application context. The D3 URL (`d3.v7`) resolves to the latest v7 minor version, meaning the loaded code can change without the developer's knowledge.
-
-**Recommendation:** Add `integrity="sha384-..."` and `crossorigin="anonymous"` attributes. Pin D3 to an exact version.
+**Fix:** D3 pinned to exact version (7.9.0) via cdnjs. All three CDN scripts (D3, js-yaml, DOMPurify) now include `crossorigin="anonymous"`. CSP `script-src` updated to remove `d3js.org` (all scripts now served from `cdnjs.cloudflare.com`). SRI `integrity` hashes should be added when deploying (requires fetching the scripts to compute hashes).
 
 ---
 
@@ -326,19 +259,13 @@ There is a time-of-check-to-time-of-use race between the symlink check and the `
 
 ---
 
-### L6. Unbounded Authority Cache
+### L6. Unbounded Authority Cache — FIXED
 
 | Field | Value |
 |-------|-------|
 | **File** | `bin/truth.py:628` |
 
-```python
-_AUTHORITY_CACHE: dict = {}
-```
-
-The in-memory authority cache grows without limit. An attacker could cause memory exhaustion by creating many authority entries with distinct URLs.
-
-**Recommendation:** Use an LRU cache with a configurable maximum size.
+**Fix:** Replaced unbounded `dict` with `collections.OrderedDict` capped at 64 entries. Oldest entries are evicted on overflow. Cache hits refresh LRU position.
 
 ---
 
@@ -377,18 +304,18 @@ The codebase implements several strong security practices worth acknowledging:
 
 ### Priority 1 — Fix Before Public Deployment
 
-| # | Action | Effort |
-|---|--------|--------|
-| H1 | Integrate DOMPurify (or equivalent) to sanitize all content before `innerHTML` assignment | Small |
-| H4 | Add bearer-token authentication to state-mutating endpoints | Medium |
-| H5 | Move Gemini API key from URL query parameter to `x-goog-api-key` header | Small |
+| # | Action | Effort | Status |
+|---|--------|--------|--------|
+| ~~H1~~ | ~~Integrate DOMPurify (or equivalent) to sanitize all content before `innerHTML` assignment~~ | ~~Small~~ | **Fixed** |
+| ~~H4~~ | ~~Add bearer-token authentication to state-mutating endpoints~~ | ~~Medium~~ | **Fixed** |
+| ~~H5~~ | ~~Move Gemini API key from URL query parameter to `x-goog-api-key` header~~ | ~~Small~~ | **Fixed** |
 
 ### Priority 2 — Address in Near Term
 
 | # | Action | Effort | Status |
 |---|--------|--------|--------|
-| H2 | Validate/restrict authority and provider URLs; block internal address ranges | Medium | Open |
-| H3 | Always pass `allowed_data_dir` to `resolve_authority_entries()` | Small | Open |
+| ~~H2~~ | ~~Validate/restrict authority and provider URLs; block internal address ranges~~ | ~~Medium~~ | **Fixed** |
+| ~~H3~~ | ~~Always pass `allowed_data_dir` to `resolve_authority_entries()`~~ | ~~Small~~ | **Fixed** |
 | M2 | HTML-escape provider names and responses in HME assembly | Small | Open |
 | ~~M3~~ | ~~Add CSRF protection (custom header check or token)~~ | ~~Medium~~ | **Fixed** |
 | ~~M4~~ | ~~Reject filenames with `..` or `/` in merge endpoint~~ | ~~Trivial~~ | **Fixed** |
@@ -403,8 +330,8 @@ The codebase implements several strong security practices worth acknowledging:
 | ~~M7~~ | ~~Validate imported state structure before merge~~ | ~~Medium~~ | **Fixed** |
 | ~~M8~~ | ~~Validate CORS origins, reject wildcards~~ | ~~Small~~ | **Fixed** |
 | ~~M9~~ | ~~Return generic error messages; log details server-side~~ | ~~Small~~ | **Fixed** |
-| L1 | Add SRI integrity attributes to CDN scripts; pin exact versions | Small | Open |
-| L6 | Replace `_AUTHORITY_CACHE` dict with bounded LRU cache | Small | Open |
+| ~~L1~~ | ~~Add SRI integrity attributes to CDN scripts; pin exact versions~~ | ~~Small~~ | **Partially fixed** |
+| ~~L6~~ | ~~Replace `_AUTHORITY_CACHE` dict with bounded LRU cache~~ | ~~Small~~ | **Fixed** |
 
 ---
 

@@ -12,9 +12,19 @@ function _apiPath(path) {
 
 async function api(method, path, body) {
   const headers = { "Content-Type": "application/json", "X-Requested-With": "WikiOracle" };
+  var token = sessionStorage.getItem("wo_api_token");
+  if (token) headers["Authorization"] = "Bearer " + token;
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(_apiPath(path), opts);
+  var resp = await fetch(_apiPath(path), opts);
+  if (resp.status === 401) {
+    token = prompt("API token required:");
+    if (token) {
+      sessionStorage.setItem("wo_api_token", token);
+      headers["Authorization"] = "Bearer " + token;
+      resp = await fetch(_apiPath(path), opts);
+    }
+  }
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);

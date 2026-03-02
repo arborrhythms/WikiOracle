@@ -124,6 +124,7 @@ class Config:
     allowed_origins: set = field(default_factory=lambda: {
         "https://127.0.0.1:8888", "https://localhost:8888"
     })
+    api_token: str = ""  # Bearer token for endpoint auth (empty = no auth required).
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -179,6 +180,7 @@ def load_config() -> Config:
         auto_context_rewrite=_env_bool("WIKIORACLE_AUTO_CONTEXT_REWRITE", False),
         merged_suffix=os.environ.get("WIKIORACLE_MERGED_SUFFIX", ".merged").strip() or ".merged",
         allowed_origins=allowed_origins,
+        api_token=os.environ.get("WIKIORACLE_API_TOKEN", ""),
     )
 
 

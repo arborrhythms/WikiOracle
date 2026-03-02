@@ -41,11 +41,38 @@ function repairXhtml(content) {
   return repaired;
 }
 
+function sanitizeHtml(html) {
+  // Whitelist-based sanitization: strip event handlers, javascript: URIs,
+  // and dangerous elements while preserving safe XHTML structure.
+  if (typeof DOMPurify !== "undefined") {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        "p", "br", "hr", "div", "span", "pre", "code", "blockquote",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "ul", "ol", "li", "dl", "dt", "dd",
+        "a", "em", "strong", "b", "i", "u", "s", "sub", "sup", "mark",
+        "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption",
+        "img", "figure", "figcaption", "details", "summary",
+        "abbr", "cite", "q", "time", "var", "kbd", "samp", "small",
+        "ruby", "rt", "rp", "wbr",
+      ],
+      ALLOWED_ATTR: [
+        "href", "src", "alt", "title", "class", "id", "colspan", "rowspan",
+        "width", "height", "style", "target", "rel", "datetime", "lang",
+        "dir", "data-provider",
+      ],
+      ALLOW_DATA_ATTR: false,
+    });
+  }
+  // Fallback when DOMPurify is unavailable: escape everything.
+  return "<p>" + escapeHtml(html) + "</p>";
+}
+
 function ensureXhtml(content) {
   if (!content) return "<div/>";
-  if (validateXhtml(content)) return content;
+  if (validateXhtml(content)) return sanitizeHtml(content);
   const repaired = repairXhtml(content);
-  if (validateXhtml(repaired)) return repaired;
+  if (validateXhtml(repaired)) return sanitizeHtml(repaired);
   // Last resort: escape and wrap
   return `<p>${escapeHtml(content)}</p>`;
 }
@@ -1038,6 +1065,31 @@ function bindEvents() {
     document.getElementById("fileImport").click();
   });
 
+  function _validateImport(st) {
+    if (!Array.isArray(st.conversations))
+      throw new Error("Invalid import: conversations must be an array");
+    for (var i = 0; i < st.conversations.length; i++) {
+      var c = st.conversations[i];
+      if (typeof c.id !== "string") throw new Error("Invalid import: conversation missing id");
+      if (!Array.isArray(c.messages)) throw new Error("Invalid import: conversation " + c.id + " missing messages array");
+      for (var j = 0; j < c.messages.length; j++) {
+        var m = c.messages[j];
+        if (typeof m.id !== "string") throw new Error("Invalid import: message missing id in conversation " + c.id);
+        if (m.role !== "user" && m.role !== "assistant") throw new Error("Invalid import: bad role '" + m.role + "' in message " + m.id);
+        if (typeof m.content !== "string") throw new Error("Invalid import: message " + m.id + " missing content");
+      }
+    }
+    if (!Array.isArray(st.truth))
+      throw new Error("Invalid import: truth must be an array");
+    for (var k = 0; k < st.truth.length; k++) {
+      var t = st.truth[k];
+      if (typeof t.id !== "string") throw new Error("Invalid import: truth entry missing id");
+      if (typeof t.trust !== "number" || t.trust < -1 || t.trust > 1)
+        throw new Error("Invalid import: truth entry " + t.id + " has invalid trust value");
+      if (typeof t.content !== "string") throw new Error("Invalid import: truth entry " + t.id + " missing content");
+    }
+  }
+
   document.getElementById("fileImport").addEventListener("change", async function(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -1103,6 +1155,7 @@ function bindEvents() {
       }
 
       if (!importState.schema || !importState.schema.includes("llm_state")) throw new Error("Not a WikiOracle state file");
+      _validateImport(importState);
 
       // Merge: client-side in stateless mode, server-side otherwise
       _showProgress(85, "Merging\u2026");

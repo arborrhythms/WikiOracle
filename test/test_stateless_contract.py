@@ -58,6 +58,22 @@ def _make_runtime_config(**overrides):
     return base
 
 
+class _CsrfClient:
+    """Thin wrapper that injects the X-Requested-With CSRF header on POSTs."""
+
+    _CSRF = {"X-Requested-With": "WikiOracle"}
+
+    def __init__(self, client):
+        self._c = client
+
+    def __getattr__(self, name):
+        return getattr(self._c, name)
+
+    def post(self, *args, headers=None, **kwargs):
+        headers = {**(headers or {}), **self._CSRF}
+        return self._c.post(*args, headers=headers, **kwargs)
+
+
 class StatelessContractBase(unittest.TestCase):
     """Base class that creates a Flask test client in stateless mode."""
 
@@ -78,7 +94,7 @@ class StatelessContractBase(unittest.TestCase):
         self.cfg = Config(state_file=self._state_path)
         self.app = create_app(self.cfg, url_prefix="")
         self.app.testing = True
-        self.client = self.app.test_client()
+        self.client = _CsrfClient(self.app.test_client())
 
     def tearDown(self):
         config_mod.STATELESS_MODE = self._orig_stateless
@@ -295,7 +311,7 @@ class TestStatefulChatUnaffected(unittest.TestCase):
         self.cfg = Config(state_file=self._state_path)
         self.app = create_app(self.cfg, url_prefix="")
         self.app.testing = True
-        self.client = self.app.test_client()
+        self.client = _CsrfClient(self.app.test_client())
 
     def tearDown(self):
         config_mod.STATELESS_MODE = self._orig_stateless

@@ -528,17 +528,19 @@ def get_allowed_urls() -> list:
 def is_url_allowed(url: str) -> bool:
     """Check whether a URL is permitted by the allowed_urls whitelist.
 
-    file:// URLs are always rejected.  Only https:// URLs matching a
-    configured prefix are accepted.
+    file:// URLs are always rejected.  https:// and http://127.0.0.1
+    (loopback) URLs matching a configured prefix are accepted.
+    Comparisons are case-insensitive (domains are case-insensitive per RFC).
     """
     if not isinstance(url, str):
         return False
     if url.startswith("file://"):
         return False
-    if not url.startswith("https://"):
+    if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
         return False
     allowed = get_allowed_urls()
-    return any(url.startswith(prefix) for prefix in allowed)
+    url_lower = url.lower()
+    return any(url_lower.startswith(prefix.lower()) for prefix in allowed)
 
 
 # ---------------------------------------------------------------------------

@@ -77,9 +77,10 @@ server:
     - "https://generativelanguage.googleapis.com/"
     - "https://api.x.ai/"
     - "https://en.wikipedia.org/"
-    - "https://wikioracle.org/"
+    - "https://wikiOracle.org/"
     - "https://127.0.0.1:"
     - "https://localhost:"
+    - "http://127.0.0.1:"
 
 # --- SSH keys ----------------------------------------------------------------
 # Referenced by the Makefile for remote operations.

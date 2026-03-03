@@ -17,6 +17,7 @@ providers:
     name: oracle
     username: you@example.com
     url: http://127.0.0.1:8000/chat/completions
+    timeout: 15  # seconds – NanoChat request timeout
 
   openai:
     name: chatGPT

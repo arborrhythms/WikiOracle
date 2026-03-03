@@ -285,6 +285,8 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
         # YAML api_key fills in when no env var is set
         if ycfg.get("api_key") and not pcfg.get("api_key"):
             pcfg["api_key"] = ycfg["api_key"]
+        if ycfg.get("timeout"):
+            pcfg["timeout"] = ycfg["timeout"]
 
     return providers
 

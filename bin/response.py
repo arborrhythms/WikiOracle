@@ -730,8 +730,9 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str
         for i, m in enumerate(messages):
             print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
     payload = {"messages": messages, "temperature": temperature, "max_tokens": 1024}
+    provider_timeout = PROVIDERS.get("wikioracle", {}).get("timeout") or cfg.timeout_s
     resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
-                         timeout=cfg.timeout_s, stream=True)
+                         timeout=provider_timeout, stream=True)
     if resp.status_code >= 400:
         return f"[Error from upstream: HTTP {resp.status_code}] {resp.text[:500]}"
 

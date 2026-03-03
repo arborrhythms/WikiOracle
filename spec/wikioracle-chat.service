@@ -22,6 +22,7 @@ ExecStart=/opt/bitnami/wordpress/files/wikiOracle.org/chat/.venv/bin/python3 \
     bin/wikioracle.py --stateless --url-prefix /chat
 Restart=on-failure
 RestartSec=5
+Environment=PYTHONUNBUFFERED=1
 Environment=WIKIORACLE_BIND_HOST=127.0.0.1
 Environment=WIKIORACLE_BIND_PORT=8787
 Environment=WIKIORACLE_BASE_URL=http://127.0.0.1:8000

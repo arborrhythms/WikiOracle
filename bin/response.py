@@ -60,7 +60,7 @@ class Source:
     title: str  # Human-readable source label shown to the model/user.
     certainty: float  # Confidence score used in ranking/display.
     content: str  # Plaintext/XHTML snippet injected into prompts.
-    kind: str = "fact"          # "fact" | "reference" | "provider" | "operator" | "authority" | "transient"
+    kind: str = "fact"          # "fact" | "feeling" | "reference" | "provider" | "operator" | "authority" | "transient"
     time: str = ""
 
 
@@ -91,9 +91,9 @@ def static_truth(
 ) -> List[Dict[str, Any]]:
     """Extract the evaluable (static) subset of the truth table.
 
-    Returns every entry whose content is a fact or reference — i.e. the
-    entries that carry propositional content rather than structural wiring.
-    These are the entries that ``dynamic_truth`` evaluates against.
+    Returns every entry whose content is a fact, feeling, or reference —
+    i.e. the entries that carry propositional content rather than structural
+    wiring.  These are the entries that ``dynamic_truth`` evaluates against.
 
     Structural entries are excluded from this subset:
       - ``<provider>``  — evaluated separately as dynamic expert consultations
@@ -428,6 +428,8 @@ def build_query(
                 kind = "reference"
             elif _has_operator_tag(content):
                 kind = "operator"
+            elif "<feeling" in content:
+                kind = "feeling"
             else:
                 kind = "fact"
             bundle.sources.append(Source(

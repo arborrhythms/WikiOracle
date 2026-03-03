@@ -10,6 +10,7 @@ REST API Endpoints:
 | Route            | Methods      | Purpose                                                      |
 |------------------|--------------|--------------------------------------------------------------|
 | /health          | GET          | Liveness check                                               |
+| /nanochat_status | GET          | Probe upstream NanoChat server health                        |
 | /server_info     | GET          | Stateless flag + url_prefix                                  |
 | /bootstrap       | GET          | One-shot seed for stateless clients (state + config)             |
 | /info            | GET          | State/schema/provider metadata for diagnostics               |
@@ -152,6 +153,21 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     def health():
         """Simple liveness endpoint for local health checks."""
         return jsonify({"ok": True})
+
+    @app.route(url_prefix + "/nanochat_status", methods=["GET"])
+    def nanochat_status():
+        """Probe the upstream NanoChat server and return its status."""
+        import requests as _req
+        url = cfg.base_url.rstrip("/")
+        try:
+            resp = _req.get(url + "/health", timeout=5, verify=False)
+            if resp.ok:
+                return jsonify({"ok": True, "url": url, "status": "online"})
+            return jsonify({"ok": False, "url": url, "status": f"HTTP {resp.status_code}"})
+        except _req.ConnectionError:
+            return jsonify({"ok": False, "url": url, "status": "offline"})
+        except Exception as exc:
+            return jsonify({"ok": False, "url": url, "status": str(exc)})
 
     @app.route(url_prefix + "/server_info", methods=["GET"])
     def server_info():

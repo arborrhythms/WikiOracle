@@ -14,6 +14,7 @@ Sections:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -107,9 +108,9 @@ class Config:
     """Runtime configuration for the local shim process."""
 
     state_file: Path  # Canonical on-disk state location (ignored in stateless mode).
-    base_url: str = "https://wikioracle.org"  # Upstream NanoChat-compatible base URL.
+    base_url: str = "http://127.0.0.1:8000"  # Upstream NanoChat-compatible base URL.
     api_path: str = "/chat/completions"  # Upstream endpoint path appended to base_url.
-    bind_host: str = "0.0.0.0"  # Bind all interfaces (LAN-accessible).
+    bind_host: str = "127.0.0.1"  # Loopback only; reverse proxy handles external traffic.
     bind_port: int = 8888  # Local port for browser/UI traffic.
     ssl_cert: Path = field(default_factory=lambda: _DEFAULT_CERT)  # TLS certificate.
     ssl_key: Path = field(default_factory=lambda: _DEFAULT_KEY)  # TLS private key.
@@ -123,6 +124,7 @@ class Config:
     allowed_origins: set = field(default_factory=lambda: {
         "https://127.0.0.1:8888", "https://localhost:8888"
     })
+    api_token: str = ""  # Bearer token for endpoint auth (empty = no auth required).
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -144,16 +146,29 @@ def load_config() -> Config:
         "WIKIORACLE_ALLOWED_ORIGINS",
         f"https://127.0.0.1:{port},https://localhost:{port}",
     )
-    allowed_origins = {v.strip() for v in allowed_origins_raw.split(",") if v.strip()}
+    allowed_origins = set()
+    for _origin in allowed_origins_raw.split(","):
+        _origin = _origin.strip()
+        if not _origin:
+            continue
+        if _origin == "*":
+            logging.warning("WIKIORACLE_ALLOWED_ORIGINS: wildcard '*' rejected")
+            continue
+        if not (_origin.startswith("https://")
+                or _origin.startswith("http://127.0.0.1")
+                or _origin.startswith("http://localhost")):
+            logging.warning("WIKIORACLE_ALLOWED_ORIGINS: non-https origin rejected: %s", _origin)
+            continue
+        allowed_origins.add(_origin)
 
     ssl_cert = Path(os.environ.get("WIKIORACLE_SSL_CERT", str(_DEFAULT_CERT))).expanduser()
     ssl_key = Path(os.environ.get("WIKIORACLE_SSL_KEY", str(_DEFAULT_KEY))).expanduser()
 
     return Config(
         state_file=state_file,
-        base_url=os.environ.get("WIKIORACLE_BASE_URL", "https://wikioracle.org").rstrip("/"),
-        api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/chat/completions"),
-        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "0.0.0.0"),
+        base_url=os.environ.get("WIKIORACLE_BASE_URL", "http://127.0.0.1:8000").rstrip("/"),
+        api_path=os.environ.get("WIKIORACLE_API_PATH", "/chat/completions"),
+        bind_host=os.environ.get("WIKIORACLE_BIND_HOST", "127.0.0.1"),
         bind_port=port,
         ssl_cert=ssl_cert,
         ssl_key=ssl_key,
@@ -165,6 +180,7 @@ def load_config() -> Config:
         auto_context_rewrite=_env_bool("WIKIORACLE_AUTO_CONTEXT_REWRITE", False),
         merged_suffix=os.environ.get("WIKIORACLE_MERGED_SUFFIX", ".merged").strip() or ".merged",
         allowed_origins=allowed_origins,
+        api_token=os.environ.get("WIKIORACLE_API_TOKEN", ""),
     )
 
 
@@ -315,7 +331,6 @@ CONFIG_SCHEMA = [
     ("providers.grok.api_key",      "API key (or set XAI_API_KEY env var)"),
     ("providers.grok.default_model", "Default model"),
     ("chat.temperature",            "Sampling temperature (0.0–2.0)"),
-    ("chat.output_format",          'Appended as "output_format: <value>" line'),
     ("chat.rag",                    "Use truth entries for retrieval"),
     ("chat.url_fetch",              "Allow URL fetching in responses"),
     ("chat.confirm_actions",        "Prompt before deletes, merges, etc."),
@@ -328,14 +343,7 @@ CONFIG_SCHEMA = [
     ("server",                      "Runtime parameters (usually set via CLI flags)"),
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
-    ("ssh.wikioracle.key_file",     "Web-server deployment key"),
-    ("ssh.wikioracle.user",         "SSH user"),
-    ("ssh.wikioracle.host",         "SSH host"),
-    ("ssh.wikioracle.dest",         "Remote destination path"),
-    ("ssh.ec2.key_file",            "GPU training instance key"),
-    ("ssh.ec2.user",                "SSH user"),
-    ("ssh.ec2.region",              "AWS region"),
-    ("ssh.ec2.key_name",            "AWS key name"),
+    ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
 ]
 
 
@@ -385,6 +393,15 @@ def config_to_yaml(data: dict) -> str:
     """
     if not isinstance(data, dict):
         return ""
+
+    # Strip runtime-only field injected by _normalize_config — server.providers
+    # is metadata for UI dropdowns and must not be persisted to config.yaml.
+    data = dict(data)  # shallow copy to avoid mutating caller's dict
+    srv = data.get("server")
+    if isinstance(srv, dict):
+        srv = dict(srv)
+        srv.pop("providers", None)
+        data["server"] = srv
 
     lines: list[str] = []
     emitted: set[str] = set()  # Track dotted paths already written
@@ -477,6 +494,56 @@ def config_to_yaml(data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Allowed URL prefixes for authority/provider fetches
+# ---------------------------------------------------------------------------
+def _default_allowed_urls() -> list:
+    """Default URL prefixes that authority and dynamic provider fetches may target.
+
+    Only https:// URLs whose prefix matches one of these entries are allowed.
+    file:// URLs are always blocked.
+    """
+    return [
+        "https://api.openai.com/",
+        "https://api.anthropic.com/",
+        "https://generativelanguage.googleapis.com/",
+        "https://api.x.ai/",
+        "https://en.wikipedia.org/",
+        "http://127.0.0.1:8000/",
+        "https://127.0.0.1:",
+        "https://localhost:",
+    ]
+
+
+def get_allowed_urls() -> list:
+    """Return the allowed URL prefixes from the on-disk config.
+
+    This reads from ``_CONFIG_YAML`` which is reloaded from disk on each
+    request.  Client-submitted config changes are stripped of
+    ``allowed_urls`` by the POST /config handler so only the admin (who
+    edits config.yaml directly) can change this list.
+    """
+    return _CONFIG_YAML.get("server", {}).get("allowed_urls", _default_allowed_urls())
+
+
+def is_url_allowed(url: str) -> bool:
+    """Check whether a URL is permitted by the allowed_urls whitelist.
+
+    file:// URLs are always rejected.  https:// and http://127.0.0.1
+    (loopback) URLs matching a configured prefix are accepted.
+    Comparisons are case-insensitive (domains are case-insensitive per RFC).
+    """
+    if not isinstance(url, str):
+        return False
+    if url.startswith("file://"):
+        return False
+    if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
+        return False
+    allowed = get_allowed_urls()
+    url_lower = url.lower()
+    return any(url_lower.startswith(prefix.lower()) for prefix in allowed)
+
+
+# ---------------------------------------------------------------------------
 # Config normalization (fill defaults, keep YAML shape)
 # ---------------------------------------------------------------------------
 def _normalize_config(cfg_yaml: dict) -> dict:
@@ -501,6 +568,7 @@ def _normalize_config(cfg_yaml: dict) -> dict:
     server = cfg.setdefault("server", {})
     server.setdefault("stateless", False)
     server.setdefault("url_prefix", "")
+    server.setdefault("allowed_urls", _default_allowed_urls())
     # Non-secret provider metadata for UI dropdowns / key-status badges
     prov_meta = {}
     for key, pcfg in PROVIDERS.items():
@@ -511,11 +579,6 @@ def _normalize_config(cfg_yaml: dict) -> dict:
             "models": _PROVIDER_MODELS.get(key, []),
         }
     server["providers"] = prov_meta
-    # Factory defaults for reset buttons (context, output)
-    cfg["defaults"] = {
-        "context": "<div/>",
-        "output": "",
-    }
     return cfg
 
 
@@ -536,6 +599,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("--stateless", action="store_true",
                         help="Run in stateless mode (no writes to disk; editors disabled)")
+    parser.add_argument("--no-ssl", action="store_true",
+                        help="Serve over plain HTTP (skip TLS)")
     parser.add_argument("--url-prefix", default="",
                         help="URL path prefix (e.g. /chat) for reverse-proxy deployments")
     sub = parser.add_subparsers(dest="cmd")

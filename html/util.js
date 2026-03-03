@@ -32,6 +32,10 @@ function escapeHtml(text) {
   return (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function decodeEntities(text) {
   var el = document.createElement("textarea");
   el.innerHTML = text || "";
@@ -387,8 +391,7 @@ function _toggleContextEditor() {
     overlay = dlg.overlay;
 
     document.getElementById("ctxReset").addEventListener("click", function() {
-      var d = config.defaults || {};
-      document.getElementById("contextTextarea").value = stripTags(d.context || "<div/>").trim();
+      document.getElementById("contextTextarea").value = "";
     });
     document.getElementById("ctxCancel").addEventListener("click", dlg.close);
     document.getElementById("ctxSave").addEventListener("click", function() {
@@ -433,8 +436,7 @@ function _toggleOutputEditor() {
 
     document.getElementById("outCancel").addEventListener("click", dlg.close);
     document.getElementById("outReset").addEventListener("click", function() {
-      var d = config.defaults || {};
-      document.getElementById("outputTextarea").value = d.output ?? "";
+      document.getElementById("outputTextarea").value = "";
     });
     document.getElementById("outSave").addEventListener("click", function() {
       const newText = document.getElementById("outputTextarea").value.trim();
@@ -1170,7 +1172,7 @@ function _openSearch() {
       if (!query || !state) return;
       var results = [];
       var re;
-      try { re = new RegExp(query, "gi"); } catch (e) {
+      try { re = new RegExp(escapeRegExp(query), "gi"); } catch (e) {
         document.getElementById("searchInfo").textContent = "Invalid regex: " + e.message;
         return;
       }
@@ -1218,7 +1220,7 @@ function _openSearch() {
         (function(r) {
           var div = document.createElement("div");
           div.className = "search-result";
-          div.innerHTML = '<div class="search-result-title">' + escapeHtml(r.convTitle) + ' <span style="color:var(--fg-muted);font-weight:normal">(' + r.role + ')</span></div>' +
+          div.innerHTML = '<div class="search-result-title">' + escapeHtml(r.convTitle) + ' <span style="color:var(--fg-muted);font-weight:normal">(' + escapeHtml(r.role) + ')</span></div>' +
             '<div class="search-result-snippet">' + r.snippet + '</div>';
           div.addEventListener("click", function() {
             dlg.close();

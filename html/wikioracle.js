@@ -41,11 +41,38 @@ function repairXhtml(content) {
   return repaired;
 }
 
+function sanitizeHtml(html) {
+  // Whitelist-based sanitization: strip event handlers, javascript: URIs,
+  // and dangerous elements while preserving safe XHTML structure.
+  if (typeof DOMPurify !== "undefined") {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        "p", "br", "hr", "div", "span", "pre", "code", "blockquote",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "ul", "ol", "li", "dl", "dt", "dd",
+        "a", "em", "strong", "b", "i", "u", "s", "sub", "sup", "mark",
+        "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption",
+        "img", "figure", "figcaption", "details", "summary",
+        "abbr", "cite", "q", "time", "var", "kbd", "samp", "small",
+        "ruby", "rt", "rp", "wbr",
+      ],
+      ALLOWED_ATTR: [
+        "href", "src", "alt", "title", "class", "id", "colspan", "rowspan",
+        "width", "height", "style", "target", "rel", "datetime", "lang",
+        "dir", "data-provider",
+      ],
+      ALLOW_DATA_ATTR: false,
+    });
+  }
+  // Fallback when DOMPurify is unavailable: escape everything.
+  return "<p>" + escapeHtml(html) + "</p>";
+}
+
 function ensureXhtml(content) {
   if (!content) return "<div/>";
-  if (validateXhtml(content)) return content;
+  if (validateXhtml(content)) return sanitizeHtml(content);
   const repaired = repairXhtml(content);
-  if (validateXhtml(repaired)) return repaired;
+  if (validateXhtml(repaired)) return sanitizeHtml(repaired);
   // Last resort: escape and wrap
   return `<p>${escapeHtml(content)}</p>`;
 }
@@ -179,10 +206,12 @@ function _pasteConversation(targetId) {
     // Move: reparent srcId under targetId
     removeFromTree(state.conversations, srcId);
     if (targetId === "root") {
+      src.parentId = null;
       state.conversations.push(src);
     } else {
       var tgt = findConversation(state.conversations, targetId);
       if (!tgt) return;
+      src.parentId = targetId;
       if (!tgt.children) tgt.children = [];
       tgt.children.push(src);
     }
@@ -195,10 +224,12 @@ function _pasteConversation(targetId) {
     // Duplicate: deep-clone src and add as child of target
     var clone = _deepCloneConversation(src);
     if (targetId === "root") {
+      clone.parentId = null;
       state.conversations.push(clone);
     } else {
       var tgt = findConversation(state.conversations, targetId);
       if (!tgt) return;
+      clone.parentId = targetId;
       if (!tgt.children) tgt.children = [];
       tgt.children.push(clone);
     }
@@ -211,12 +242,13 @@ function _pasteConversation(targetId) {
 
 function _deepCloneConversation(conv) {
   var clone = JSON.parse(JSON.stringify(conv));
-  function _reassignIds(c) {
+  function _reassignIds(c, newParentId) {
     c.id = generateUUID();
+    c.parentId = newParentId;
     (c.messages || []).forEach(function(m) { m.id = generateUUID(); });
-    (c.children || []).forEach(_reassignIds);
+    (c.children || []).forEach(function(ch) { _reassignIds(ch, c.id); });
   }
-  _reassignIds(clone);
+  _reassignIds(clone, null);
   return clone;
 }
 
@@ -270,7 +302,10 @@ function _splitAfterMessage(msgIdx) {
     title: newTitle,
     messages: tailMessages,
     children: conv.children || [],  // existing children follow the tail
+    parentId: conv.id,
   };
+  // Update moved children's parentId to point to the new conv
+  (newConv.children || []).forEach(function(c) { c.parentId = newConv.id; });
   conv.children = [newConv];
 
   state.selected_conversation = newConv.id;
@@ -894,6 +929,7 @@ async function sendMessage() {
       title: text.slice(0, 50),
       messages: [userEntry],
       children: [],
+      parentId: branchFrom || null,
     };
     if (branchFrom) {
       const parent = findConversation(state.conversations, branchFrom);
@@ -1048,6 +1084,31 @@ function bindEvents() {
     document.getElementById("fileImport").click();
   });
 
+  function _validateImport(st) {
+    if (!Array.isArray(st.conversations))
+      throw new Error("Invalid import: conversations must be an array");
+    for (var i = 0; i < st.conversations.length; i++) {
+      var c = st.conversations[i];
+      if (typeof c.id !== "string") throw new Error("Invalid import: conversation missing id");
+      if (!Array.isArray(c.messages)) throw new Error("Invalid import: conversation " + c.id + " missing messages array");
+      for (var j = 0; j < c.messages.length; j++) {
+        var m = c.messages[j];
+        if (typeof m.id !== "string") throw new Error("Invalid import: message missing id in conversation " + c.id);
+        if (m.role !== "user" && m.role !== "assistant") throw new Error("Invalid import: bad role '" + m.role + "' in message " + m.id);
+        if (typeof m.content !== "string") throw new Error("Invalid import: message " + m.id + " missing content");
+      }
+    }
+    if (!Array.isArray(st.truth))
+      throw new Error("Invalid import: truth must be an array");
+    for (var k = 0; k < st.truth.length; k++) {
+      var t = st.truth[k];
+      if (typeof t.id !== "string") throw new Error("Invalid import: truth entry missing id");
+      if (typeof t.trust !== "number" || t.trust < -1 || t.trust > 1)
+        throw new Error("Invalid import: truth entry " + t.id + " has invalid trust value");
+      if (typeof t.content !== "string") throw new Error("Invalid import: truth entry " + t.id + " missing content");
+    }
+  }
+
   document.getElementById("fileImport").addEventListener("change", async function(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -1094,7 +1155,7 @@ function bindEvents() {
           const byId = {};
           const roots = [];
           for (const rec of convRecords) {
-            byId[rec.id] = { ...rec, children: [] };
+            byId[rec.id] = { ...rec, children: [], parentId: rec.parent || null };
           }
           for (const rec of convRecords) {
             const node = byId[rec.id];
@@ -1113,6 +1174,7 @@ function bindEvents() {
       }
 
       if (!importState.schema || !importState.schema.includes("llm_state")) throw new Error("Not a WikiOracle state file");
+      _validateImport(importState);
 
       // Merge: client-side in stateless mode, server-side otherwise
       _showProgress(85, "Merging\u2026");
@@ -1595,6 +1657,7 @@ init();
 (function() {
   const divider = document.getElementById("resizeDivider");
   const tree = document.getElementById("treeContainer");
+  const mainArea = document.getElementById("mainArea");
   let dragging = false, startPos = 0, startSize = 0;
 
   function isVertical() {
@@ -1613,12 +1676,12 @@ init();
   function moveDrag(clientX, clientY) {
     if (!dragging) return;
     if (isVertical()) {
-      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
-      const newW = Math.max(0, Math.min(window.innerWidth * 0.8, startSize + (clientX - startPos)));
+      const max = mainArea.clientWidth - divider.offsetWidth;
+      const newW = Math.max(0, Math.min(max, startSize + (clientX - startPos)));
       tree.style.width = newW + "px";
     } else {
-      // Allow collapsing to 0 but keep divider on-screen (min 0, max 80% viewport)
-      const newH = Math.max(0, Math.min(window.innerHeight * 0.8, startSize + (clientY - startPos)));
+      const max = mainArea.clientHeight - divider.offsetHeight;
+      const newH = Math.max(0, Math.min(max, startSize + (clientY - startPos)));
       tree.style.height = newH + "px";
     }
   }

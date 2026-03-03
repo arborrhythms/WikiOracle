@@ -3,10 +3,8 @@
 
 These tests make REAL network calls to OpenAI and Anthropic APIs using
 the API keys in config.yaml.  They are slow (~5-20s each) and require
-valid credentials, so they are NOT included in the default `make test`
-target.  Run explicitly:
-
-    python3 -m unittest test.test_online_llm -v
+valid credentials.  Failures are treated as warnings in `make test`
+(non-blocking).  Tests without matching API keys are skipped automatically.
 """
 
 import os
@@ -47,6 +45,22 @@ def _has_provider_key(provider: str) -> bool:
     return bool(cfg.get("providers", {}).get(provider, {}).get("api_key"))
 
 
+class _CsrfClient:
+    """Thin wrapper that injects X-Requested-With CSRF header on POSTs."""
+
+    _CSRF = {"X-Requested-With": "WikiOracle"}
+
+    def __init__(self, client):
+        self._c = client
+
+    def __getattr__(self, name):
+        return getattr(self._c, name)
+
+    def post(self, *args, headers=None, **kwargs):
+        headers = {**(headers or {}), **self._CSRF}
+        return self._c.post(*args, headers=headers, **kwargs)
+
+
 class _OnlineLLMBase(unittest.TestCase):
     """Base that creates a Flask test client with real config.yaml providers."""
 
@@ -66,7 +80,7 @@ class _OnlineLLMBase(unittest.TestCase):
         self.cfg = Config(state_file=self._state_path)
         self.app = create_app(self.cfg, url_prefix="")
         self.app.testing = True
-        self.client = self.app.test_client()
+        self.client = _CsrfClient(self.app.test_client())
 
     def tearDown(self):
         config_mod.STATELESS_MODE = self._orig_stateless

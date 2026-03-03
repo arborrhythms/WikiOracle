@@ -11,10 +11,20 @@ function _apiPath(path) {
 }
 
 async function api(method, path, body) {
-  const headers = { "Content-Type": "application/json" };
+  const headers = { "Content-Type": "application/json", "X-Requested-With": "WikiOracle" };
+  var token = sessionStorage.getItem("wo_api_token");
+  if (token) headers["Authorization"] = "Bearer " + token;
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(_apiPath(path), opts);
+  var resp = await fetch(_apiPath(path), opts);
+  if (resp.status === 401) {
+    token = prompt("API token required:");
+    if (token) {
+      sessionStorage.setItem("wo_api_token", token);
+      headers["Authorization"] = "Bearer " + token;
+      resp = await fetch(_apiPath(path), opts);
+    }
+  }
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
@@ -51,12 +61,12 @@ function _buildAncestorPath(conversations, convId) {
       var c = convs[i];
       if (c.id === target) {
         // Found target — return it with its children intact (includes optimistic conv)
-        return [{ id: c.id, title: c.title, messages: c.messages || [], children: c.children || [] }];
+        return [{ id: c.id, title: c.title, messages: c.messages || [], children: c.children || [], parentId: c.parentId }];
       }
       var deeper = _search(c.children || [], target);
       if (deeper) {
         // This node is on the path — keep only the child that leads to target
-        return [{ id: c.id, title: c.title, messages: c.messages || [], children: deeper }];
+        return [{ id: c.id, title: c.title, messages: c.messages || [], children: deeper, parentId: c.parentId }];
       }
     }
     return null;
@@ -77,6 +87,7 @@ function _mergeResponseConversation(localConvs, responseBundle) {
   if (localConv) {
     localConv.messages = respConv.messages || [];
     localConv.title = respConv.title || localConv.title;
+    if (respConv.parentId !== undefined) localConv.parentId = respConv.parentId;
     // Merge children (response may have added a new child)
     if (respConv.children) {
       if (!localConv.children) localConv.children = [];
@@ -88,22 +99,24 @@ function _mergeResponseConversation(localConvs, responseBundle) {
       }
     }
   } else {
-    // New conversation — find its parent in the response path and insert there
-    // Walk the response tree to find the parent
-    function _findParent(convs, childId) {
-      for (var j = 0; j < convs.length; j++) {
-        var ch = convs[j].children || [];
-        for (var k = 0; k < ch.length; k++) {
-          if (ch[k].id === childId) return convs[j].id;
+    // New conversation — use parentId for correct placement
+    var pid = respConv.parentId || null;
+    // Fallback: walk the response tree for backward compat with old servers
+    if (!pid) {
+      pid = (function _findParent(convs, childId) {
+        for (var j = 0; j < convs.length; j++) {
+          var ch = convs[j].children || [];
+          for (var k = 0; k < ch.length; k++) {
+            if (ch[k].id === childId) return convs[j].id;
+          }
+          var deeper = _findParent(ch, childId);
+          if (deeper) return deeper;
         }
-        var deeper = _findParent(ch, childId);
-        if (deeper) return deeper;
-      }
-      return null;
+        return null;
+      })(responseBundle.conversations || [], selId);
     }
-    var parentId = _findParent(responseBundle.conversations || [], selId);
-    if (parentId) {
-      var localParent = findInTree(localConvs, parentId);
+    if (pid) {
+      var localParent = findInTree(localConvs, pid);
       if (localParent) {
         if (!localParent.children) localParent.children = [];
         localParent.children.push(respConv);
@@ -164,8 +177,9 @@ function _clientMerge(importState) {
             existing.messages.push(m);
           }
         }
-        // Update title if import has one
+        // Update title and parentId if import has them
         if (inc.title) existing.title = inc.title;
+        if (inc.parentId !== undefined) existing.parentId = inc.parentId;
         // Recursively merge children
         if (!existing.children) existing.children = [];
         mergeConvLists(existing.children, inc.children || []);

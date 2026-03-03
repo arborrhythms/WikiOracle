@@ -19,6 +19,7 @@ Dependency: stdlib only (no imports from config, state, or oracle).
 
 from __future__ import annotations
 
+import collections
 import copy
 import hashlib
 import html
@@ -626,7 +627,8 @@ def get_authority_entries(trust_entries: list) -> list:
 
 
 # In-memory cache for fetched authority JSONL: { url: (timestamp, entries) }
-_AUTHORITY_CACHE: dict = {}
+_AUTHORITY_CACHE_MAX = 64  # Maximum number of cached authority URLs.
+_AUTHORITY_CACHE: collections.OrderedDict = collections.OrderedDict()
 _AUTHORITY_MAX_RESPONSE_BYTES = 1_048_576  # 1 MB
 _AUTHORITY_MAX_ENTRIES = 1000
 
@@ -666,12 +668,15 @@ def resolve_authority_entries(
         cached = _AUTHORITY_CACHE.get(url)
         if cached and (now - cached[0]) < refresh:
             raw_entries = cached[1]
+            _AUTHORITY_CACHE.move_to_end(url)  # refresh LRU position
         else:
             raw_entries = _fetch_authority_jsonl(
                 url, timeout_s=timeout_s,
                 allowed_data_dir=allowed_data_dir,
             )
             _AUTHORITY_CACHE[url] = (now, raw_entries)
+            if len(_AUTHORITY_CACHE) > _AUTHORITY_CACHE_MAX:
+                _AUTHORITY_CACHE.popitem(last=False)  # evict oldest
 
         # Scale certainty and namespace IDs
         scaled = []
@@ -718,29 +723,29 @@ def _fetch_authority_jsonl(
 
     entries = []
     try:
+        # file:// authority URLs are not supported — to reference a local
+        # file as an authority, add it via the merge endpoint or CLI instead.
         if url.startswith("file://"):
-            # Local file read (within allowed data dir)
-            rel_path = url[len("file://"):]
-            file_path = Path(rel_path).expanduser().resolve()
-            if allowed_data_dir:
-                allowed = Path(allowed_data_dir).resolve()
-                try:
-                    file_path.relative_to(allowed)
-                except ValueError:
-                    print(f"[WikiOracle] Authority file outside allowlist: {file_path}")
-                    return []
-            if not file_path.exists():
-                print(f"[WikiOracle] Authority file not found: {file_path}")
-                return []
-            raw = file_path.read_text(encoding="utf-8")
-        elif url.startswith("https://"):
-            import urllib.request
-            req = urllib.request.Request(url, headers={"User-Agent": "WikiOracle/1.0"})
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                raw = resp.read(_AUTHORITY_MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
-        else:
+            print(f"[WikiOracle] file:// authority URLs are blocked: {url}")
+            return []
+
+        if not url.startswith("https://"):
             print(f"[WikiOracle] Authority URL scheme not allowed: {url}")
             return []
+
+        # Validate URL against the configured whitelist
+        try:
+            from config import is_url_allowed
+            if not is_url_allowed(url):
+                print(f"[WikiOracle] Authority URL not in allowed_urls whitelist: {url}")
+                return []
+        except ImportError:
+            pass  # standalone usage without config module
+
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "WikiOracle/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read(_AUTHORITY_MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
 
         for line in raw.splitlines():
             line = line.strip()
@@ -770,7 +775,7 @@ def _eval_operator(op: dict, certainty: dict) -> float | None:
       and(a, b, ...) = min(a, b, ...)
       or(a, b, ...)  = max(a, b, ...)
       not(a)         = -a
-      non(a)         = sign(a) * (1 - |a|)   (non-affirming negation)
+      non(a)         = 1 - 2|a|   (non-affirming negation)
     Returns None if any referenced ID is missing from the certainty table.
     """
     refs = op["refs"]
@@ -787,10 +792,7 @@ def _eval_operator(op: dict, certainty: dict) -> float | None:
     elif operator == "not":
         return -values[0]
     elif operator == "non":
-        x = values[0]
-        if x == 0.0:
-            return 0.0
-        return (1.0 if x > 0 else -1.0) * (1.0 - abs(x))
+        return 1.0 - 2.0 * abs(values[0])
     return None
 
 

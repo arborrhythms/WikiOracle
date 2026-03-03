@@ -8,7 +8,8 @@ Recommended reading order:
 2. `WhatIsTruth.md` (plural truth, POVs, and certainty semantics)
 3. `HierarchicalMixtureOfExperts.md` (HME logic, distributed truth vs consensus, conceptual spaces)
 4. `Authority.md` (transitive trust and the authority import format)
-5. `Implication.md` (logical operators: and/or/not under Strong Kleene semantics)
+5. `Logic.md` (logical operators: and/or/not/non under Strong Kleene semantics)
+   - `non.md` (non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity)
 6. `Voting.md` (voting protocol: dom steering, sub fan-out, cycle prevention, truth-only output)
 7. `FreedomEmpathyTruth.md` (Freedom, Empathy, and Truth — safety principles)
 8. `Architecture.md` (current local-first software architecture)
@@ -24,7 +25,8 @@ Recommended reading order:
 - [`WhatIsTruth.md`](./WhatIsTruth.md): plural truth model, POVs, empathy as procedural constraint, HME fan-out, Kleene-style certainty.
 - [`HierarchicalMixtureOfExperts.md`](./HierarchicalMixtureOfExperts.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
 - [`Authority.md`](./Authority.md): authority blocks (`<authority>`), transitive trust, certainty scaling, namespacing, and fetch/security constraints.
-- [`Implication.md`](./Implication.md): logical operators (and/or/not); Strong Kleene evaluation; derived truth engine.
+- [`Logic.md`](./Logic.md): logical operators (and/or/not/non); Strong Kleene evaluation; derived truth engine.
+- [`non.md`](./non.md): non-affirming negation — Buddhist philosophical motivation (prasajya-pratisedha), fuzzy logic interpretation, and proof of expressive necessity.
 - [`Voting.md`](./Voting.md): voting protocol — dom steering, sub fan-out, cycle prevention, `<feeling>` as truth type, truth-only output.
 - [`FreedomEmpathyTruth.md`](./FreedomEmpathyTruth.md): Freedom, Empathy, and Truth — safety principles and architectural commitments.
 - [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).

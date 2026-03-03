@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import copy
+import html as html_mod
 import json
 import os
 import re
@@ -280,15 +281,16 @@ def evaluate_providers(
         try:
             response = call_fn(pconfig, messages)
             if response and not response.startswith("[Error"):
-                pname = pconfig.get("name", "")
+                pname = html_mod.escape(pconfig.get("name", ""), quote=True)
+                safe_response = html_mod.escape(response[:4000])
                 return Source(
                     source_id=entry.get("id", ""),
-                    title=pname,
+                    title=pconfig.get("name", ""),
                     certainty=entry.get("certainty", 0),
                     content=(
                         f'<div class="provider-response" '
                         f'data-provider="{pname}">'
-                        f'{response[:4000]}</div>'
+                        f'{safe_response}</div>'
                     ),
                     kind="provider",
                     time=entry.get("time", ""),
@@ -721,7 +723,7 @@ def _bundle_to_messages(bundle: ProviderBundle, provider: str) -> List[Dict[str,
 # ---------------------------------------------------------------------------
 def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str:
     """Call NanoChat /chat/completions (SSE streaming, buffered)."""
-    url = cfg.base_url + cfg.api_path
+    url = PROVIDERS.get("wikioracle", {}).get("url") or (cfg.base_url + cfg.api_path)
     if DEBUG_MODE:
         print(f"[DEBUG] NanoChat → {url}")
         print(f"[DEBUG] NanoChat messages ({len(messages)}):")
@@ -919,7 +921,7 @@ def _call_gemini(bundle: ProviderBundle | None, temperature: float,
     model = provider_cfg.get("default_model", "gemini-2.5-flash")
     base_url = provider_cfg.get("url", "https://generativelanguage.googleapis.com/v1beta/models")
     api_key = provider_cfg.get("api_key", "")
-    url = f"{base_url}/{model}:generateContent?key={api_key}"
+    url = f"{base_url}/{model}:generateContent"
 
     if bundle is not None:
         payload = to_gemini_payload(bundle, model=model, temperature=temperature)
@@ -943,7 +945,7 @@ def _call_gemini(bundle: ProviderBundle | None, temperature: float,
             text = c.get("parts", [{}])[0].get("text", "")
             print(f"  [{i}] {c.get('role', '?')}: {text[:200]}{'...' if len(text) > 200 else ''}")
 
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     resp = requests.post(url, json=payload, headers=headers, timeout=120)
     if resp.status_code >= 400:
         return f"[Error from Gemini: HTTP {resp.status_code}] {resp.text[:500]}"
@@ -982,7 +984,7 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
 
     if provider == "wikioracle":
         if DEBUG_MODE:
-            print(f"[DEBUG] → _call_nanochat (wikioracle.org)")
+            print(f"[DEBUG] → _call_nanochat (127.0.0.1)")
         nano_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
         return _call_nanochat(cfg, nano_msgs, temperature)
     pcfg = PROVIDERS.get(provider)
@@ -1081,7 +1083,11 @@ def _call_dynamic_provider(
     provider_config: dict, messages: List[Dict], temperature: float, cfg: Config,
 ) -> str:
     """Route a trust-entry provider config to Anthropic, NanoChat, or OpenAI path."""
+    from config import is_url_allowed
+
     api_url = provider_config.get("api_url", "")
+    if api_url and not is_url_allowed(api_url):
+        return f"[Error: URL not in allowed_urls whitelist: {api_url}]"
     raw_key = provider_config.get("api_key", "")
     model = provider_config.get("model", "")
     timeout = provider_config.get("timeout") or int(cfg.timeout_s)
@@ -1089,9 +1095,10 @@ def _call_dynamic_provider(
 
     api_key = _resolve_dynamic_api_key(raw_key, api_url)
 
-    if "anthropic.com" in api_url:
+    api_url_lower = api_url.lower()
+    if "anthropic.com" in api_url_lower:
         return _call_dynamic_anthropic(api_url, api_key, model, messages, temperature, timeout, max_tokens)
-    elif "wikioracle.org" in api_url:
+    elif "127.0.0.1" in api_url_lower:
         return _call_nanochat(cfg, messages, temperature)
     else:
         return _call_dynamic_openai(api_url, api_key, model, messages, temperature, timeout, max_tokens)
@@ -1236,16 +1243,6 @@ def _fan_out_and_aggregate(
     else:
         final_messages = to_nanochat_messages(final_bundle)
         response_text = _call_dynamic_provider(primary_config, final_messages, temperature, cfg)
-
-    if response_text.startswith("[Error"):
-        fallback_messages = to_nanochat_messages(final_bundle)
-        for entry, pconfig in secondaries:
-            try:
-                fallback_text = _call_dynamic_provider(pconfig, fallback_messages, temperature, cfg)
-                if not fallback_text.startswith("[Error"):
-                    return fallback_text, provider_sources
-            except Exception:
-                continue
 
     return response_text, provider_sources
 
@@ -1492,6 +1489,7 @@ def process_chat(
                     "title": first_words,
                     "messages": [query_entry, response_entry],
                     "children": [],
+                    "parentId": branch_from,
                 }
                 ensure_conversation_id(new_conv)
                 add_child_conversation(conversations, branch_from, new_conv)
@@ -1502,6 +1500,7 @@ def process_chat(
                 "title": first_words,
                 "messages": [query_entry, response_entry],
                 "children": [],
+                "parentId": branch_from,
             }
             ensure_conversation_id(new_conv)
             add_child_conversation(conversations, branch_from, new_conv)
@@ -1519,6 +1518,7 @@ def process_chat(
                     "title": first_words,
                     "messages": [query_entry, response_entry],
                     "children": [],
+                    "parentId": None,
                 }
                 ensure_conversation_id(new_conv)
                 conversations.append(normalize_conversation(new_conv))
@@ -1529,6 +1529,7 @@ def process_chat(
                 "title": first_words,
                 "messages": [query_entry, response_entry],
                 "children": [],
+                "parentId": None,
             }
             ensure_conversation_id(new_conv)
             conversations.append(normalize_conversation(new_conv))

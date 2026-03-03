@@ -69,7 +69,6 @@ function _normalizeConfig(cfg) {
   if (cfg.server.stateless === undefined) cfg.server.stateless = false;
   if (cfg.server.url_prefix === undefined) cfg.server.url_prefix = "";
   if (!cfg.server.providers) cfg.server.providers = {};
-  if (!cfg.defaults) cfg.defaults = { context: "<div/>", output: "" };
   return cfg;
 }
 

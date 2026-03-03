@@ -16,6 +16,7 @@ providers:
   wikioracle:
     name: oracle
     username: you@example.com
+    url: http://127.0.0.1:8000/chat/completions
 
   openai:
     name: chatGPT
@@ -49,7 +50,6 @@ providers:
 
 chat:
   temperature: 0.7
-  output_format: XHTML                    # appended as "output_format: <value>" line
   rag: false                              # use truth entries for retrieval
   url_fetch: false                       # allow URL fetching in responses
   confirm_actions: true                  # prompt before deletes, merges, etc.
@@ -61,28 +61,25 @@ ui:
   layout: horizontal                      # flat | horizontal | vertical
   theme: system                           # system | light | dark
   splitter_pct: 0                         # tree panel height (0 = collapsed)
+  swipe_nav_horizontal: true  # Swipe left/right to navigate siblings
+  swipe_nav_vertical: false  # Swipe up/down to navigate siblings
 
 # --- Server ------------------------------------------------------------------
 # Runtime parameters — usually set via CLI flags; YAML values are defaults.
 
 server:
-  stateless: false
+  stateless: true
   url_prefix: ""
-
-# --- SSH keys ----------------------------------------------------------------
-# Referenced by the Makefile for remote operations.
-
-ssh:
-  # Web-server deployment
-  wikioracle:
-    key_file: ~/.ssh/your-deploy-key.pem
-    user: bitnami
-    host: example.com
-    dest: /var/www/html/chat
-
-  # GPU training instance
-  ec2:
-    key_file: ~/.ssh/your-ec2-key.pem
-    user: ubuntu
-    region: us-west-2
-    key_name: your-key-name
+  # URL prefixes allowed for authority and dynamic provider fetches.
+  # file:// URLs are always blocked.  Only https:// URLs matching one of
+  # these prefixes are permitted.
+  allowed_urls:
+    - "https://api.openai.com/"
+    - "https://api.anthropic.com/"
+    - "https://generativelanguage.googleapis.com/"
+    - "https://api.x.ai/"
+    - "https://en.wikipedia.org/"
+    - "https://wikiOracle.org/"
+    - "https://127.0.0.1:"
+    - "https://localhost:"
+    - "http://127.0.0.1:"

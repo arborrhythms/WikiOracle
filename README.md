@@ -46,8 +46,8 @@ A distributed truth network prevents appropriation. Anyone who tries to capture 
 
 WikiOracle implements a **Hierarchical Mixture of Experts (HME)** architecture for evaluating claims:
 
-- **Trust entries** carry certainty values in [-1, +1] using Kleene ternary logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
-- **Logical operators** (and/or/not under Strong Kleene semantics) compute derived certainty over the truth table.
+- **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
+- **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the truth table.
 - **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
 - **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
 
@@ -61,15 +61,15 @@ See the [documentation](doc/README.md) for the full design.
 
 The initial prototype is intentionally modest and low-cost:
 
-- Extends Andrej Karpathy's [NanoChat](https://github.com/karpathy/nanochat) with Retrieval-Augmented Generation (RAG) over trusted corpora
-- User-specified trust sets (configurable source whitelists)
-- Online learning constrained by trust and grounding requirements
-- Experiments in symbolic computation for grounding truth
-- Training feasible on rented compute (~$100 scale)
+- Hierarchical, multi-LLM architecture for runtime-configurable Hierarchical Mixture of Experts.
+- User-specified truth sets (facts, collections, LLMs, authorities, ...)
+- Online learning constrained by trust and epistemic grounding
+- Extends [NanoChat](https://github.com/karpathy/nanochat) with Retrieval-Augmented Generation (RAG)
+- Allows feasible experiments in LLM architectures on rented compute (~$100 scale)
 
 ## Longer-Term Direction
 
-If grounding-based truthfulness proves viable at small scale, the architecture can be evaluated and extended to larger open models. The broader aim is to explore whether architectural commitments to truth can enable honest self-explanation, reduce the need for ad-hoc guardrails, and support AI systems that function as durable public goods.
+If WikiOracle proves viable at small scale, the architecture can be evaluated and extended to larger open models. The broader aim is to explore whether architectural commitments to truth can enable honest self-explanation, reduce the need for ad-hoc guardrails, and support AI systems that function as durable public goods.
 
 ---
 
@@ -104,7 +104,8 @@ The full design and governance documentation lives in [`doc/`](doc/README.md):
 | [WhatIsTruth](doc/WhatIsTruth.md) | Plural truth, POVs, empathy, certainty semantics |
 | [HierarchicalMixtureOfExperts](doc/HierarchicalMixtureOfExperts.md) | HME logic, distributed truth, conceptual spaces |
 | [Authority](doc/Authority.md) | Transitive trust and authority import format |
-| [Implication](doc/Implication.md) | Logical operators under Strong Kleene semantics |
+| [Logic](doc/Logic.md) | Logical operators (and/or/not/non) under Strong Kleene semantics |
+| [Non](doc/non.md) | Non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity |
 | [FreedomEmpathyTruth](doc/FreedomEmpathyTruth.md) | Freedom, Empathy, and Truth — safety principles |
 | [Architecture](doc/Architecture.md) | Local-first software architecture |
 | [Security](doc/Security.md) | Security considerations |

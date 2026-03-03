@@ -37,24 +37,22 @@ GPU_WINDOW       ?= SSSL           # SSSL for H100+ w/ FA3 (use L for A100)
 DATA_SHARDS_INIT ?= 8
 DATA_SHARDS_FULL ?= 370
 
-# --- Read SSH config from config.yaml (with fallback defaults) ----------------
-# Helper: extract a value from config.yaml via Python
-_yaml_val = $(shell python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')) if __import__('os').path.exists('config.yaml') else {}; print($(1))" 2>/dev/null)
+# --- Remote configuration (override via env or make VAR=value) ----------------
 
 # Remote EC2 configuration
 EC2_INSTANCE_TYPE ?= p5.4xlarge     # 1× H100-80GB ~$6.88/hr (alt: p4d.24xlarge 8× A100 ~$32.77/hr)
-EC2_REGION        ?= $(or $(call _yaml_val,c.get('ssh',{}).get('ec2',{}).get('region','')),us-west-2)
-EC2_KEY_NAME      ?= $(or $(call _yaml_val,c.get('ssh',{}).get('ec2',{}).get('key_name','')),nanochat-key)
-EC2_KEY_FILE      ?= $(or $(call _yaml_val,c.get('ssh',{}).get('ec2',{}).get('key_file','')),~/.ssh/$(EC2_KEY_NAME).pem)
+EC2_REGION        ?= us-west-2
+EC2_KEY_NAME      ?= nanochat-key
+EC2_KEY_FILE      ?= ~/.ssh/$(EC2_KEY_NAME).pem
 EC2_DISK_SIZE     ?= 200
-EC2_USER          ?= $(or $(call _yaml_val,c.get('ssh',{}).get('ec2',{}).get('user','')),ubuntu)
+EC2_USER          ?= ubuntu
 EC2_TARGET        ?=
 
 # WikiOracle (Lightsail) deployment configuration
-WO_KEY_FILE       ?= $(or $(call _yaml_val,c.get('ssh',{}).get('wikioracle',{}).get('key_file','')),./wikiOracle.pem)
-WO_USER           ?= $(or $(call _yaml_val,c.get('ssh',{}).get('wikioracle',{}).get('user','')),bitnami)
-WO_HOST           ?= $(or $(call _yaml_val,c.get('ssh',{}).get('wikioracle',{}).get('host','')),wikiOracle.org)
-WO_DEST           ?= $(or $(call _yaml_val,c.get('ssh',{}).get('wikioracle',{}).get('dest','')),/opt/bitnami/wordpress/files/wikiOracle.org/chat)
+WO_KEY_FILE       ?= ./wikiOracle.pem
+WO_USER           ?= bitnami
+WO_HOST           ?= wikiOracle.org
+WO_DEST           ?= /opt/bitnami/wordpress/files/wikiOracle.org/chat
 
 ALERT_EMAIL ?=
 WIKIORACLE_APP ?= bin/wikioracle.py
@@ -254,7 +252,7 @@ WO_CHAT_DEST     := $(WO_DEST)
 # Extra untracked files the server needs (e.g. runtime config with secrets).
 WO_CHAT_EXTRA    := config.yaml
 
-.PHONY: wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs
+.PHONY: wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs wo-fix-proxy
 
 wo-chat-deploy:
 	@echo "Deploying WikiOracle chat shim to $(WO_HOST):$(WO_CHAT_DEST) ..."
@@ -262,6 +260,7 @@ wo-chat-deploy:
 		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
 		--files-from=<(git ls-files -- bin html spec requirements.txt; echo $(WO_CHAT_EXTRA)) \
 		. $(WO_USER)@$(WO_HOST):$(WO_CHAT_DEST)/
+	$(WO_SSH) "sudo cp $(WO_CHAT_DEST)/spec/wikioracle-chat.service /etc/systemd/system/ && sudo systemctl daemon-reload"
 	@echo "Chat shim deployed. Run 'make wo-chat-restart' to apply."
 
 wo-chat-start:
@@ -411,7 +410,10 @@ debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
 test:
-	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle -v
+	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle test.test_derived_truth test.test_authority test.test_stateless_contract test.test_hme_inference test.test_voting -v
+	@echo ""
+	@echo "── online LLM tests (warnings only) ──"
+	@$(SHIM_ACTIVATE) && python3 -m unittest test.test_online_llm -v 2>&1 || echo "⚠  online LLM tests had failures (non-blocking)"
 
 run-cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \

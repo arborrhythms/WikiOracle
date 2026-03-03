@@ -642,14 +642,15 @@ function _openTruthEditor() {
           <div id="truthEntries" class="trust-entries-scroll"></div>
           <div class="settings-actions settings-actions-xs">
             <select id="truthAddType" class="trust-input" style="max-width:9rem; font-size:0.78rem;">
+              <option value="feeling">Feeling</option>
               <option value="fact">Fact</option>
               <option value="reference">Reference</option>
-              <option value="and">AND</option>
-              <option value="or">OR</option>
+              <option value="authority">Authority</option>
+              <option value="provider">Provider</option>
               <option value="not">NOT</option>
               <option value="non">NON</option>
-              <option value="provider">Provider</option>
-              <option value="authority">Authority</option>
+              <option value="or">OR</option>
+              <option value="and">AND</option>
             </select>
             <button class="btn" id="truthAdd">Add</button>
             <button class="btn" id="truthClose">Close</button>
@@ -671,6 +672,7 @@ function _openTruthEditor() {
 
     // ─── XHTML template for each subtype ───
     var _truthTemplates = {
+      feeling: '<feeling id="ID" certainty="0.5" title="TITLE">Subjective statement here.</feeling>',
       fact: '<fact id="ID" certainty="0.5" title="TITLE">Assertion text here.</fact>',
       reference: '<reference id="ID" certainty="0.5" title="TITLE" href="https://example.com">Link text</reference>',
       and: '<and id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n  <child id="ENTRY_B"/>\n</and>',
@@ -683,6 +685,7 @@ function _openTruthEditor() {
 
     // Brief description shown above the editor for each truth type
     var _truthDescriptions = {
+      feeling:   "Feeling \u2014 a subjective, non-verifiable claim (not penalizable).",
       fact:      "Fact \u2014 a direct assertion with a certainty value.",
       reference: "Reference \u2014 a link to an external source.",
       and:       "AND \u2014 true when all children are true (min certainty).",
@@ -783,7 +786,7 @@ function _parseXhtmlContent(content) {
     var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
     if (doc.querySelector("parsererror")) return null;
     var root = doc.documentElement;
-    var recognized = ["fact", "reference", "and", "or", "not", "non", "provider", "authority"];
+    var recognized = ["feeling", "fact", "reference", "authority", "provider", "not", "non", "or", "and"];
     for (var i = 0; i < recognized.length; i++) {
       var el = root.querySelector(recognized[i]);
       if (el) {

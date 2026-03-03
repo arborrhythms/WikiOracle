@@ -764,6 +764,21 @@ function renderMessages() {
     });
     summary.appendChild(truthSection);
 
+    // Initialize button (clears all local storage)
+    var initSection = document.createElement("div");
+    initSection.className = "root-summary-section root-init-section";
+    var initBtn = document.createElement("button");
+    initBtn.className = "btn root-init-btn";
+    initBtn.textContent = "Initialize";
+    initBtn.addEventListener("click", function() {
+      if (confirm("This will clear all local data (conversations, truth entries, config). This cannot be undone. Continue?")) {
+        _clearAllLocal();
+        window.location.reload();
+      }
+    });
+    initSection.appendChild(initBtn);
+    summary.appendChild(initSection);
+
     wrapper.appendChild(summary);
   }
 

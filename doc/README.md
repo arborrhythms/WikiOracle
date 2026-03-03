@@ -1,5 +1,5 @@
 # WikiOracle Docs
-Updated: 2026-02-28
+Updated: 2026-03-03
 
 This directory is the design, governance, and research documentation for WikiOracle.
 

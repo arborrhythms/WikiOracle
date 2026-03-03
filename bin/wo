@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""wo — WikiOracle command-line client.
+
+Send a query to a running WikiOracle server and append the conversation
+turn to a local JSONL file.
+
+Usage:
+    bin/wo "What is the capital of France?"
+    bin/wo -f my_log.jsonl "Tell me about Strong Kleene logic."
+    bin/wo --stateless -f llm.jsonl "Summarize your truth table."
+
+Stateful mode (default):
+    POST /chat with the message.  Print the response.  Append the
+    user + assistant messages as a conversation record to --file.
+
+Stateless mode (--stateless):
+    Load state from --file, send it with the query, write the
+    returned state back to --file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Ensure bin/ is on the path so sibling modules are importable.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import requests
+from state import (
+    ensure_minimal_state,
+    jsonl_to_state,
+    load_state_file,
+    state_to_jsonl,
+    utc_now_iso,
+)
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="wo",
+        description="WikiOracle command-line client",
+    )
+    p.add_argument("message", help="Query text to send")
+    p.add_argument(
+        "-s", "--server",
+        default="https://127.0.0.1:8888",
+        help="Server URL (default: https://127.0.0.1:8888)",
+    )
+    p.add_argument(
+        "-f", "--file",
+        default="llm.jsonl",
+        help="JSONL file to read/write (default: llm.jsonl)",
+    )
+    p.add_argument(
+        "-k", "--insecure",
+        action="store_true",
+        help="Skip TLS certificate verification",
+    )
+    p.add_argument(
+        "-t", "--token",
+        default=None,
+        help="API bearer token",
+    )
+    p.add_argument(
+        "--stateless",
+        action="store_true",
+        help="Stateless mode: load state from --file, send with query, "
+             "write returned state back",
+    )
+    p.add_argument(
+        "--provider",
+        default=None,
+        help="Provider name override (e.g. openai, anthropic, wikioracle)",
+    )
+    p.add_argument(
+        "--model",
+        default=None,
+        help="Model name override",
+    )
+    p.add_argument(
+        "--url-prefix",
+        default="",
+        help="URL path prefix (e.g. /chat) if server is behind a reverse proxy",
+    )
+    return p.parse_args()
+
+
+def _headers(token: str | None) -> dict:
+    h = {
+        "Content-Type": "application/json",
+        "X-Requested-With": "WikiOracle",
+    }
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
+
+
+def _api_url(server: str, prefix: str, path: str) -> str:
+    base = server.rstrip("/")
+    return f"{base}{prefix}{path}"
+
+
+def _post_chat(args: argparse.Namespace, body: dict) -> dict:
+    """POST /chat and return the JSON response."""
+    url = _api_url(args.server, args.url_prefix, "/chat")
+    verify = not args.insecure
+    resp = requests.post(
+        url,
+        json=body,
+        headers=_headers(args.token),
+        verify=verify,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _get_config(args: argparse.Namespace) -> dict:
+    """GET /config and return the config dict."""
+    url = _api_url(args.server, args.url_prefix, "/config")
+    verify = not args.insecure
+    resp = requests.get(
+        url,
+        headers=_headers(args.token),
+        verify=verify,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("config", {})
+
+
+def _run_stateful(args: argparse.Namespace) -> int:
+    """Stateful mode: send query, append conversation to JSONL file."""
+    body: dict = {"message": args.message}
+
+    # Optional overrides
+    cfg: dict = {}
+    if args.provider:
+        cfg["provider"] = args.provider
+    if args.model:
+        cfg["model"] = args.model
+    if cfg:
+        body["config"] = cfg
+
+    data = _post_chat(args, body)
+
+    if not data.get("ok"):
+        print(f"Error: {data.get('error', 'unknown')}", file=sys.stderr)
+        return 1
+
+    response_text = data.get("text", "")
+    print(response_text)
+
+    # Append the conversation turn to the JSONL file.
+    path = Path(args.file)
+    now = utc_now_iso()
+
+    # Build user + assistant messages
+    user_msg = {
+        "role": "user",
+        "username": "User",
+        "time": now,
+        "content": args.message,
+    }
+    assistant_msg = {
+        "role": "assistant",
+        "username": "WikiOracle",
+        "time": now,
+        "content": response_text,
+    }
+
+    # If the server returned a conversation in state, use its ID
+    resp_state = data.get("state", {})
+    conv_id = resp_state.get("selected_conversation", "")
+    convs = resp_state.get("conversations", [])
+    if convs and convs[0].get("id"):
+        conv_id = convs[0]["id"]
+        conv_record = convs[0]
+    else:
+        # Build a minimal conversation record
+        import uuid
+        conv_id = conv_id or str(uuid.uuid4())
+        conv_record = {
+            "id": conv_id,
+            "messages": [user_msg, assistant_msg],
+        }
+
+    # Load existing state or create minimal one, merge, and write
+    if path.exists():
+        state = load_state_file(path, strict=False)
+    else:
+        state = ensure_minimal_state({}, strict=False)
+
+    # Find or insert the conversation
+    from state import find_conversation
+    existing = find_conversation(state.get("conversations", []), conv_id)
+    if existing:
+        existing["messages"] = conv_record.get("messages", existing["messages"])
+    else:
+        state["conversations"].append(conv_record)
+
+    state["time"] = now
+    state["selected_conversation"] = conv_id
+
+    from state import atomic_write_jsonl
+    atomic_write_jsonl(path, state)
+    return 0
+
+
+def _run_stateless(args: argparse.Namespace) -> int:
+    """Stateless mode: load state from file, send with query, write back."""
+    path = Path(args.file)
+
+    # Load state
+    if path.exists():
+        state = load_state_file(path, strict=False)
+    else:
+        state = ensure_minimal_state({}, strict=False)
+
+    # Build runtime config from server or minimal defaults
+    try:
+        runtime_cfg = _get_config(args)
+    except Exception:
+        runtime_cfg = {}
+
+    # Apply overrides
+    if args.provider:
+        runtime_cfg.setdefault("ui", {})["default_provider"] = args.provider
+    if args.model:
+        runtime_cfg.setdefault("ui", {})["model"] = args.model
+
+    body = {
+        "message": args.message,
+        "state": state,
+        "runtime_config": runtime_cfg,
+    }
+
+    # Optional config overrides in the query bundle
+    cfg: dict = {}
+    if args.provider:
+        cfg["provider"] = args.provider
+    if args.model:
+        cfg["model"] = args.model
+    if cfg:
+        body["config"] = cfg
+
+    data = _post_chat(args, body)
+
+    if not data.get("ok"):
+        print(f"Error: {data.get('error', 'unknown')}", file=sys.stderr)
+        return 1
+
+    response_text = data.get("text", "")
+    print(response_text)
+
+    # Write the full returned state back to file
+    returned_state = data.get("state")
+    if isinstance(returned_state, dict):
+        returned_state = ensure_minimal_state(returned_state, strict=False)
+        from state import atomic_write_jsonl
+        atomic_write_jsonl(path, returned_state)
+    else:
+        print("Warning: server did not return state", file=sys.stderr)
+
+    return 0
+
+
+def main() -> int:
+    args = _parse_args()
+    try:
+        if args.stateless:
+            return _run_stateless(args)
+        else:
+            return _run_stateful(args)
+    except requests.exceptions.ConnectionError as e:
+        print(f"Connection error: {e}", file=sys.stderr)
+        return 1
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP error: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

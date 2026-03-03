@@ -25,16 +25,21 @@ let config = {
   defaults: { context: "<div/>", output: "" },
 };
 
-// ─── SessionStorage persistence ───
+// ─── Storage persistence (sessionStorage + localStorage mirror) ───
 
 const _CONFIG_KEY = "wikioracle_config";
 
-// Config in sessionStorage: the YAML-shaped config dict directly.
+// Config in sessionStorage (+ localStorage fallback for tab-close durability).
 function _loadLocalConfig() {
   try {
-    const raw = sessionStorage.getItem(_CONFIG_KEY);
+    var raw = sessionStorage.getItem(_CONFIG_KEY);
+    if (!raw) {
+      // Fallback: restore from localStorage (survives tab close)
+      raw = localStorage.getItem(_CONFIG_KEY);
+      if (raw) sessionStorage.setItem(_CONFIG_KEY, raw);
+    }
     if (!raw) return null;
-    const data = JSON.parse(raw);
+    var data = JSON.parse(raw);
     // Handle legacy formats (raw YAML string or old { parsed, config } bundle)
     if (typeof data === "string") return null;
     if (data.parsed && data.config) return data.config;  // upgrade old bundle
@@ -43,7 +48,11 @@ function _loadLocalConfig() {
 }
 
 function _saveLocalConfig(cfg) {
-  try { sessionStorage.setItem(_CONFIG_KEY, JSON.stringify(cfg)); } catch {}
+  try {
+    var json = JSON.stringify(cfg);
+    sessionStorage.setItem(_CONFIG_KEY, json);
+    localStorage.setItem(_CONFIG_KEY, json);
+  } catch {}
 }
 
 // ─── Config normalization ───

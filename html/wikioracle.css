@@ -140,6 +140,9 @@ body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disa
 .root-summary-context { white-space: pre-line; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 
 .root-summary-hint { font-size: 0.82rem; color: var(--fg-muted); margin-top: 1.4rem; }
+.root-init-section { text-align: center; background: none; border: none; margin-top: 0.6rem; padding: 0; }
+.root-init-btn { font-size: 0.78rem; color: var(--fg-muted); background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 1rem; cursor: pointer; }
+.root-init-btn:hover { color: #dc2626; border-color: #dc2626; }
 
 .message { display: flex; flex-direction: column; margin-bottom: 0.25rem; position: relative; }
 .msg-meta { font-size: 0.75rem; color: var(--fg-muted); margin-bottom: 0.15rem; padding: 0 0.25rem; }

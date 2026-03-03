@@ -344,14 +344,6 @@ CONFIG_SCHEMA = [
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
     ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
-    ("ssh.wikioracle.key_file",     "Web-server deployment key"),
-    ("ssh.wikioracle.user",         "SSH user"),
-    ("ssh.wikioracle.host",         "SSH host"),
-    ("ssh.wikioracle.dest",         "Remote destination path"),
-    ("ssh.ec2.key_file",            "GPU training instance key"),
-    ("ssh.ec2.user",                "SSH user"),
-    ("ssh.ec2.region",              "AWS region"),
-    ("ssh.ec2.key_name",            "AWS key name"),
 ]
 
 
@@ -402,10 +394,9 @@ def config_to_yaml(data: dict) -> str:
     if not isinstance(data, dict):
         return ""
 
-    # Strip runtime-only fields injected by _normalize_config — these
-    # must not be persisted to config.yaml.
+    # Strip runtime-only field injected by _normalize_config — server.providers
+    # is metadata for UI dropdowns and must not be persisted to config.yaml.
     data = dict(data)  # shallow copy to avoid mutating caller's dict
-    data.pop("defaults", None)
     srv = data.get("server")
     if isinstance(srv, dict):
         srv = dict(srv)
@@ -588,11 +579,6 @@ def _normalize_config(cfg_yaml: dict) -> dict:
             "models": _PROVIDER_MODELS.get(key, []),
         }
     server["providers"] = prov_meta
-    # Factory defaults for reset buttons (context, output)
-    cfg["defaults"] = {
-        "context": "<div/>",
-        "output": "",
-    }
     return cfg
 
 

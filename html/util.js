@@ -391,8 +391,7 @@ function _toggleContextEditor() {
     overlay = dlg.overlay;
 
     document.getElementById("ctxReset").addEventListener("click", function() {
-      var d = config.defaults || {};
-      document.getElementById("contextTextarea").value = stripTags(d.context || "<div/>").trim();
+      document.getElementById("contextTextarea").value = "";
     });
     document.getElementById("ctxCancel").addEventListener("click", dlg.close);
     document.getElementById("ctxSave").addEventListener("click", function() {
@@ -437,8 +436,7 @@ function _toggleOutputEditor() {
 
     document.getElementById("outCancel").addEventListener("click", dlg.close);
     document.getElementById("outReset").addEventListener("click", function() {
-      var d = config.defaults || {};
-      document.getElementById("outputTextarea").value = d.output ?? "";
+      document.getElementById("outputTextarea").value = "";
     });
     document.getElementById("outSave").addEventListener("click", function() {
       const newText = document.getElementById("outputTextarea").value.trim();

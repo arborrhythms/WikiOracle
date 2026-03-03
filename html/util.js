@@ -543,6 +543,7 @@ async function _openConfigEditor() {
 
     document.getElementById("cfgReset").addEventListener("click", function() {
       var factory = _normalizeConfig({});
+      if (factory.server) delete factory.server.providers;
       document.getElementById("configEditorTextarea").value = jsyaml.dump(factory, { lineWidth: -1 });
     });
     document.getElementById("cfgCancel").addEventListener("click", dlg.close);
@@ -619,6 +620,8 @@ async function _openConfigEditor() {
       return;
     }
   }
+  // Strip runtime-only field before showing in editor
+  if (parsed && parsed.server) delete parsed.server.providers;
   textarea.value = jsyaml.dump(parsed || {}, { lineWidth: -1 });
   textarea.focus();
 }

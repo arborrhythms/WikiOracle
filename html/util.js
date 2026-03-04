@@ -672,26 +672,26 @@ function _openTruthEditor() {
 
     // ─── XHTML template for each subtype ───
     var _truthTemplates = {
-      feeling: '<feeling id="ID" certainty="0.5" title="TITLE">Subjective statement here.</feeling>',
-      fact: '<fact id="ID" certainty="0.5" title="TITLE">Assertion text here.</fact>',
-      reference: '<reference id="ID" certainty="0.5" title="TITLE" href="https://example.com">Link text</reference>',
-      and: '<and id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n  <child id="ENTRY_B"/>\n</and>',
-      or: '<or id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n  <child id="ENTRY_B"/>\n</or>',
-      not: '<not id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n</not>',
-      non: '<non id="ID" certainty="0.0" title="TITLE">\n  <child id="ENTRY_A"/>\n</non>',
-      provider: '<provider id="ID" certainty="0.8" title="TITLE" name="provider_name" api_url="https://api.example.com" model="model_name"/>',
-      authority: '<authority id="ID" certainty="0.5" title="TITLE" did="did:web:example.com" url="https://example.com/kb.jsonl"/>'
+      feeling: '<feeling>Subjective statement here.</feeling>',
+      fact: '<fact>Assertion text here.</fact>',
+      reference: '<reference href="https://example.com">Link text</reference>',
+      and: '<and/>',
+      or: '<or/>',
+      not: '<not/>',
+      non: '<non/>',
+      provider: '<provider api_url="https://api.example.com" model="model_name"/>',
+      authority: '<authority url="https://example.com/kb.jsonl"/>'
     };
 
     // Brief description shown above the editor for each truth type
     var _truthDescriptions = {
       feeling:   "Feeling \u2014 a subjective, non-verifiable claim (not penalizable).",
-      fact:      "Fact \u2014 a direct assertion with a certainty value.",
+      fact:      "Fact \u2014 a direct assertion with a trust value.",
       reference: "Reference \u2014 a link to an external source.",
-      and:       "AND \u2014 true when all children are true (min certainty).",
-      or:        "OR \u2014 true when any child is true (max certainty).",
+      and:       "AND \u2014 true when all children are true (min trust).",
+      or:        "OR \u2014 true when any child is true (max trust).",
       not:       "NOT \u2014 negation of a child entry.",
-      non:       "NON \u2014 non-affirming negation (weakens certainty toward zero).",
+      non:       "NON \u2014 non-affirming negation (weakens trust toward zero).",
       provider:  "Provider \u2014 an LLM API endpoint.",
       authority: "Authority \u2014 a remote knowledge base (JSONL URL)."
     };
@@ -704,7 +704,6 @@ function _openTruthEditor() {
       _truthEditing = "new";
       var subtype = document.getElementById("truthAddType").value;
       var tmpl = _truthTemplates[subtype] || _truthTemplates.fact;
-      tmpl = tmpl.replace(/id="ID"/, 'id="' + generateUUID() + '"');
       document.getElementById("truthContent").value = tmpl;
       document.getElementById("truthEditError").textContent = "";
       _setTruthEditLabel(subtype);
@@ -727,27 +726,26 @@ function _openTruthEditor() {
         errEl.textContent = "Invalid XML. Check syntax.";
         return;
       }
-      if (!parsed.id) {
-        errEl.textContent = 'Missing required id="..." attribute on root element.';
-        return;
-      }
       errEl.textContent = "";
 
-      var id = parsed.id;
-      var certainty = parsed.certainty != null ? Math.min(1, Math.max(-1, parsed.certainty)) : 0.0;
-      var title = parsed.title || "Untitled";
-
+      // id/trust/title live on the JSON envelope, not in XHTML.
+      // For legacy XHTML that still carries them, accept them as hints.
       if (_truthEditing === "new") {
-        var entry = { id: id, title: title, certainty: certainty, content: content, time: now };
+        var id = parsed.id || generateUUID();
+        var trust = parsed.trust != null ? Math.min(1, Math.max(-1, parsed.trust)) : 0.0;
+        var title = parsed.title || "Untitled";
+        var entry = { id: id, title: title, trust: trust, content: content, time: now };
         state.truth.push(entry);
       } else if (typeof _truthEditing === "number") {
         var entry = state.truth[_truthEditing];
         if (entry) {
-          entry.id = id;
-          entry.title = title;
-          entry.certainty = certainty;
+          // Preserve existing id/title/trust; only update content and time
           entry.content = content;
           entry.time = now;
+          // If XHTML has explicit overrides (legacy), apply them
+          if (parsed.id) entry.id = parsed.id;
+          if (parsed.trust != null) entry.trust = Math.min(1, Math.max(-1, parsed.trust));
+          if (parsed.title) entry.title = parsed.title;
         }
       }
       _truthEditing = null;
@@ -780,7 +778,7 @@ function _truthShowEditView() {
 }
 
 function _parseXhtmlContent(content) {
-  /** Parse XHTML content and extract root tag, id, certainty, title. */
+  /** Parse XHTML content and extract root tag, id, trust, title. */
   try {
     var parser = new DOMParser();
     var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
@@ -790,11 +788,11 @@ function _parseXhtmlContent(content) {
     for (var i = 0; i < recognized.length; i++) {
       var el = root.querySelector(recognized[i]);
       if (el) {
-        var c = parseFloat(el.getAttribute("certainty"));
+        var c = parseFloat(el.getAttribute("trust"));
         return {
           tag: recognized[i],
           id: el.getAttribute("id") || "",
-          certainty: isNaN(c) ? null : c,
+          trust: isNaN(c) ? null : c,
           title: el.getAttribute("title") || ""
         };
       }
@@ -936,12 +934,12 @@ function _truthRenderList() {
     idTd.title = entry.id || "";
     row.appendChild(idTd);
 
-    // Certainty cell
-    const certTd = document.createElement("td");
-    const c = entry.certainty || 0;
-    certTd.textContent = (c >= 0 ? "+" : "") + c.toFixed(2);
-    certTd.style.cssText = "padding:0.3rem; text-align:right; font-family:ui-monospace,monospace; font-size:0.72rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
-    row.appendChild(certTd);
+    // Trust cell
+    const trustTd = document.createElement("td");
+    const c = entry.trust || 0;
+    trustTd.textContent = (c >= 0 ? "+" : "") + c.toFixed(2);
+    trustTd.style.cssText = "padding:0.3rem; text-align:right; font-family:ui-monospace,monospace; font-size:0.72rem; color:" + (c > 0 ? "var(--accent)" : c < 0 ? "#dc2626" : "var(--fg-muted)") + ";";
+    row.appendChild(trustTd);
 
     // Title cell
     const titleTd = document.createElement("td");

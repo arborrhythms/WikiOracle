@@ -19,43 +19,41 @@ from truth import (
 )
 
 
-def _make_trust(id, certainty, content=None, title=""):
+def _make_trust(id, trust, content=None, title=""):
     if content is None:
-        content = f'<fact id="{id}" certainty="{certainty}" title="{title}">test</fact>'
-    return {"type": "truth", "id": id, "certainty": certainty, "content": content, "title": title}
+        content = '<fact>test</fact>'
+    return {"type": "truth", "id": id, "trust": trust, "content": content, "title": title}
 
 
-def _make_and(entry_id, refs, certainty=0.0):
+def _make_and(entry_id, refs, trust=0.0):
     title = f"and({', '.join(refs)})"
-    child_xml = "".join(f'<child id="{r}"/>' for r in refs)
-    content = f'<and id="{entry_id}" certainty="{certainty}" title="{title}">{child_xml}</and>'
-    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
+    content = '<and/>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": refs[0] if refs else "", "arg2": refs[1] if len(refs) > 1 else ""}
 
 
-def _make_or(entry_id, refs, certainty=0.0):
+def _make_or(entry_id, refs, trust=0.0):
     title = f"or({', '.join(refs)})"
-    child_xml = "".join(f'<child id="{r}"/>' for r in refs)
-    content = f'<or id="{entry_id}" certainty="{certainty}" title="{title}">{child_xml}</or>'
-    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
+    content = '<or/>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": refs[0] if refs else "", "arg2": refs[1] if len(refs) > 1 else ""}
 
 
-def _make_not(entry_id, ref, certainty=0.0):
+def _make_not(entry_id, ref, trust=0.0):
     title = f"not({ref})"
-    content = f'<not id="{entry_id}" certainty="{certainty}" title="{title}"><child id="{ref}"/></not>'
-    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
+    content = '<not/>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": ref}
 
 
-def _make_non(entry_id, ref, certainty=0.0):
+def _make_non(entry_id, ref, trust=0.0):
     title = f"non({ref})"
-    content = f'<non id="{entry_id}" certainty="{certainty}" title="{title}"><child id="{ref}"/></non>'
-    return {"type": "truth", "id": entry_id, "certainty": certainty, "content": content, "title": title}
+    content = '<non/>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": ref}
 
 
 # ─── parse_operator_block tests ───
 
 
 def test_parse_operator_block_and():
-    content = '<and id="op" certainty="0.0"><child id="a"/><child id="b"/></and>'
+    content = '<and><child id="a"/><child id="b"/></and>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "and"
@@ -63,7 +61,7 @@ def test_parse_operator_block_and():
 
 
 def test_parse_operator_block_or():
-    content = '<or id="op" certainty="0.0"><child id="x"/><child id="y"/><child id="z"/></or>'
+    content = '<or><child id="x"/><child id="y"/><child id="z"/></or>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "or"
@@ -71,7 +69,7 @@ def test_parse_operator_block_or():
 
 
 def test_parse_operator_block_not():
-    content = '<not id="op" certainty="0.0"><child id="a"/></not>'
+    content = '<not><child id="a"/></not>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "not"
@@ -79,7 +77,7 @@ def test_parse_operator_block_not():
 
 
 def test_parse_operator_block_non():
-    content = '<non id="op" certainty="0.0"><child id="a"/></non>'
+    content = '<non><child id="a"/></non>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "non"
@@ -88,26 +86,26 @@ def test_parse_operator_block_non():
 
 def test_parse_operator_block_non_rejects_multiple():
     """NON with more than 1 child should return None."""
-    content = '<non id="op" certainty="0.0"><child id="a"/><child id="b"/></non>'
+    content = '<non><child id="a"/><child id="b"/></non>'
     assert parse_operator_block(content) is None
 
 
 def test_parse_operator_block_not_rejects_multiple():
     """NOT with more than 1 child should return None."""
-    content = '<not id="op" certainty="0.0"><child id="a"/><child id="b"/></not>'
+    content = '<not><child id="a"/><child id="b"/></not>'
     assert parse_operator_block(content) is None
 
 
 def test_parse_operator_block_and_rejects_single():
     """AND with fewer than 2 children should return None."""
-    content = '<and id="op" certainty="0.0"><child id="a"/></and>'
+    content = '<and><child id="a"/></and>'
     assert parse_operator_block(content) is None
 
 
 def test_parse_operator_block_not_operator():
-    assert parse_operator_block('<fact id="x" certainty="1.0">Just a fact.</fact>') is None
+    assert parse_operator_block('<fact>Just a fact.</fact>') is None
     assert parse_operator_block("") is None
-    assert parse_operator_block("<provider name='x' />") is None
+    assert parse_operator_block("<provider />") is None
 
 
 def test_parse_operator_block_legacy_ref():
@@ -123,12 +121,12 @@ def test_parse_operator_block_legacy_ref():
 
 
 def test_ensure_operator_id_preserves_existing():
-    entry = {"id": "existing_01", "content": '<and id="existing_01" certainty="0.0"><child id="a"/><child id="b"/></and>'}
+    entry = {"id": "existing_01", "content": '<and><child id="a"/><child id="b"/></and>'}
     assert ensure_operator_id(entry) == "existing_01"
 
 
 def test_ensure_operator_id_generates():
-    entry = {"content": '<and certainty="0.0"><child id="a"/><child id="b"/></and>'}
+    entry = {"content": '<and><child id="a"/><child id="b"/></and>'}
     oid = ensure_operator_id(entry)
     # Generated IDs are deterministic UUIDs (36 chars with dashes).
     assert len(oid) == 36 and oid.count("-") == 4
@@ -213,7 +211,7 @@ def test_not_double_negation():
 
 
 def test_non_positive():
-    """NON of positive certainty: 1 - 2*0.8 = -0.6"""
+    """NON of positive trust: 1 - 2*0.8 = -0.6"""
     entries = [
         _make_trust("a", 0.8),
         _make_non("op", "a"),
@@ -223,7 +221,7 @@ def test_non_positive():
 
 
 def test_non_negative():
-    """NON of negative certainty: 1 - 2*0.9 = -0.8"""
+    """NON of negative trust: 1 - 2*0.9 = -0.8"""
     entries = [
         _make_trust("a", -0.9),
         _make_non("op", "a"),
@@ -233,7 +231,7 @@ def test_non_negative():
 
 
 def test_non_zero():
-    """NON of zero certainty should be +1.0 (maximum openness)."""
+    """NON of zero trust should be +1.0 (maximum openness)."""
     entries = [
         _make_trust("a", 0.0),
         _make_non("op", "a"),

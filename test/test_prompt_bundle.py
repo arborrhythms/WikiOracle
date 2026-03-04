@@ -37,12 +37,12 @@ def _make_state(**overrides):
     return base
 
 
-def _make_trust_entry(title, certainty, content="Some fact", entry_id="", time=""):
+def _make_trust_entry(title, trust, content="Some fact", entry_id="", time=""):
     eid = entry_id or "auto"
     entry = {
         "title": title,
-        "certainty": certainty,
-        "content": f'<fact id="{eid}" certainty="{certainty}" title="{title}">{content}</fact>',
+        "trust": trust,
+        "content": f'<fact>{content}</fact>',
     }
     if entry_id:
         entry["id"] = entry_id
@@ -84,7 +84,7 @@ class TestBuildProviderBundle(unittest.TestCase):
         bundle = build_query(state, "query", {"chat": {"rag": True}})
         self.assertEqual(len(bundle.sources), 2)
         self.assertEqual(bundle.sources[0].title, "Doc A")
-        self.assertGreaterEqual(bundle.sources[0].certainty, bundle.sources[1].certainty)
+        self.assertGreaterEqual(bundle.sources[0].trust, bundle.sources[1].trust)
 
     def test_rag_disabled(self):
         trust = [_make_trust_entry("Doc", 0.9)]
@@ -93,7 +93,7 @@ class TestBuildProviderBundle(unittest.TestCase):
         self.assertEqual(len(bundle.sources), 0)
 
     def test_all_entries_included(self):
-        """All fact entries are included regardless of certainty."""
+        """All fact entries are included regardless of trust."""
         trust = [
             _make_trust_entry("High", 0.9, entry_id="t1"),
             _make_trust_entry("Low", 0.3, entry_id="t2"),
@@ -122,7 +122,7 @@ class TestBuildProviderBundle(unittest.TestCase):
 
     def test_transient_snippets(self):
         state = _make_state()
-        snippets = [{"source": "GPT-4", "certainty": 0.8, "content": "Some answer"}]
+        snippets = [{"source": "GPT-4", "trust": 0.8, "content": "Some answer"}]
         bundle = build_query(state, "q", {}, transient_snippets=snippets)
         self.assertEqual(len(bundle.transient_sources), 1)
         self.assertEqual(bundle.transient_sources[0].title, "GPT-4")
@@ -131,11 +131,11 @@ class TestBuildProviderBundle(unittest.TestCase):
         """When rag=True, ALL state.truth entries appear in sources."""
         trust = [
             _make_trust_entry("Normal", 0.9, "Normal fact", "t1"),
-            {"title": "LLM Provider", "certainty": 0.95, "id": "t2",
-             "content": "<provider><name>GPT-4</name><api_url>https://api.openai.com</api_url></provider>"},
-            {"title": "Op", "certainty": 0.8, "id": "t3",
-             "content": '<and id="t3" certainty="0.8"><child id="t1"/></and>'},
-            {"title": "Auth", "certainty": 0.7, "id": "t4",
+            {"title": "LLM Provider", "trust": 0.95, "id": "t2",
+             "content": "<provider><api_url>https://api.openai.com</api_url></provider>"},
+            {"title": "Op", "trust": 0.8, "id": "t3",
+             "content": '<and><child id="t1"/></and>'},
+            {"title": "Auth", "trust": 0.7, "id": "t4",
              "content": '<authority url="http://example.com/state"/>'},
         ]
         state = _make_state(truth=trust)
@@ -152,7 +152,7 @@ class TestBuildProviderBundle(unittest.TestCase):
         """When rag=False, NO state.truth entries appear in sources."""
         trust = [
             _make_trust_entry("Normal", 0.9, "Normal fact", "t1"),
-            {"title": "LLM Provider", "certainty": 0.95, "id": "t2",
+            {"title": "LLM Provider", "trust": 0.95, "id": "t2",
              "content": "<provider><name>GPT-4</name></provider>"},
         ]
         state = _make_state(truth=trust)
@@ -183,7 +183,7 @@ class TestStaticTruth(unittest.TestCase):
     def test_excludes_providers(self):
         entries = [
             _make_trust_entry("Fact", 0.9, "plain fact", "e1"),
-            {"title": "Provider", "certainty": 0.95, "id": "e2",
+            {"title": "Provider", "trust": 0.95, "id": "e2",
              "content": "<provider><name>X</name></provider>"},
         ]
         st = static_truth(entries)
@@ -193,8 +193,8 @@ class TestStaticTruth(unittest.TestCase):
     def test_excludes_operators(self):
         entries = [
             _make_trust_entry("Fact", 0.9, "plain", "e1"),
-            {"title": "Op", "certainty": 0.95, "id": "e2",
-             "content": '<and id="e2" certainty="0.95"><child id="e1"/><child id="e1"/></and>'},
+            {"title": "Op", "trust": 0.95, "id": "e2",
+             "content": '<and><child id="e1"/><child id="e1"/></and>'},
         ]
         st = static_truth(entries)
         self.assertEqual(len(st), 1)
@@ -202,7 +202,7 @@ class TestStaticTruth(unittest.TestCase):
     def test_excludes_authorities(self):
         entries = [
             _make_trust_entry("Fact", 0.9, "plain", "e1"),
-            {"title": "Auth", "certainty": 0.8, "id": "e2",
+            {"title": "Auth", "trust": 0.8, "id": "e2",
              "content": '<authority url="http://example.com/state"/>'},
         ]
         st = static_truth(entries)
@@ -219,8 +219,8 @@ class TestStaticTruth(unittest.TestCase):
         st = static_truth(entries)
         self.assertEqual([e["title"] for e in st], ["A", "B", "C"])
 
-    def test_negative_certainty_included(self):
-        """Negative certainty (disbelief) entries are included."""
+    def test_negative_trust_included(self):
+        """Negative trust (disbelief) entries are included."""
         entries = [
             _make_trust_entry("Belief", 0.3, entry_id="e1"),
             _make_trust_entry("Disbelief", -0.9, entry_id="e2"),
@@ -228,8 +228,8 @@ class TestStaticTruth(unittest.TestCase):
         st = static_truth(entries)
         self.assertEqual(len(st), 2)
 
-    def test_zero_certainty_included(self):
-        """Certainty=0 (ignorance) entries are still included."""
+    def test_zero_trust_included(self):
+        """Trust=0 (ignorance) entries are still included."""
         entries = [
             _make_trust_entry("Known", 0.8, entry_id="e1"),
             _make_trust_entry("Unknown", 0.0, entry_id="e2"),
@@ -520,16 +520,16 @@ class TestBuildProviderQueryBundle(unittest.TestCase):
 class TestEvaluateProviders(unittest.TestCase):
     """Test evaluate_providers() HME evaluation."""
 
-    def _make_provider_entry(self, name, certainty=0.8, entry_id="t1"):
-        entry = {"id": entry_id, "title": name, "certainty": certainty,
+    def _make_provider_entry(self, name, trust=0.8, entry_id="t1"):
+        entry = {"id": entry_id, "title": name, "trust": trust,
                  "time": "2026-02-23T00:00:00Z"}
-        config = {"name": name, "api_url": "http://test", "api_key": "k",
+        config = {"api_url": "http://test", "api_key": "k",
                   "model": "m", "timeout": 30, "max_tokens": 1024}
         return (entry, config)
 
     def test_single_provider_success(self):
         def mock_call(pconfig, messages):
-            return f"Response from {pconfig['name']}"
+            return f"Response from {pconfig['api_url']}"
         pairs = [self._make_provider_entry("GPT-4")]
         results = evaluate_providers(
             pairs, "system", [], "question", "output", mock_call,
@@ -537,13 +537,13 @@ class TestEvaluateProviders(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].kind, "provider")
         self.assertEqual(results[0].title, "GPT-4")
-        self.assertIn("Response from GPT-4", results[0].content)
+        self.assertIn("Response from http://test", results[0].content)
         self.assertIn('<div class="provider-response"', results[0].content)
-        self.assertIn('data-provider="GPT-4"', results[0].content)
+        self.assertIn('data-provider="t1"', results[0].content)
 
     def test_multiple_providers_parallel(self):
         def mock_call(pconfig, messages):
-            return f"Answer from {pconfig['name']}"
+            return f"Answer from {pconfig['api_url']}"
         pairs = [
             self._make_provider_entry("Claude", 0.9, "t1"),
             self._make_provider_entry("GPT", 0.8, "t2"),
@@ -579,14 +579,14 @@ class TestEvaluateProviders(unittest.TestCase):
         )
         self.assertEqual(results, [])
 
-    def test_certainty_preserved(self):
+    def test_trust_preserved(self):
         def mock_call(pconfig, messages):
             return "ok"
-        pairs = [self._make_provider_entry("P", certainty=0.95)]
+        pairs = [self._make_provider_entry("P", trust=0.95)]
         results = evaluate_providers(
             pairs, "", [], "q", "", mock_call,
         )
-        self.assertAlmostEqual(results[0].certainty, 0.95)
+        self.assertAlmostEqual(results[0].trust, 0.95)
 
     def test_rag_free_messages(self):
         """Verify the messages sent to providers contain no RAG sources."""
@@ -614,7 +614,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
         provider_src = Source(
             source_id="t_prov",
             title="Claude",
-            certainty=0.9,
+            trust=0.9,
             content='<div class="provider-response">Claude says yes</div>',
             kind="provider",
         )
@@ -629,7 +629,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
         provider_src = Source(
             source_id="t_prov",
             title="Claude",
-            certainty=0.9,
+            trust=0.9,
             content='<div class="provider-response">Claude says yes</div>',
             kind="provider",
         )
@@ -644,7 +644,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
 
     def test_provider_sources_alongside_rag(self):
         provider_src = Source(
-            source_id="t_prov", title="GPT", certainty=0.85,
+            source_id="t_prov", title="GPT", trust=0.85,
             content='<div class="provider-response">GPT says</div>',
             kind="provider",
         )
@@ -661,7 +661,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
     def test_provider_sources_in_adapter_output(self):
         """Provider sources should appear in all adapter outputs."""
         provider_src = Source(
-            source_id="t_prov", title="Claude-resp", certainty=0.9,
+            source_id="t_prov", title="Claude-resp", trust=0.9,
             content='<div class="provider-response">Answer: 42</div>',
             kind="provider",
         )

@@ -19,13 +19,34 @@ let _treeSvgH = 0;
 
 /**
  * Convert conversations tree to D3 hierarchy data.
+ *
+ * Diamond merge nodes (same id reachable from multiple parents) are
+ * emitted once — under the *first* parent encountered.  The extra
+ * parent→child edges are collected into `_diamondLinks` so renderTree
+ * can draw them after layout.
  */
+var _diamondLinks = [];          // [{sourceId, targetId}] — extra DAG edges
+
 function conversationsToHierarchy(conversations, selectedId) {
-  function mapConv(conv) {
-    const msgs = conv.messages || [];
-    const qCount = msgs.filter(m => m.role === "user").length;
-    const childNodes = (conv.children || []).map(mapConv);
-    return {
+  var seen = {};                 // id → mapped node
+  _diamondLinks = [];
+
+  function mapConv(conv, parentId) {
+    if (seen[conv.id]) {
+      // Diamond: this node was already mapped under a different parent.
+      // Record the extra edge; don't add the node again.
+      _diamondLinks.push({ sourceId: parentId, targetId: conv.id });
+      return null;               // skip duplicate
+    }
+    var msgs = conv.messages || [];
+    var qCount = msgs.filter(function(m) { return m.role === "user"; }).length;
+    var childNodes = [];
+    var children = conv.children || [];
+    for (var i = 0; i < children.length; i++) {
+      var mapped = mapConv(children[i], conv.id);
+      if (mapped) childNodes.push(mapped);
+    }
+    var node = {
       id: conv.id,
       title: conv.title || "(untitled)",
       messageCount: msgs.length,
@@ -34,8 +55,14 @@ function conversationsToHierarchy(conversations, selectedId) {
       selected: conv.id === selectedId,
       children: childNodes.length > 0 ? childNodes : undefined,
     };
+    seen[conv.id] = node;
+    return node;
   }
-  const rootChildren = (conversations || []).map(mapConv);
+  var rootChildren = [];
+  for (var i = 0; i < (conversations || []).length; i++) {
+    var mapped = mapConv(conversations[i], "root");
+    if (mapped) rootChildren.push(mapped);
+  }
   return {
     id: "root",
     title: "/",
@@ -189,6 +216,31 @@ function renderTree(hierarchyData, callbacks) {
     .attr("fill", "none")
     .attr("stroke", border)
     .attr("stroke-width", 1.5);
+
+  // Diamond links — extra DAG edges for merge nodes
+  if (_diamondLinks.length > 0) {
+    var descById = {};
+    root.descendants().forEach(function(d) { descById[d.data.id] = d; });
+    var extraLinks = [];
+    for (var di = 0; di < _diamondLinks.length; di++) {
+      var src = descById[_diamondLinks[di].sourceId];
+      var tgt = descById[_diamondLinks[di].targetId];
+      if (src && tgt) extraLinks.push({ source: src, target: tgt });
+    }
+    g.selectAll(".conv-link-diamond")
+      .data(extraLinks)
+      .join("path")
+      .attr("class", "conv-link-diamond")
+      .attr("d", function(d) {
+        var sx = d.source.x, sy = d.source.y;
+        var tx = d.target.x, ty = d.target.y;
+        var my = (sy + ty) / 2;
+        return "M" + sx + "," + sy + " C" + sx + "," + my + " " + tx + "," + my + " " + tx + "," + ty;
+      })
+      .attr("fill", "none")
+      .attr("stroke", border)
+      .attr("stroke-width", 1.5);
+  }
 
   // Nodes
   const node = g.selectAll(".conv-node")

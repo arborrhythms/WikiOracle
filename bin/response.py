@@ -55,10 +55,10 @@ from state import (
 # ---------------------------------------------------------------------------
 @dataclass
 class Source:
-    """A single retrieved trust entry with certainty score."""
+    """A single retrieved trust entry with trust score."""
     source_id: str  # Stable entry identifier used for traceability.
     title: str  # Human-readable source label shown to the model/user.
-    certainty: float  # Confidence score used in ranking/display.
+    trust: float  # Confidence score used in ranking/display.
     content: str  # Plaintext/XHTML snippet injected into prompts.
     kind: str = "fact"          # "fact" | "feeling" | "reference" | "provider" | "operator" | "authority" | "transient"
     time: str = ""
@@ -84,7 +84,7 @@ class ProviderBundle:
 
 
 # ---------------------------------------------------------------------------
-# Certainty-aware retrieval ranking
+# Trust-aware retrieval ranking
 # ---------------------------------------------------------------------------
 def static_truth(
     trust_entries: List[Dict[str, Any]],
@@ -158,37 +158,37 @@ def resolve_provider_truth(
     *,
     allowed_data_dir: str | None = None,
 ) -> List[Source]:
-    """Resolve a provider's private truth table from its truth_url.
+    """Resolve a provider's private truth table from its authority_url.
 
     Uses the same JSONL format and fetch logic as authority resolution.
-    Certainty is scaled by the provider entry's certainty.
+    Trust is scaled by the provider entry's trust.
     Returns Source objects ready for injection into the provider's bundle.
     """
-    truth_url = provider_config.get("truth_url", "")
-    if not truth_url:
+    authority_url = provider_config.get("authority_url", "")
+    if not authority_url:
         return []
 
     raw_entries = _fetch_authority_jsonl(
-        truth_url, timeout_s=30,
+        authority_url, timeout_s=30,
         allowed_data_dir=allowed_data_dir,
     )
 
     provider_id = provider_entry.get("id", "unknown")
-    provider_certainty = provider_entry.get("certainty", 0.0)
+    provider_trust = provider_entry.get("trust", 0.0)
     sources = []
     for entry in raw_entries:
         # JSONL files may use "trust" or "certainty" as the key
-        remote_certainty = entry.get("certainty", entry.get("trust", 0.0))
+        remote_trust = entry.get("trust", entry.get("certainty", 0.0))
         try:
-            remote_certainty = float(remote_certainty)
+            remote_trust = float(remote_trust)
         except (TypeError, ValueError):
-            remote_certainty = 0.0
-        scaled = min(1.0, max(-1.0, provider_certainty * remote_certainty))
+            remote_trust = 0.0
+        scaled = min(1.0, max(-1.0, provider_trust * remote_trust))
         remote_id = entry.get("id", "")
         sources.append(Source(
             source_id=f"{provider_id}:{remote_id}" if remote_id else provider_id,
             title=entry.get("title", "untitled"),
-            certainty=scaled,
+            trust=scaled,
             content=entry.get("content", ""),
             kind="fact",
             time=entry.get("time", ""),
@@ -265,7 +265,7 @@ def evaluate_providers(
         # Per-provider prelim control: prelim defaults to True
         wants_prelim = pconfig.get("prelim", True) and prelim_response
 
-        # Per-provider truth: if truth_url, build custom messages with
+        # Per-provider truth: if authority_url, build custom messages with
         # the provider's private facts; otherwise use shared RAG-free messages
         prov_truth = resolve_provider_truth(pconfig, entry)
         if prov_truth:
@@ -281,12 +281,12 @@ def evaluate_providers(
         try:
             response = call_fn(pconfig, messages)
             if response and not response.startswith("[Error"):
-                pname = html_mod.escape(pconfig.get("name", ""), quote=True)
+                pname = html_mod.escape(entry.get("id", ""), quote=True)
                 safe_response = html_mod.escape(response[:4000])
                 return Source(
                     source_id=entry.get("id", ""),
-                    title=pconfig.get("name", ""),
-                    certainty=entry.get("certainty", 0),
+                    title=entry.get("title", ""),
+                    trust=entry.get("trust", 0),
                     content=(
                         f'<div class="provider-response" '
                         f'data-provider="{pname}">'
@@ -350,10 +350,10 @@ def build_query(
     The pipeline is:
 
         st = static_truth(state.truth)   — facts & references (evaluable)
-        t  = st + dynamic_truth(st)      — operators propagate certainty,
+        t  = st + dynamic_truth(st)      — operators propagate trust,
                                            authorities resolved, providers
                                            evaluated
-        bundle.sources = state.truth (with derived certainty)
+        bundle.sources = state.truth (with derived trust)
                        + authority remote entries
                        + provider_sources (HME expert responses)
     """
@@ -388,12 +388,12 @@ def build_query(
         # to dynamic evaluation steps
         st = static_truth(trust_entries)
 
-        # dynamic_truth(st): operators (Strong Kleene certainty propagation)
+        # dynamic_truth(st): operators (Strong Kleene trust propagation)
         derived = compute_derived_truth(trust_entries)
         for entry in trust_entries:
             eid = entry.get("id", "")
             if eid in derived:
-                entry["_derived_certainty"] = derived[eid]
+                entry["_derived_trust"] = derived[eid]
 
         # dynamic_truth(st): authority resolution (remote truth tables)
         authority_entries = get_authority_entries(trust_entries)
@@ -405,7 +405,7 @@ def build_query(
                     authority_sources.append(Source(
                         source_id=rt.get("id", ""),
                         title=rt.get("title", "untitled"),
-                        certainty=rt.get("certainty", 0),
+                        trust=rt.get("trust", 0),
                         content=strip_xhtml_fn(rt.get("content", "")),
                         kind="authority",
                         time=rt.get("time", ""),
@@ -416,9 +416,9 @@ def build_query(
 
         # t = st + dynamic_truth(st)
         # Send every state.truth entry to the provider, with derived
-        # certainty where operators have propagated it.
+        # trust where operators have propagated it.
         for entry in trust_entries:
-            certainty = entry.get("_derived_certainty", entry.get("certainty", 0))
+            trust_val = entry.get("_derived_trust", entry.get("trust", 0))
             content = entry.get("content", "")
             if "<provider" in content:
                 kind = "provider"
@@ -435,7 +435,7 @@ def build_query(
             bundle.sources.append(Source(
                 source_id=entry.get("id", ""),
                 title=entry.get("title", "untitled"),
-                certainty=certainty,
+                trust=trust_val,
                 content=strip_xhtml_fn(content),
                 kind=kind,
                 time=entry.get("time", ""),
@@ -450,7 +450,7 @@ def build_query(
             bundle.transient_sources.append(Source(
                 source_id=s.get("source_id", ""),
                 title=s.get("source", "unknown"),
-                certainty=s.get("certainty", 0),
+                trust=s.get("trust", 0),
                 content=s.get("content", "")[:4000],
                 kind="transient",
                 time=s.get("time", ""),
@@ -492,12 +492,12 @@ def _format_sources(sources: List[Source]) -> str:
         content = s.content.strip()
         if title and content.lower().startswith(title.lower()):
             lines.append(
-                f"- (id: {s.source_id}, certainty: {s.certainty:.2f}): "
+                f"- (id: {s.source_id}, trust: {s.trust:.2f}): "
                 f"{content}"
             )
         else:
             lines.append(
-                f"- [{title}] (id: {s.source_id}, certainty: {s.certainty:.2f}): "
+                f"- [{title}] (id: {s.source_id}, trust: {s.trust:.2f}): "
                 f"{content}"
             )
     return "\n".join(lines)
@@ -1077,6 +1077,8 @@ def _resolve_dynamic_api_key(raw_key: str, api_url: str) -> str:
             return os.getenv("ANTHROPIC_API_KEY", "")
         if "openai.com" in api_url:
             return os.getenv("OPENAI_API_KEY", "")
+        if "googleapis.com" in api_url:
+            return os.getenv("GEMINI_API_KEY", "")
     return ""
 
 
@@ -1099,7 +1101,9 @@ def _call_dynamic_provider(
     api_url_lower = api_url.lower()
     if "anthropic.com" in api_url_lower:
         return _call_dynamic_anthropic(api_url, api_key, model, messages, temperature, timeout, max_tokens)
-    elif "127.0.0.1" in api_url_lower:
+    elif "googleapis.com" in api_url_lower:
+        return _call_dynamic_gemini(api_url, api_key, model, messages, temperature, timeout, max_tokens)
+    elif "127.0.0.1" in api_url_lower or "localhost" in api_url_lower:
         return _call_nanochat(cfg, messages, temperature)
     else:
         return _call_dynamic_openai(api_url, api_key, model, messages, temperature, timeout, max_tokens)
@@ -1142,6 +1146,42 @@ def _call_dynamic_anthropic(
         return f"[Error: HTTP {resp.status_code}] {resp.text[:300]}"
     blocks = resp.json().get("content", [])
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or "[No content]"
+
+
+def _call_dynamic_gemini(
+    api_url: str, api_key: str, model: str,
+    messages: List[Dict], temperature: float, timeout: int, max_tokens: int,
+) -> str:
+    """Call a dynamic Gemini endpoint from a <provider> trust entry."""
+    # Gemini URL format: {base}/{model}:generateContent
+    # If api_url already contains a model, use it directly; otherwise append.
+    if ":generateContent" in api_url:
+        url = api_url
+    else:
+        base = api_url.rstrip("/")
+        url = f"{base}/{model or 'gemini-2.5-flash'}:generateContent"
+
+    # Convert messages to Gemini contents format
+    contents = []
+    for msg in messages:
+        role = "model" if msg["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+
+    payload = {
+        "contents": contents,
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+    }
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    if resp.status_code >= 400:
+        return f"[Error from Gemini: HTTP {resp.status_code}] {resp.text[:300]}"
+
+    data = resp.json()
+    candidates = data.get("candidates", [])
+    if not candidates:
+        return "[No response from Gemini]"
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "".join(p.get("text", "") for p in parts if "text" in p) or "[No content]"
 
 
 # ---------------------------------------------------------------------------
@@ -1358,8 +1398,8 @@ def process_chat(
     derived = compute_derived_truth(truth_list)
     for entry in truth_list:
         eid = entry.get("id", "")
-        if eid in derived and abs(derived[eid] - entry.get("certainty", 0.0)) > 1e-9:
-            entry["_derived_certainty"] = derived[eid]
+        if eid in derived and abs(derived[eid] - entry.get("trust", 0.0)) > 1e-9:
+            entry["_derived_trust"] = derived[eid]
 
     # ── Voting diamond: R_alpha_prelim → R_beta_* → R_alpha_final ──
     #
@@ -1472,23 +1512,113 @@ def process_chat(
     conversations = state.get("conversations", [])
     client_owns_query = config_mod.STATELESS_MODE
 
-    if conversation_id:
-        if not client_owns_query:
-            add_message_to_conversation(conversations, conversation_id, query_entry)
-        add_message_to_conversation(conversations, conversation_id, response_entry)
-        state["selected_conversation"] = conversation_id
-    elif branch_from:
-        if client_owns_query:
-            parent = find_conversation(conversations, branch_from)
-            opt = parent["children"][-1] if parent and parent.get("children") else None
-            if opt:
-                opt["messages"].append(response_entry)
-                state["selected_conversation"] = opt["id"]
+    # ── Build conversation tree ──
+    # When a vote occurred (prelim + beta responses), build a diamond:
+    #
+    #        root (query + prelim)
+    #       /    \
+    #     beta1  beta2        ← children of root
+    #       \    /
+    #        final            ← child of every beta; parentId: [beta_ids]
+    #
+    # The final node lives as a child of each beta (true DAG merge).
+    # The same final object appears in every beta's children list so
+    # that navigating down from *any* beta reaches it.  The JSONL
+    # flatten/nest helpers dedup by ID.
+    #
+    # Without voting, it's a simple linear conversation:
+    #   conv: [user_query, alpha_response]
+
+    has_vote = bool(prelim_response and provider_sources)
+
+    if has_vote:
+        first_words = strip_xhtml(user_content)[:50]
+
+        # Root: user question + alpha preliminary
+        prelim_entry = {
+            "role": "assistant",
+            "username": f"{llm_display} (prelim)",
+            "time": user_timestamp,
+            "content": ensure_xhtml(prelim_response),
+        }
+        ensure_message_id(prelim_entry)
+
+        # Final: alpha's final (synthesized) response
+        # Two parents: all betas (true diamond)
+        final_conv = {
+            "title": f"{llm_display} (final)",
+            "messages": [response_entry],
+            "children": [],
+        }
+        ensure_conversation_id(final_conv)
+        final_normalized = normalize_conversation(final_conv)
+
+        # Beta children: one conversation per beta provider response
+        # Each beta gets final_conv as a child (shared object = diamond)
+        beta_convs = []
+        for src in provider_sources:
+            beta_msg = {
+                "role": "assistant",
+                "username": src.title or src.source_id,
+                "time": user_timestamp,
+                "content": src.content,
+            }
+            ensure_message_id(beta_msg)
+            beta_conv = {
+                "title": src.title or src.source_id,
+                "messages": [beta_msg],
+                "children": [final_normalized],
+            }
+            ensure_conversation_id(beta_conv)
+            beta_convs.append(beta_conv)
+
+        # Set final's parentId to all beta IDs
+        beta_ids = [b["id"] for b in beta_convs]
+        final_normalized["parentId"] = beta_ids
+
+        # Assemble the root with betas as children
+        vote_root = {
+            "title": first_words,
+            "messages": [query_entry, prelim_entry],
+            "children": [normalize_conversation(b) for b in beta_convs],
+            "parentId": None,
+        }
+        ensure_conversation_id(vote_root)
+        conversations.append(normalize_conversation(vote_root))
+
+        state["selected_conversation"] = final_conv["id"]
+    else:
+        # No voting — simple linear conversation
+        all_messages = [query_entry, response_entry]
+
+        if conversation_id:
+            if not client_owns_query:
+                add_message_to_conversation(conversations, conversation_id, query_entry)
+            add_message_to_conversation(conversations, conversation_id, response_entry)
+            state["selected_conversation"] = conversation_id
+        elif branch_from:
+            if client_owns_query:
+                parent = find_conversation(conversations, branch_from)
+                opt = parent["children"][-1] if parent and parent.get("children") else None
+                if opt:
+                    opt["messages"].append(response_entry)
+                    state["selected_conversation"] = opt["id"]
+                else:
+                    first_words = strip_xhtml(user_content)[:50]
+                    new_conv = {
+                        "title": first_words,
+                        "messages": all_messages,
+                        "children": [],
+                        "parentId": branch_from,
+                    }
+                    ensure_conversation_id(new_conv)
+                    add_child_conversation(conversations, branch_from, new_conv)
+                    state["selected_conversation"] = new_conv["id"]
             else:
                 first_words = strip_xhtml(user_content)[:50]
                 new_conv = {
                     "title": first_words,
-                    "messages": [query_entry, response_entry],
+                    "messages": all_messages,
                     "children": [],
                     "parentId": branch_from,
                 }
@@ -1496,45 +1626,34 @@ def process_chat(
                 add_child_conversation(conversations, branch_from, new_conv)
                 state["selected_conversation"] = new_conv["id"]
         else:
-            first_words = strip_xhtml(user_content)[:50]
-            new_conv = {
-                "title": first_words,
-                "messages": [query_entry, response_entry],
-                "children": [],
-                "parentId": branch_from,
-            }
-            ensure_conversation_id(new_conv)
-            add_child_conversation(conversations, branch_from, new_conv)
-            state["selected_conversation"] = new_conv["id"]
-    else:
-        if client_owns_query:
-            opt = conversations[-1] if conversations else None
-            if opt and len(opt.get("messages", [])) == 1 and opt["messages"][0].get("_pending"):
-                opt["messages"][0].pop("_pending", None)
-                opt["messages"].append(response_entry)
-                state["selected_conversation"] = opt["id"]
+            if client_owns_query:
+                opt = conversations[-1] if conversations else None
+                if opt and len(opt.get("messages", [])) == 1 and opt["messages"][0].get("_pending"):
+                    opt["messages"][0].pop("_pending", None)
+                    opt["messages"].append(response_entry)
+                    state["selected_conversation"] = opt["id"]
+                else:
+                    first_words = strip_xhtml(user_content)[:50]
+                    new_conv = {
+                        "title": first_words,
+                        "messages": all_messages,
+                        "children": [],
+                        "parentId": None,
+                    }
+                    ensure_conversation_id(new_conv)
+                    conversations.append(normalize_conversation(new_conv))
+                    state["selected_conversation"] = new_conv["id"]
             else:
                 first_words = strip_xhtml(user_content)[:50]
                 new_conv = {
                     "title": first_words,
-                    "messages": [query_entry, response_entry],
+                    "messages": all_messages,
                     "children": [],
                     "parentId": None,
                 }
                 ensure_conversation_id(new_conv)
                 conversations.append(normalize_conversation(new_conv))
                 state["selected_conversation"] = new_conv["id"]
-        else:
-            first_words = strip_xhtml(user_content)[:50]
-            new_conv = {
-                "title": first_words,
-                "messages": [query_entry, response_entry],
-                "children": [],
-                "parentId": None,
-            }
-            ensure_conversation_id(new_conv)
-            conversations.append(normalize_conversation(new_conv))
-            state["selected_conversation"] = new_conv["id"]
 
     state["conversations"] = conversations
     return response_text, state

@@ -127,6 +127,11 @@ function applyTheme(theme) {
 // state — declared in util.js
 var _navScrollHint = null;  // "top" | "bottom" | null — set by _treeNav for continuous scrolling
 
+// treePath: ordered list of conversation IDs from root to current node.
+// Needed for DAG navigation (diamond merges) where a node can have
+// multiple parents and "up" must know which path the user came from.
+var _treePath = [];
+
 // Pending branch: when set, the next send creates a child of this conversation
 let _pendingBranchParent = null;
 
@@ -138,14 +143,38 @@ function confirmAction(msg) {
 
 // ─── Tree navigation ───
 
-function navigateToNode(nodeId) {
+function navigateToNode(nodeId, path) {
   if (!state) return;
-  if (state.selected_conversation === nodeId) return; // already on this node (dedup)
+  if (state.selected_conversation === nodeId && !path) return; // already on this node (dedup)
   _pendingBranchParent = null; // cancel any pending branch
   state.selected_conversation = nodeId;
+  // Update treePath: explicit path wins, otherwise rebuild from nodeId
+  if (path !== undefined) {
+    _treePath = path;
+  } else {
+    _treePath = _buildTreePath(state.conversations || [], nodeId);
+  }
   renderMessages();
   // Persist selected_conversation to server
   _persistState();
+}
+
+// Build the path from root to nodeId by DFS.  Returns [root, ..., nodeId]
+// or [] if nodeId is null (root view).  For diamond nodes that appear under
+// multiple parents, returns the first path found.
+function _buildTreePath(convs, targetId) {
+  if (!targetId) return [];
+  function _search(nodes, trail) {
+    for (var i = 0; i < nodes.length; i++) {
+      var cur = nodes[i];
+      var next = trail.concat([cur.id]);
+      if (cur.id === targetId) return next;
+      var deeper = _search(cur.children || [], next);
+      if (deeper) return deeper;
+    }
+    return null;
+  }
+  return _search(convs, []) || [];
 }
 
 function branchFromNode(convId) {
@@ -573,20 +602,26 @@ function renderMessages() {
   console.log("[WikiOracle] renderMessages: selectedConv=", state.selected_conversation,
               "visible=", visible.length, "conversations=", state.conversations.length);
 
-  // Show parent navigation link at top of chat
+  // Show parent navigation link at top of chat (uses treePath for DAG awareness)
   if (!_pendingBranchParent && state.selected_conversation !== null) {
-    var parentConv = findParentConversation(state.conversations, state.selected_conversation);
     var parentNav = document.createElement("div");
     parentNav.className = "conv-parent-nav";
     var parentLink = document.createElement("button");
     parentLink.className = "conv-parent-link";
-    if (parentConv) {
-      parentLink.textContent = "\u2190 " + (parentConv.title || "(untitled)");
-      parentLink.addEventListener("click", function() { navigateToNode(parentConv.id); });
+    if (_treePath.length >= 2) {
+      // Use treePath: parent is the node we came from
+      var pathParentId = _treePath[_treePath.length - 2];
+      var pathParent = findConversation(state.conversations, pathParentId);
+      var pathParentTitle = pathParent ? (pathParent.title || "(untitled)") : "(untitled)";
+      var upPath = _treePath.slice(0, -1);
+      parentLink.textContent = "\u2190 " + pathParentTitle;
+      parentLink.addEventListener("click", (function(pid, p) {
+        return function() { navigateToNode(pid, p); };
+      })(pathParentId, upPath));
     } else {
       // Current node is a root — link goes to root view
       parentLink.textContent = "\u2190 Root";
-      parentLink.addEventListener("click", function() { navigateToNode(null); });
+      parentLink.addEventListener("click", function() { navigateToNode(null, []); });
     }
     parentNav.appendChild(parentLink);
     wrapper.appendChild(parentNav);
@@ -688,14 +723,20 @@ function renderMessages() {
       ncStatus.classList.add("status-offline");
     });
 
-    // Stat grid
+    // Date info (single line, aligned with NanoChat status)
+    if (state.time) {
+      var dateLine = document.createElement("div");
+      dateLine.className = "root-nanochat-status";
+      dateLine.textContent = "Last modified: " + _friendlyDate(state.time);
+      summary.appendChild(dateLine);
+    }
+
+    // Stat grid: [Conversations, Messages, Initialize]
     var grid = document.createElement("div");
     grid.className = "root-summary-grid";
     var statItems = [
       [stats.convCount, "Conversations"],
       [stats.msgCount,  "Messages"],
-      [stats.qCount,    "Questions"],
-      [stats.rCount,    "Responses"]
     ];
     for (var si = 0; si < statItems.length; si++) {
       var cell = document.createElement("div");
@@ -711,23 +752,6 @@ function renderMessages() {
       grid.appendChild(cell);
     }
     summary.appendChild(grid);
-
-    // Date info
-    if (stats.msgCount > 0) {
-      var meta = document.createElement("div");
-      meta.className = "root-summary-meta";
-      if (state.time) {
-        var modSpan = document.createElement("span");
-        modSpan.textContent = "Last modified: " + _friendlyDate(state.time);
-        meta.appendChild(modSpan);
-      }
-      if (stats.earliest && stats.latest) {
-        var rangeSpan = document.createElement("span");
-        rangeSpan.textContent = _friendlyDate(stats.earliest) + " \u2013 " + _friendlyDate(stats.latest);
-        meta.appendChild(rangeSpan);
-      }
-      summary.appendChild(meta);
-    }
 
     // Context preview (clickable — opens context editor)
     var ctxSection = document.createElement("div");
@@ -764,21 +788,6 @@ function renderMessages() {
     });
     summary.appendChild(truthSection);
 
-    // Initialize button (clears all local storage)
-    var initSection = document.createElement("div");
-    initSection.className = "root-summary-section root-init-section";
-    var initBtn = document.createElement("button");
-    initBtn.className = "btn root-init-btn";
-    initBtn.textContent = "Initialize";
-    initBtn.addEventListener("click", function() {
-      if (confirm("This will clear all local data (conversations, truth entries, config). This cannot be undone. Continue?")) {
-        _clearAllLocal();
-        window.location.reload();
-      }
-    });
-    initSection.appendChild(initBtn);
-    summary.appendChild(initSection);
-
     wrapper.appendChild(summary);
   }
 
@@ -795,7 +804,10 @@ function renderMessages() {
         const msgs = child.messages || [];
         const qCount = msgs.filter(function(m) { return m.role === "user"; }).length;
         link.textContent = (child.title || "(untitled)") + " (" + qCount + "Q " + (msgs.length - qCount) + "R)";
-        link.addEventListener("click", (function(id) { return function() { navigateToNode(id); }; })(child.id));
+        link.addEventListener("click", (function(id) {
+          var childPath = _treePath.concat([id]);
+          return function() { navigateToNode(id, childPath); };
+        })(child.id));
         childNav.appendChild(link);
       }
       wrapper.appendChild(childNav);
@@ -1041,6 +1053,14 @@ async function sendMessage() {
 
 // ─── Bind UI events ───
 function bindEvents() {
+  // New (clear all local data)
+  document.getElementById("btnNew").addEventListener("click", function() {
+    if (confirm("This will clear all local data (conversations, truth entries, config). This cannot be undone. Continue?")) {
+      _clearAllLocal();
+      window.location.reload();
+    }
+  });
+
   // Export JSONL
   document.getElementById("btnExport").addEventListener("click", function() {
     if (!state) { setStatus("No state to export"); return; }
@@ -1060,8 +1080,11 @@ function bindEvents() {
     lines.push(JSON.stringify(header));
 
     // Flatten conversations tree with parent references
+    var _seen = {};
     function flattenConvs(convs, parentId) {
       for (const conv of convs) {
+        if (_seen[conv.id]) continue;   // diamond: already emitted
+        _seen[conv.id] = true;
         const rec = {
           type: "conversation",
           id: conv.id,
@@ -1072,7 +1095,13 @@ function bindEvents() {
             return clean;
           }),
         };
-        if (parentId) rec.parent = parentId;
+        // parentId on node wins (may be list for diamond); else structural parent
+        var pid = conv.parentId;
+        if (pid !== undefined && pid !== null) {
+          rec.parent = pid;             // string or array
+        } else if (parentId) {
+          rec.parent = parentId;
+        }
         lines.push(JSON.stringify(rec));
         flattenConvs(conv.children || [], conv.id);
       }
@@ -1172,10 +1201,22 @@ function bindEvents() {
           for (const rec of convRecords) {
             byId[rec.id] = { ...rec, children: [], parentId: rec.parent || null };
           }
+          var _placed = {};
           for (const rec of convRecords) {
             const node = byId[rec.id];
-            if (rec.parent && byId[rec.parent]) {
-              byId[rec.parent].children.push(node);
+            var rawParent = rec.parent;
+            if (Array.isArray(rawParent)) {
+              // Diamond merge: place under each parent
+              var ok = false;
+              for (var pi = 0; pi < rawParent.length; pi++) {
+                if (byId[rawParent[pi]]) {
+                  byId[rawParent[pi]].children.push(node);
+                  ok = true;
+                }
+              }
+              if (!ok) roots.push(node);
+            } else if (rawParent && byId[rawParent]) {
+              byId[rawParent].children.push(node);
             } else {
               roots.push(node);
             }
@@ -1267,66 +1308,141 @@ function bindEvents() {
   });
 
   // ─── Tree navigation helpers (shared by arrow keys and scroll-at-border) ───
+
+  // Resolve a treePath to the node it points to.
+  // Returns null if the path is empty (virtual root) or invalid.
+  function _findNodeByPath(convs, path) {
+    var nodes = convs;
+    var node = null;
+    for (var i = 0; i < path.length; i++) {
+      var found = false;
+      for (var j = 0; j < nodes.length; j++) {
+        if (nodes[j].id === path[i]) {
+          node = nodes[j];
+          nodes = node.children || [];
+          found = true;
+          break;
+        }
+      }
+      if (!found) return null;
+    }
+    return node;
+  }
+
+  // Return the deepest last-descendant path from a given node+path.
+  // e.g. for a node with children [A, B] where B has children [C],
+  // deepestLast returns path extended with [B.id, C.id].
+  function _deepestLast(node, path) {
+    while (node && node.children && node.children.length > 0) {
+      var last = node.children[node.children.length - 1];
+      path = path.concat([last.id]);
+      node = last;
+    }
+    return path;
+  }
+
+  // Next node in preorder traversal from current _treePath.
+  // Returns the new path, or null if at the end.
+  function _nextPreorder(convs) {
+    if (_treePath.length === 0) {
+      // At virtual root — go to first top-level conversation
+      if (convs.length > 0) return [convs[0].id];
+      return null;
+    }
+    // If current node has children, go to first child
+    var cur = _findNodeByPath(convs, _treePath);
+    if (cur && cur.children && cur.children.length > 0) {
+      return _treePath.concat([cur.children[0].id]);
+    }
+    // Otherwise walk up the path looking for a next sibling
+    for (var depth = _treePath.length - 1; depth >= 0; depth--) {
+      var parentPath = _treePath.slice(0, depth);
+      var parent = depth === 0
+        ? { children: convs }
+        : _findNodeByPath(convs, parentPath);
+      if (!parent || !parent.children) continue;
+      var childId = _treePath[depth];
+      var siblings = parent.children;
+      for (var si = 0; si < siblings.length; si++) {
+        if (siblings[si].id === childId && si < siblings.length - 1) {
+          return parentPath.concat([siblings[si + 1].id]);
+        }
+      }
+    }
+    return null; // end of tree
+  }
+
+  // Previous node in preorder traversal from current _treePath.
+  // Returns the new path, or null if at the beginning.
+  function _prevPreorder(convs) {
+    if (_treePath.length === 0) return null; // at virtual root
+    var parentPath = _treePath.slice(0, -1);
+    var childId = _treePath[_treePath.length - 1];
+    var parent = parentPath.length === 0
+      ? { children: convs }
+      : _findNodeByPath(convs, parentPath);
+    if (!parent || !parent.children) return parentPath.length > 0 ? parentPath : [];
+    var siblings = parent.children;
+    var idx = -1;
+    for (var si = 0; si < siblings.length; si++) {
+      if (siblings[si].id === childId) { idx = si; break; }
+    }
+    if (idx <= 0) {
+      // First child (or not found) — go to parent
+      return parentPath; // [] = virtual root
+    }
+    // Previous sibling's deepest last descendant
+    var prevSib = siblings[idx - 1];
+    return _deepestLast(prevSib, parentPath.concat([prevSib.id]));
+  }
+
   function _treeNav(direction) {
     if (!state) return false;
     var convs = state.conversations || [];
 
-    function buildPreorder(nodes) {
-      var result = [null];
-      function walk(arr) {
-        for (var i = 0; i < arr.length; i++) {
-          result.push(arr[i]);
-          if (arr[i].children && arr[i].children.length > 0) walk(arr[i].children);
-        }
-      }
-      walk(nodes);
-      return result;
-    }
-
-    var flat = buildPreorder(convs);
-    var curIdx = flat.findIndex(function(c) {
-      return c === null ? state.selected_conversation === null : c.id === state.selected_conversation;
-    });
-
     switch (direction) {
       case "up": {
-        if (state.selected_conversation === null) return false;
-        var parent = findParentConversation(convs, state.selected_conversation);
+        if (_treePath.length === 0) return false; // at virtual root
+        var parentPath = _treePath.slice(0, -1);
+        var parentId = parentPath.length > 0 ? parentPath[parentPath.length - 1] : null;
         _navScrollHint = "bottom";
         treeRequestFocus();
-        navigateToNode(parent ? parent.id : null);
+        navigateToNode(parentId, parentPath);
         return true;
       }
       case "down": {
-        var cur = state.selected_conversation === null ? null : findConversation(convs, state.selected_conversation);
-        var hasChildren = state.selected_conversation === null
-          ? convs.length > 0
-          : (cur && cur.children && cur.children.length > 0);
-        if (hasChildren && curIdx >= 0 && curIdx < flat.length - 1) {
-          var next = flat[curIdx + 1];
+        // Down = first child of current node
+        var cur = _treePath.length === 0
+          ? { children: convs }
+          : _findNodeByPath(convs, _treePath);
+        if (cur && cur.children && cur.children.length > 0) {
+          var child = cur.children[0];
+          var childPath = _treePath.concat([child.id]);
           _navScrollHint = "top";
           treeRequestFocus();
-          navigateToNode(next ? next.id : null);
+          navigateToNode(child.id, childPath);
           return true;
         }
         return false;
       }
       case "right": {
-        if (curIdx >= 0 && curIdx < flat.length - 1) {
-          var next = flat[curIdx + 1];
+        var nextPath = _nextPreorder(convs);
+        if (nextPath) {
+          var nodeId = nextPath.length > 0 ? nextPath[nextPath.length - 1] : null;
           _navScrollHint = "top";
           treeRequestFocus();
-          navigateToNode(next ? next.id : null);
+          navigateToNode(nodeId, nextPath);
           return true;
         }
         return false;
       }
       case "left": {
-        if (curIdx > 0) {
-          var prev = flat[curIdx - 1];
+        var prevPath = _prevPreorder(convs);
+        if (prevPath) {
+          var nodeId = prevPath.length > 0 ? prevPath[prevPath.length - 1] : null;
           _navScrollHint = "top";
           treeRequestFocus();
-          navigateToNode(prev ? prev.id : null);
+          navigateToNode(nodeId, prevPath);
           return true;
         }
         return false;
@@ -1476,6 +1592,8 @@ async function init() {
 
     const convCount = state.conversations.length;
     console.log("[WikiOracle] init: loaded", convCount, "root conversations");
+    // Initialize treePath from selected conversation
+    _treePath = _buildTreePath(state.conversations || [], state.selected_conversation);
     _navScrollHint = "top"; // scroll messages pane to top on initial load
     renderMessages();
     _hideProgress();

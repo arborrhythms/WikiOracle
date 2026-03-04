@@ -502,7 +502,7 @@ def _default_allowed_urls() -> list:
     """Default URL prefixes that authority and dynamic provider fetches may target.
 
     Only https:// URLs whose prefix matches one of these entries are allowed.
-    file:// URLs are always blocked.
+    file:// URLs are blocked unless explicitly whitelisted here.
     """
     return [
         "https://api.openai.com/",
@@ -510,35 +510,61 @@ def _default_allowed_urls() -> list:
         "https://generativelanguage.googleapis.com/",
         "https://api.x.ai/",
         "https://en.wikipedia.org/",
-        "http://127.0.0.1:8000/",
+        "http://127.0.0.1:",
         "https://127.0.0.1:",
+        "http://localhost:",
         "https://localhost:",
+        "file://spec/",
+        "file://output/",
     ]
 
 
 def get_allowed_urls() -> list:
-    """Return the allowed URL prefixes from the on-disk config.
+    """Return the allowed URL prefixes for authority/provider fetches.
 
-    This reads from ``_CONFIG_YAML`` which is reloaded from disk on each
-    request.  Client-submitted config changes are stripped of
-    ``allowed_urls`` by the POST /config handler so only the admin (who
-    edits config.yaml directly) can change this list.
+    Checks the in-memory ``_CONFIG_YAML`` first, then falls back to
+    re-reading config.yaml from disk (so admin edits take effect without
+    a server restart).  If neither source has ``allowed_urls``, returns
+    the built-in defaults.
     """
-    return _CONFIG_YAML.get("server", {}).get("allowed_urls", _default_allowed_urls())
+    urls = _CONFIG_YAML.get("server", {}).get("allowed_urls")
+    if not urls:
+        # Re-read disk in case config.yaml was edited after server start.
+        fresh = _load_config_yaml()
+        urls = fresh.get("server", {}).get("allowed_urls")
+    if not urls:
+        return _default_allowed_urls()
+    # Guard against YAML parsing the list as a string (e.g. quoted inline).
+    if isinstance(urls, str):
+        import ast
+        try:
+            urls = ast.literal_eval(urls)
+        except (ValueError, SyntaxError):
+            return _default_allowed_urls()
+    if not isinstance(urls, list):
+        return _default_allowed_urls()
+    return urls
 
 
 def is_url_allowed(url: str) -> bool:
     """Check whether a URL is permitted by the allowed_urls whitelist.
 
-    file:// URLs are always rejected.  https:// and http://127.0.0.1
-    (loopback) URLs matching a configured prefix are accepted.
+    file:// URLs are accepted only when an explicit file:// prefix is
+    present in allowed_urls.  https:// and http://127.0.0.1 (loopback)
+    URLs matching a configured prefix are accepted.
     Comparisons are case-insensitive (domains are case-insensitive per RFC).
     """
     if not isinstance(url, str):
         return False
+    # file:// URLs are allowed only when explicitly whitelisted.
     if url.startswith("file://"):
-        return False
-    if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
+        allowed = get_allowed_urls()
+        url_lower = url.lower()
+        return any(
+            prefix.lower().startswith("file://") and url_lower.startswith(prefix.lower())
+            for prefix in allowed
+        )
+    if not url.startswith("https://") and not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
         return False
     allowed = get_allowed_urls()
     url_lower = url.lower()
@@ -595,9 +621,50 @@ URL_PREFIX: str = ""
 # ---------------------------------------------------------------------------
 # CLI argument parsing
 # ---------------------------------------------------------------------------
+def reload_config_yaml(path: str | Path | None = None) -> Dict[str, Any]:
+    """Reload config.yaml from *path* (or the default location).
+
+    Replaces the module-level ``_CONFIG_YAML`` and re-populates
+    ``PROVIDERS`` so the server picks up the new file immediately.
+    Returns the new config dict.
+    """
+    global _CONFIG_YAML
+    if path is not None:
+        _CONFIG_YAML = _load_config_yaml(Path(path).resolve().parent)
+        # _load_config_yaml looks for config.yaml in the given directory,
+        # so we need the file itself to be named config.yaml — or we read
+        # it directly.
+        import yaml as _yaml
+        p = Path(path)
+        if p.is_file():
+            with open(p) as f:
+                data = _yaml.safe_load(f) or {}
+            _CONFIG_YAML = data
+    else:
+        _CONFIG_YAML = _load_config_yaml()
+    # Re-populate PROVIDERS from the fresh config
+    _populate_providers()
+    return _CONFIG_YAML
+
+
+def _populate_providers() -> None:
+    """Refresh the module-level PROVIDERS dict from _CONFIG_YAML."""
+    yaml_providers = _CONFIG_YAML.get("providers", {})
+    PROVIDERS.clear()
+    for key, prov in yaml_providers.items():
+        PROVIDERS[key] = {
+            "name": prov.get("name", key),
+            "url": prov.get("url", ""),
+            "api_key": prov.get("api_key", ""),
+            "default_model": prov.get("default_model", ""),
+        }
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for serve/merge execution modes."""
     parser = argparse.ArgumentParser(description="WikiOracle local shim")
+    parser.add_argument("--config", default=None,
+                        help="Path to config YAML file (default: config.yaml in project root)")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("--stateless", action="store_true",
                         help="Run in stateless mode (no writes to disk; editors disabled)")

@@ -110,11 +110,11 @@ class TestEnsureMinimalState(unittest.TestCase):
         self.assertEqual(conv["messages"][0]["role"], "user")
         self.assertEqual(conv["children"], [])
 
-    def test_trust_certainty_clamped(self):
+    def test_trust_value_clamped(self):
         state = ensure_minimal_state(_make_state(truth=[
-            {"title": "X", "certainty": 5.0, "content": "test", "time": "2026-01-01T00:00:00Z"},
+            {"title": "X", "trust": 5.0, "content": "test", "time": "2026-01-01T00:00:00Z"},
         ]), strict=True)
-        self.assertEqual(state["truth"][0]["certainty"], 1.0)
+        self.assertEqual(state["truth"][0]["trust"], 1.0)
 
     def test_removes_legacy_fields(self):
         state = ensure_minimal_state({
@@ -141,7 +141,7 @@ class TestJSONLRoundTrip(unittest.TestCase):
             ],
             truth=[
                 {"id": "t_1", "title": "Fact", "time": "2026-02-23T00:00:00Z",
-                 "certainty": 0.9, "content": "<div>Truth</div>"}
+                 "trust": 0.9, "content": "<div>Truth</div>"}
             ]
         ), strict=True)
 
@@ -217,11 +217,11 @@ class TestJSONLRoundTrip(unittest.TestCase):
         ids_rt = {e["id"] for e in trust_rt if "id" in e}
         self.assertEqual(ids_orig, ids_rt, "Trust entry IDs must survive round-trip")
 
-        # Certainty values preserved (including negative)
+        # Trust values preserved (including negative)
         by_id = {e["id"]: e for e in trust_rt}
-        self.assertEqual(by_id["axiom_01"]["certainty"], 1.0)
-        self.assertEqual(by_id["false_01"]["certainty"], -0.9)
-        self.assertEqual(by_id["soft_01"]["certainty"], 0.8)
+        self.assertEqual(by_id["axiom_01"]["trust"], 1.0)
+        self.assertEqual(by_id["false_01"]["trust"], -0.9)
+        self.assertEqual(by_id["soft_01"]["trust"], 0.8)
 
         # Context preserved
         self.assertIn("Kleene", restored.get("context", ""))
@@ -402,12 +402,12 @@ class TestMerge(unittest.TestCase):
 
     def test_merge_trust_entries(self):
         base = ensure_minimal_state(_make_state(truth=[
-            {"id": "t_1", "title": "Fact A", "certainty": 0.8,
+            {"id": "t_1", "title": "Fact A", "trust": 0.8,
              "time": "2026-02-23T00:00:00Z", "content": "<div>A</div>"},
         ]), strict=True)
 
         incoming = ensure_minimal_state(_make_state(truth=[
-            {"id": "t_2", "title": "Fact B", "certainty": 0.6,
+            {"id": "t_2", "title": "Fact B", "trust": 0.6,
              "time": "2026-02-23T00:01:00Z", "content": "<div>B</div>"},
         ]), strict=True)
 
@@ -518,7 +518,6 @@ class TestProviderParsing(unittest.TestCase):
     def test_parse_provider_block(self):
         result = parse_provider_block(self.PROVIDER_XHTML)
         self.assertIsNotNone(result)
-        self.assertEqual(result["name"], "claude")
         self.assertEqual(result["api_url"], "https://api.anthropic.com/v1/messages")
         self.assertEqual(result["api_key"], "sk-test-key-123")
         self.assertEqual(result["model"], "claude-sonnet-4-6")
@@ -533,7 +532,7 @@ class TestProviderParsing(unittest.TestCase):
         content = "<div><p>This is a provider entry.</p>" + self.PROVIDER_XHTML + "</div>"
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
-        self.assertEqual(result["name"], "claude")
+        self.assertEqual(result["api_url"], "https://api.anthropic.com/v1/messages")
 
     def test_resolve_api_key_raw(self):
         self.assertEqual(resolve_api_key("sk-raw-key"), "sk-raw-key")
@@ -551,36 +550,36 @@ class TestProviderParsing(unittest.TestCase):
 
     def test_get_provider_entries_sorted(self):
         entries = [
-            {"id": "t_1", "title": "P1", "certainty": 0.8,
+            {"id": "t_1", "title": "P1", "trust": 0.8,
              "time": "2026-02-23T00:00:01Z",
-             "content": "<provider><name>p1</name><api_url>http://a</api_url><api_key>k1</api_key></provider>"},
-            {"id": "t_2", "title": "P2", "certainty": 0.9,
+             "content": "<provider><api_url>http://a</api_url><api_key>k1</api_key></provider>"},
+            {"id": "t_2", "title": "P2", "trust": 0.9,
              "time": "2026-02-23T00:00:02Z",
-             "content": "<provider><name>p2</name><api_url>http://b</api_url><api_key>k2</api_key></provider>"},
-            {"id": "t_3", "title": "P3", "certainty": 0.9,
+             "content": "<provider><api_url>http://b</api_url><api_key>k2</api_key></provider>"},
+            {"id": "t_3", "title": "P3", "trust": 0.9,
              "time": "2026-02-23T00:00:03Z",
-             "content": "<provider><name>p3</name><api_url>http://c</api_url><api_key>k3</api_key></provider>"},
+             "content": "<provider><api_url>http://c</api_url><api_key>k3</api_key></provider>"},
         ]
         result = get_provider_entries(entries)
-        names = [cfg["name"] for _, cfg in result]
-        self.assertEqual(names[0], "p3")
-        self.assertEqual(names[1], "p2")
-        self.assertEqual(names[2], "p1")
+        titles = [e["title"] for e, _ in result]
+        self.assertEqual(titles[0], "P3")
+        self.assertEqual(titles[1], "P2")
+        self.assertEqual(titles[2], "P1")
 
     def test_get_primary_provider(self):
         entries = [
-            {"id": "t_1", "certainty": 0.5, "time": "2026-02-23T00:00:01Z",
-             "content": "<provider><name>low</name><api_url>x</api_url><api_key>k</api_key></provider>"},
-            {"id": "t_2", "certainty": 0.95, "time": "2026-02-23T00:00:01Z",
-             "content": "<provider><name>high</name><api_url>y</api_url><api_key>k</api_key></provider>"},
+            {"id": "t_1", "title": "low", "trust": 0.5, "time": "2026-02-23T00:00:01Z",
+             "content": "<provider><api_url>x</api_url><api_key>k</api_key></provider>"},
+            {"id": "t_2", "title": "high", "trust": 0.95, "time": "2026-02-23T00:00:01Z",
+             "content": "<provider><api_url>y</api_url><api_key>k</api_key></provider>"},
         ]
         result = get_primary_provider(entries)
         self.assertIsNotNone(result)
-        self.assertEqual(result[1]["name"], "high")
+        self.assertEqual(result[0]["title"], "high")
 
     def test_get_primary_provider_none(self):
         result = get_primary_provider([
-            {"id": "t_1", "certainty": 0.5, "time": "2026-02-23T00:00:01Z",
+            {"id": "t_1", "trust": 0.5, "time": "2026-02-23T00:00:01Z",
              "content": "<div>Normal trust entry</div>"},
         ])
         self.assertIsNone(result)

@@ -60,6 +60,9 @@ WIKIORACLE_APP ?= bin/wikioracle.py
 DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
                --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)
 
+# Vote question (override on command line, e.g. make vote VOTE_Q="Should we cut taxes?")
+VOTE_Q           ?= Lets have a vote on taxes. Should we raise them?
+
 # --- Phony targets ------------------------------------------------------------
 
 .PHONY: all all-gpu some some-gpu help \
@@ -69,7 +72,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         sft-cpu sft-gpu \
         train-cpu train-gpu \
         eval-cpu eval-gpu \
-        init run test run-cli run-web \
+        init run test vote run-vote run-cli run-web \
         report clean clean-all \
         remote remote-retrieve remote-ssh remote-status remote-logs \
         remote-deploy remote-deploy-launch \
@@ -108,7 +111,9 @@ help:
 	@echo ""
 	@echo "Evaluation & Inference:"
 	@echo "  make test              Run unit tests"
-	@echo "  make run               Start WikiOracle local shim (bin/wikioracle.py)"
+	@echo "  make vote              Start server, run alpha/beta vote, stop server"
+	@echo "  make run               Start WikiOracle local shim (config.yaml)"
+	@echo "  make run-vote          Start server with alpha.yaml (stateless, for voting)"
 	@echo "  make eval-cpu           Evaluate model (CPU)"
 	@echo "  make eval-gpu           Evaluate model (GPU)"
 	@echo "  make run-cli            Chat with the model (CLI)"
@@ -155,11 +160,12 @@ help:
 	@echo "  DATA_SHARDS_FULL=370    Full data shards for GPU training"
 	@echo "  EC2_INSTANCE_TYPE       EC2 instance type (default: p5.4xlarge)"
 	@echo "  EC2_DISK_SIZE           Root EBS volume in GB (default: 200)"
+	@echo "  VOTE_Q='...'            Vote question (default: taxes)"
 	@echo "  ALERT_EMAIL             Email for idle-instance alerts (required for remote builds)"
 
 # ---- All ----------------------------------------------------------------------
 
-all: setup-cpu train-cpu eval-cpu report
+all: wo-chat-deploy wo-restart wo-chat-restart
 
 all-gpu: setup-gpu train-gpu eval-gpu report
 
@@ -406,14 +412,42 @@ init:
 run:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP)
 
+run-vote:
+	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --config alpha.yaml
+
 debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
 test:
-	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle test.test_derived_truth test.test_authority test.test_stateless_contract test.test_hme_inference test.test_voting -v
+	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle test.test_derived_truth test.test_authority test.test_stateless_contract test.test_hme_inference test.test_voting test.test_alpha_state -v
 	@echo ""
 	@echo "── online LLM tests (warnings only) ──"
 	@$(SHIM_ACTIVATE) && python3 -m unittest test.test_online_llm -v 2>&1 || echo "⚠  online LLM tests had failures (non-blocking)"
+
+vote:
+	@mkdir -p output
+	cp spec/alpha.jsonl output/alpha.jsonl
+	cp spec/beta1.jsonl output/beta1.jsonl
+	cp spec/beta2.jsonl output/beta2.jsonl
+	@# Rewrite authority paths so alpha references the output/ copies
+	sed -i '' 's|file://spec/|file://output/|g' output/alpha.jsonl
+	@echo "Starting vote server (alpha.yaml) …"
+	@$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --config alpha.yaml &  \
+		SERVER_PID=$$!;                                                     \
+		sleep 2;                                                            \
+		echo "Server PID $$SERVER_PID — sending vote …";                    \
+		python3 bin/wo -k --provider gemini --file output/alpha.jsonl "$(VOTE_Q)"; \
+		VOTE_RC=$$?;                                                        \
+		echo "Stopping server …";                                           \
+		kill $$SERVER_PID 2>/dev/null; wait $$SERVER_PID 2>/dev/null;       \
+		echo "";                                                            \
+		if [ $$VOTE_RC -eq 0 ]; then                                        \
+			echo "── vote complete ──";                                     \
+			echo "Result written to output/alpha.jsonl";                    \
+		else                                                                \
+			echo "── vote FAILED (exit $$VOTE_RC) ──" >&2;                 \
+			exit $$VOTE_RC;                                                 \
+		fi
 
 run-cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \

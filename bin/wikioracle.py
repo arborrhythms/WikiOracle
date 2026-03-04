@@ -63,6 +63,7 @@ from config import (
     config_to_yaml,
     load_config,
     parse_args,
+    reload_config_yaml,
 )
 from state import (
     SCHEMA_URL,
@@ -470,8 +471,19 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 def main() -> int:
     """Entrypoint for server startup and one-shot CLI merge execution."""
     args = parse_args()
+    # Load custom config YAML if specified (before anything reads _CONFIG_YAML).
+    if args.config:
+        reload_config_yaml(args.config)
     config_mod.DEBUG_MODE = args.debug
-    config_mod.STATELESS_MODE = args.stateless or _env_bool("WIKIORACLE_STATELESS", False)
+    # Stateless: CLI flag > config.yaml > env var > default (False)
+    if args.stateless:
+        config_mod.STATELESS_MODE = True
+    else:
+        yaml_stateless = config_mod._CONFIG_YAML.get("server", {}).get("stateless")
+        if yaml_stateless is not None:
+            config_mod.STATELESS_MODE = bool(yaml_stateless)
+        else:
+            config_mod.STATELESS_MODE = _env_bool("WIKIORACLE_STATELESS", False)
     cfg = load_config()
 
     if args.cmd == "merge":

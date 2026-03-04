@@ -143,8 +143,9 @@ def normalize_conversation(raw: Any, parent_id: str | None = None) -> dict:
     if not isinstance(msgs, list):
         msgs = []
     item["messages"] = [_normalize_inner_message(m) for m in msgs]
-    # Title is always derived from messages (never stored in JSONL)
-    item["title"] = _derive_conversation_title(item["messages"])
+    # Keep explicit title if provided; otherwise derive from messages
+    if not item.get("title"):
+        item["title"] = _derive_conversation_title(item["messages"])
     # parentId: use explicit value if already present, otherwise derive from tree
     if "parentId" not in item:
         item["parentId"] = parent_id
@@ -231,46 +232,84 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
 # JSONL I/O
 # ---------------------------------------------------------------------------
 def _flatten_conversations(convs: list, parent_id: str | None = None) -> list:
-    """Flatten nested conversations into JSONL records with 'parent' references."""
-    records = []
-    for conv in convs:
-        record = {
-            "type": "conversation",
-            "id": conv["id"],
-            "messages": conv.get("messages", []),
-        }
-        if parent_id is not None:
-            record["parent"] = parent_id
-        records.append(record)
-        # Recurse into children
-        records.extend(_flatten_conversations(conv.get("children", []), parent_id=conv["id"]))
+    """Flatten nested conversations into JSONL records with 'parent' references.
+
+    ``parentId`` may be a list (diamond merge node with multiple parents).
+    In JSONL the ``parent`` field is either a string or a list of strings.
+    """
+    seen: set = set()
+    records: list = []
+
+    def _walk(convs_inner: list, pid: str | None) -> None:
+        for conv in convs_inner:
+            cid = conv["id"]
+            if cid in seen:          # diamond: already emitted
+                continue
+            seen.add(cid)
+            record: dict = {
+                "type": "conversation",
+                "id": cid,
+                "messages": conv.get("messages", []),
+            }
+            # Persist explicit title so it round-trips through JSONL
+            title = conv.get("title")
+            if title:
+                record["title"] = title
+            # parentId on the node wins; fall back to structural parent
+            explicit = conv.get("parentId")
+            if explicit is not None:
+                record["parent"] = explicit       # str or list
+            elif pid is not None:
+                record["parent"] = pid
+            records.append(record)
+            _walk(conv.get("children", []), cid)
+
+    _walk(convs, parent_id)
     return records
 
 
 def _nest_conversations(flat_records: list) -> list:
-    """Rebuild conversation tree from flat JSONL records with 'parent' references."""
+    """Rebuild conversation tree from flat JSONL records with 'parent' references.
+
+    ``parent`` may be a single ID string or a list of ID strings (diamond
+    merge node).  A multi-parent node is placed as a child of each parent
+    and keeps its full ``parentId`` list.
+    """
     by_id: dict = {}
     roots: list = []
 
     # First pass: create all nodes
     for rec in flat_records:
         cid = rec.get("id", "")
-        by_id[cid] = {
+        raw_parent = rec.get("parent", None)
+        node_dict: dict = {
             "id": cid,
             "messages": rec.get("messages", []),
             "children": [],
-            "parentId": rec.get("parent", None),
+            "parentId": raw_parent,
         }
+        if rec.get("title"):
+            node_dict["title"] = rec["title"]
+        by_id[cid] = node_dict
 
     # Second pass: link parents
     for rec in flat_records:
         cid = rec.get("id", "")
-        parent = rec.get("parent")
         node = by_id.get(cid)
         if not node:
             continue
-        if parent and parent in by_id:
-            by_id[parent]["children"].append(node)
+        raw_parent = rec.get("parent")
+        if isinstance(raw_parent, list):
+            # Diamond merge: place under each parent, but only once in output
+            placed = False
+            for pid in raw_parent:
+                if pid in by_id:
+                    by_id[pid]["children"].append(node)
+                    placed = True
+            if not placed:
+                roots.append(node)
+        elif raw_parent and raw_parent in by_id:
+            by_id[raw_parent]["children"].append(node)
         else:
             roots.append(node)
 

@@ -33,31 +33,28 @@ SPEC_DIR = Path(__file__).resolve().parent.parent / "spec"
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_provider_entry(name, entry_id, certainty=0.8, truth_url="", prelim=True):
+def _make_provider_entry(name, entry_id, trust=0.8, authority_url="", prelim=True):
     """Create a (trust_entry, provider_config) pair for testing."""
-    content = (
-        f'<provider id="{entry_id}" trust="{certainty}" title="{name}" '
-        f'name="{name}" api_url="http://test/{name}" model="test"'
-    )
-    if truth_url:
-        content += f' truth_url="{truth_url}"'
+    content = f'<provider api_url="http://test/{name}" model="test"'
     if not prelim:
         content += ' prelim="false"'
-    content += "/>"
+    if authority_url:
+        content += f'><authority url="{authority_url}"/></provider>'
+    else:
+        content += '/>'
 
     entry = {
         "id": entry_id,
         "title": name,
-        "certainty": certainty,
+        "trust": trust,
         "time": "2026-03-01T00:00:00Z",
         "content": content,
     }
     config = {
-        "name": name,
         "api_url": f"http://test/{name}",
         "api_key": "k",
         "model": "test",
-        "truth_url": truth_url,
+        "authority_url": authority_url,
         "prelim": prelim,
         "timeout": 30,
         "max_tokens": 1024,
@@ -126,7 +123,7 @@ class TestVotingCyclePrevention(unittest.TestCase):
             _make_provider_entry("C", "prov_c"),
         ]
         results = evaluate_providers(
-            pairs, "", [], "q", "", lambda p, m: f"from {p['name']}",
+            pairs, "", [], "q", "", lambda p, m: f"from {p['api_url']}",
             call_chain=["prov_a"],
         )
         self.assertEqual(len(results), 2)
@@ -155,7 +152,7 @@ class TestVotingCyclePrevention(unittest.TestCase):
         call_log = []
 
         def mock_call(pconfig, messages):
-            call_log.append(pconfig["name"])
+            call_log.append(pconfig["api_url"])
             return "response"
 
         pairs = [_make_provider_entry("A", "prov_a")]
@@ -196,8 +193,8 @@ class TestAlphaBetaMutualReference(unittest.TestCase):
 
         Simulated as two rounds of evaluate_providers.
         """
-        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
-        beta = _make_provider_entry("beta", "provider_beta1", certainty=0.8)
+        alpha = _make_provider_entry("alpha", "provider_alpha", trust=0.9)
+        beta = _make_provider_entry("beta", "provider_beta1", trust=0.8)
 
         # Round 1: alpha initiates vote, calls beta as secondary.
         # call_chain starts empty (alpha is the root).
@@ -231,14 +228,14 @@ class TestBranchingVote(unittest.TestCase):
 
     def test_alpha_fans_out_to_two_betas(self):
         """Alpha calls beta1 and beta2 in parallel — both respond."""
-        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
-        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
+        beta1 = _make_provider_entry("beta1", "provider_beta1", trust=0.8)
+        beta2 = _make_provider_entry("beta2", "provider_beta2", trust=0.7)
 
         call_log = []
 
         def mock_call(pconfig, messages):
-            call_log.append(pconfig["name"])
-            return f"Response from {pconfig['name']}"
+            call_log.append(pconfig["api_url"])
+            return f"Response from {pconfig['api_url']}"
 
         results = evaluate_providers(
             [beta1, beta2],
@@ -248,7 +245,7 @@ class TestBranchingVote(unittest.TestCase):
         self.assertEqual(len(results), 2)
         names = {r.title for r in results}
         self.assertEqual(names, {"beta1", "beta2"})
-        self.assertEqual(set(call_log), {"beta1", "beta2"})
+        self.assertEqual(set(call_log), {"http://test/beta1", "http://test/beta2"})
 
     def test_both_betas_try_to_call_alpha_back_alpha_silent(self):
         """After alpha fans out, each beta tries to call alpha — alpha stays
@@ -257,7 +254,7 @@ class TestBranchingVote(unittest.TestCase):
         Beta1's nested vote: chain = [alpha, beta1] → alpha silenced
         Beta2's nested vote: chain = [alpha, beta2] → alpha silenced
         """
-        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
+        alpha = _make_provider_entry("alpha", "provider_alpha", trust=0.9)
 
         # Beta1's nested vote tries to call alpha
         results_beta1 = evaluate_providers(
@@ -280,7 +277,7 @@ class TestBranchingVote(unittest.TestCase):
     def test_beta1_can_call_beta2_in_nested_vote(self):
         """Beta1 initiates a nested vote and calls beta2 — beta2 is NOT in the
         chain (only alpha and beta1 are), so beta2 responds normally."""
-        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
+        beta2 = _make_provider_entry("beta2", "provider_beta2", trust=0.7)
 
         results = evaluate_providers(
             [beta2],
@@ -302,15 +299,15 @@ class TestBranchingVote(unittest.TestCase):
              \\   /
            alpha_final
         """
-        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
-        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
-        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
+        alpha = _make_provider_entry("alpha", "provider_alpha", trust=0.9)
+        beta1 = _make_provider_entry("beta1", "provider_beta1", trust=0.8)
+        beta2 = _make_provider_entry("beta2", "provider_beta2", trust=0.7)
 
         call_log = []
 
         def mock_call(pconfig, messages):
-            call_log.append(pconfig["name"])
-            return f"Response from {pconfig['name']}"
+            call_log.append(pconfig["api_url"])
+            return f"Response from {pconfig['api_url']}"
 
         # Step 1: alpha fans out to beta1 and beta2 (no call chain yet)
         fan_out_results = evaluate_providers(
@@ -331,7 +328,7 @@ class TestBranchingVote(unittest.TestCase):
         # alpha is silenced; beta2 responds
         self.assertEqual(len(beta1_nested), 1)
         self.assertEqual(beta1_nested[0].title, "beta2")
-        self.assertEqual(call_log, ["beta2"])
+        self.assertEqual(call_log, ["http://test/beta2"])
 
         # Step 3: beta2 initiates nested vote, tries alpha + beta1
         call_log.clear()
@@ -344,7 +341,7 @@ class TestBranchingVote(unittest.TestCase):
         # alpha is silenced; beta1 responds
         self.assertEqual(len(beta2_nested), 1)
         self.assertEqual(beta2_nested[0].title, "beta1")
-        self.assertEqual(call_log, ["beta1"])
+        self.assertEqual(call_log, ["http://test/beta1"])
 
 
 # ---------------------------------------------------------------------------
@@ -352,38 +349,35 @@ class TestBranchingVote(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestPerProviderTruth(unittest.TestCase):
-    """Test that truth_url on <provider> entries resolves private facts."""
+    """Test that authority_url on <provider> entries resolves private facts."""
 
-    def test_truth_url_parsed(self):
-        """parse_provider_block extracts truth_url attribute."""
+    def test_authority_url_parsed(self):
+        """parse_provider_block extracts authority_url from nested <authority> element."""
         content = (
-            '<provider id="p1" trust="0.8" title="Test" '
-            'name="test" api_url="http://test" model="m" '
-            'truth_url="file://spec/beta_truth.jsonl"/>'
+            '<provider api_url="http://test" model="m">'
+            '<authority url="file://spec/beta_truth.jsonl"/>'
+            '</provider>'
         )
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
-        self.assertEqual(result["truth_url"], "file://spec/beta_truth.jsonl")
+        self.assertEqual(result["authority_url"], "file://spec/beta_truth.jsonl")
 
-    def test_truth_url_empty_when_absent(self):
-        """parse_provider_block returns empty truth_url when not present."""
-        content = (
-            '<provider id="p1" trust="0.8" title="Test" '
-            'name="test" api_url="http://test" model="m"/>'
-        )
+    def test_authority_url_empty_when_absent(self):
+        """parse_provider_block returns empty authority_url when not present."""
+        content = '<provider api_url="http://test" model="m"/>'
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
-        self.assertEqual(result["truth_url"], "")
+        self.assertEqual(result["authority_url"], "")
 
     def test_resolve_provider_truth_empty_when_no_url(self):
-        """No truth_url → empty list (RAG-free behavior)."""
-        entry = {"id": "prov_x", "certainty": 0.9}
-        config = {"truth_url": ""}
+        """No authority_url → empty list (RAG-free behavior)."""
+        entry = {"id": "prov_x", "trust": 0.9}
+        config = {"authority_url": ""}
         sources = resolve_provider_truth(config, entry)
         self.assertEqual(sources, [])
 
-    def test_provider_without_truth_url_gets_rag_free_bundle(self):
-        """Provider without truth_url gets the standard RAG-free messages."""
+    def test_provider_without_authority_url_gets_rag_free_bundle(self):
+        """Provider without authority_url gets the standard RAG-free messages."""
         captured = {}
 
         def mock_call(pconfig, messages):
@@ -415,8 +409,8 @@ class TestSpecFiles(unittest.TestCase):
         entries = _load_truth_entries("alpha.jsonl")
         providers = get_provider_entries(entries)
         self.assertEqual(len(providers), 2)
-        names = {p[1]["name"] for p in providers}
-        self.assertEqual(names, {"beta1", "beta2"})
+        ids = {p[0]["id"] for p in providers}
+        self.assertEqual(ids, {"provider_beta1", "provider_beta2"})
 
     def test_alpha_has_own_facts(self):
         """alpha.jsonl has facts that beta1/beta2 don't have."""
@@ -431,7 +425,7 @@ class TestSpecFiles(unittest.TestCase):
         entries = _load_truth_entries("beta1.jsonl")
         providers = get_provider_entries(entries)
         self.assertEqual(len(providers), 1)
-        self.assertEqual(providers[0][1]["name"], "alpha")
+        self.assertEqual(providers[0][0]["id"], "provider_alpha")
 
     def test_beta1_has_own_facts(self):
         """beta1.jsonl has its own facts (Eiffel Tower)."""
@@ -447,7 +441,7 @@ class TestSpecFiles(unittest.TestCase):
         entries = _load_truth_entries("beta2.jsonl")
         providers = get_provider_entries(entries)
         self.assertEqual(len(providers), 1)
-        self.assertEqual(providers[0][1]["name"], "alpha")
+        self.assertEqual(providers[0][0]["id"], "provider_alpha")
 
     def test_beta2_has_own_facts(self):
         """beta2.jsonl has its own facts (Louvre)."""
@@ -487,12 +481,12 @@ class TestSpecFiles(unittest.TestCase):
 
         # alpha fans out to beta1 and beta2
         self.assertEqual(len(alpha_providers), 2)
-        alpha_beta_names = {p[1]["name"] for p in alpha_providers}
-        self.assertEqual(alpha_beta_names, {"beta1", "beta2"})
+        alpha_beta_ids = {p[0]["id"] for p in alpha_providers}
+        self.assertEqual(alpha_beta_ids, {"provider_beta1", "provider_beta2"})
 
         # Both betas reference alpha back
-        self.assertEqual(beta1_providers[0][1]["name"], "alpha")
-        self.assertEqual(beta2_providers[0][1]["name"], "alpha")
+        self.assertEqual(beta1_providers[0][0]["id"], "provider_alpha")
+        self.assertEqual(beta2_providers[0][0]["id"], "provider_alpha")
 
         # Beta1 tries to call alpha — silenced
         r1 = evaluate_providers(
@@ -559,8 +553,8 @@ class TestDiamondVoting(unittest.TestCase):
         captured_messages = {}
 
         def mock_call(pconfig, messages):
-            captured_messages[pconfig["name"]] = messages
-            return f"Beta response from {pconfig['name']}"
+            captured_messages[pconfig["api_url"]] = messages
+            return f"Beta response from {pconfig['api_url']}"
 
         beta1 = _make_provider_entry("beta1", "prov_beta1")
         beta2 = _make_provider_entry("beta2", "prov_beta2")
@@ -574,12 +568,12 @@ class TestDiamondVoting(unittest.TestCase):
 
         self.assertEqual(len(results), 2)
         # Both betas should have been called
-        self.assertIn("beta1", captured_messages)
-        self.assertIn("beta2", captured_messages)
+        self.assertIn("http://test/beta1", captured_messages)
+        self.assertIn("http://test/beta2", captured_messages)
 
         # Each beta's messages should contain the alpha's preliminary response
         for name in ("beta1", "beta2"):
-            msgs = captured_messages[name]
+            msgs = captured_messages[f"http://test/{name}"]
             all_text = " ".join(m["content"] for m in msgs)
             self.assertIn("Paris is the capital of France.", all_text,
                           f"{name} should see alpha's preliminary response")
@@ -595,7 +589,7 @@ class TestDiamondVoting(unittest.TestCase):
         captured_messages = {}
 
         def mock_call(pconfig, messages):
-            captured_messages[pconfig["name"]] = messages
+            captured_messages[pconfig["api_url"]] = messages
             return "response"
 
         beta = _make_provider_entry("beta1", "prov_beta1")
@@ -607,7 +601,7 @@ class TestDiamondVoting(unittest.TestCase):
             prelim_response=None,
         )
 
-        msgs = captured_messages["beta1"]
+        msgs = captured_messages["http://test/beta1"]
         all_text = " ".join(m["content"] for m in msgs)
         self.assertIn("system context", all_text)
         self.assertIn("question", all_text)
@@ -634,9 +628,9 @@ class TestDiamondVoting(unittest.TestCase):
         """
         call_sequence = []
 
-        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
-        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
-        beta2 = _make_provider_entry("beta2", "provider_beta2", certainty=0.7)
+        alpha = _make_provider_entry("alpha", "provider_alpha", trust=0.9)
+        beta1 = _make_provider_entry("beta1", "provider_beta1", trust=0.8)
+        beta2 = _make_provider_entry("beta2", "provider_beta2", trust=0.7)
 
         # Step 1: Alpha preliminary
         prelim_response = "Alpha says: Paris is the capital"
@@ -646,7 +640,7 @@ class TestDiamondVoting(unittest.TestCase):
         captured_beta_msgs = {}
 
         def mock_beta_call(pconfig, messages):
-            name = pconfig["name"]
+            name = pconfig["api_url"]
             call_sequence.append((name, "beta_response"))
             captured_beta_msgs[name] = messages
             return f"{name}: I agree about Paris"
@@ -664,7 +658,7 @@ class TestDiamondVoting(unittest.TestCase):
 
         # Both betas saw prelim_response in their messages
         for name in ("beta1", "beta2"):
-            all_text = " ".join(m["content"] for m in captured_beta_msgs[name])
+            all_text = " ".join(m["content"] for m in captured_beta_msgs[f"http://test/{name}"])
             self.assertIn(prelim_response, all_text)
 
         # Step 3: Alpha final (we simulate by calling evaluate_providers again,
@@ -681,8 +675,8 @@ class TestDiamondVoting(unittest.TestCase):
     def test_diamond_with_cycle_prevention(self):
         """In the diamond, betas try to call alpha back — alpha stays silent due
         to cycle prevention, but betas still produce their own responses."""
-        alpha = _make_provider_entry("alpha", "provider_alpha", certainty=0.9)
-        beta1 = _make_provider_entry("beta1", "provider_beta1", certainty=0.8)
+        alpha = _make_provider_entry("alpha", "provider_alpha", trust=0.9)
+        beta1 = _make_provider_entry("beta1", "provider_beta1", trust=0.8)
 
         # Step 2 simulation: beta1 is called with alpha in call chain
         beta_results = evaluate_providers(
@@ -727,35 +721,35 @@ class TestPrelimControl(unittest.TestCase):
 
     def test_parse_provider_block_prelim_default_true(self):
         """parse_provider_block defaults prelim to True when absent."""
-        content = '<provider name="test" api_url="http://test" model="m"/>'
+        content = '<provider api_url="http://test" model="m"/>'
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
         self.assertTrue(result["prelim"])
 
     def test_parse_provider_block_prelim_explicit_true(self):
         """parse_provider_block reads prelim="true"."""
-        content = '<provider name="test" api_url="http://test" model="m" prelim="true"/>'
+        content = '<provider api_url="http://test" model="m" prelim="true"/>'
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
         self.assertTrue(result["prelim"])
 
     def test_parse_provider_block_prelim_false(self):
         """parse_provider_block reads prelim="false"."""
-        content = '<provider name="test" api_url="http://test" model="m" prelim="false"/>'
+        content = '<provider api_url="http://test" model="m" prelim="false"/>'
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
         self.assertFalse(result["prelim"])
 
     def test_parse_provider_block_prelim_zero(self):
         """parse_provider_block treats prelim="0" as False."""
-        content = '<provider name="test" api_url="http://test" model="m" prelim="0"/>'
+        content = '<provider api_url="http://test" model="m" prelim="0"/>'
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
         self.assertFalse(result["prelim"])
 
     def test_parse_provider_block_prelim_no(self):
         """parse_provider_block treats prelim="no" as False."""
-        content = '<provider name="test" api_url="http://test" model="m" prelim="no"/>'
+        content = '<provider api_url="http://test" model="m" prelim="no"/>'
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
         self.assertFalse(result["prelim"])
@@ -765,7 +759,7 @@ class TestPrelimControl(unittest.TestCase):
         captured_messages = {}
 
         def mock_call(pconfig, messages):
-            captured_messages[pconfig["name"]] = messages
+            captured_messages[pconfig["api_url"]] = messages
             return "response"
 
         cold_beta = _make_provider_entry("cold", "prov_cold", prelim=False)
@@ -777,7 +771,7 @@ class TestPrelimControl(unittest.TestCase):
             prelim_response="Alpha's preliminary thoughts",
         )
 
-        msgs = captured_messages["cold"]
+        msgs = captured_messages["http://test/cold"]
         all_text = " ".join(m["content"] for m in msgs)
         self.assertNotIn("Alpha's preliminary thoughts", all_text,
                          "Beta with prelim=False must not see preliminary response")
@@ -787,7 +781,7 @@ class TestPrelimControl(unittest.TestCase):
         captured_messages = {}
 
         def mock_call(pconfig, messages):
-            captured_messages[pconfig["name"]] = messages
+            captured_messages[pconfig["api_url"]] = messages
             return "response"
 
         steered_beta = _make_provider_entry("steered", "prov_steered", prelim=True)
@@ -799,7 +793,7 @@ class TestPrelimControl(unittest.TestCase):
             prelim_response="Alpha's preliminary thoughts",
         )
 
-        msgs = captured_messages["steered"]
+        msgs = captured_messages["http://test/steered"]
         all_text = " ".join(m["content"] for m in msgs)
         self.assertIn("Alpha's preliminary thoughts", all_text,
                        "Beta with prelim=True should see preliminary response")
@@ -810,8 +804,8 @@ class TestPrelimControl(unittest.TestCase):
         captured_messages = {}
 
         def mock_call(pconfig, messages):
-            captured_messages[pconfig["name"]] = messages
-            return f"Response from {pconfig['name']}"
+            captured_messages[pconfig["api_url"]] = messages
+            return f"Response from {pconfig['api_url']}"
 
         steered = _make_provider_entry("steered", "prov_steered", prelim=True)
         cold = _make_provider_entry("cold", "prov_cold", prelim=False)
@@ -826,11 +820,11 @@ class TestPrelimControl(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
         # Steered beta sees prelim
-        steered_text = " ".join(m["content"] for m in captured_messages["steered"])
+        steered_text = " ".join(m["content"] for m in captured_messages["http://test/steered"])
         self.assertIn("Alpha's preliminary thoughts", steered_text)
 
         # Cold beta does NOT see prelim
-        cold_text = " ".join(m["content"] for m in captured_messages["cold"])
+        cold_text = " ".join(m["content"] for m in captured_messages["http://test/cold"])
         self.assertNotIn("Alpha's preliminary thoughts", cold_text)
 
     def test_prelim_false_with_no_prelim_response_is_fine(self):
@@ -838,7 +832,7 @@ class TestPrelimControl(unittest.TestCase):
         captured_messages = {}
 
         def mock_call(pconfig, messages):
-            captured_messages[pconfig["name"]] = messages
+            captured_messages[pconfig["api_url"]] = messages
             return "response"
 
         cold_beta = _make_provider_entry("cold", "prov_cold", prelim=False)
@@ -850,7 +844,7 @@ class TestPrelimControl(unittest.TestCase):
             prelim_response=None,
         )
 
-        self.assertIn("cold", captured_messages)
+        self.assertIn("http://test/cold", captured_messages)
         self.assertEqual(len([r for r in evaluate_providers(
             [cold_beta], "system", [], "q", "", mock_call,
         )]), 1)
@@ -865,13 +859,10 @@ class TestFeelingTruthType(unittest.TestCase):
 
     def test_feeling_recognized_by_parse_root_attrs(self):
         """_parse_root_attrs recognizes <feeling> as a valid root tag."""
-        content = '<feeling id="f1" certainty="0.5" title="A hunch">Just a guess.</feeling>'
+        content = '<feeling>Just a guess.</feeling>'
         parsed = _parse_root_attrs(content)
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed["tag"], "feeling")
-        self.assertEqual(parsed["id"], "f1")
-        self.assertAlmostEqual(parsed["certainty"], 0.5)
-        self.assertEqual(parsed["title"], "A hunch")
 
     def test_feeling_normalized_as_truth_entry(self):
         """_normalize_trust_entry preserves <feeling> content and syncs envelope."""
@@ -879,21 +870,21 @@ class TestFeelingTruthType(unittest.TestCase):
             "type": "truth",
             "id": "feel_01",
             "title": "Subjective opinion",
-            "certainty": 0.4,
-            "content": '<feeling id="feel_01" certainty="0.4" title="Subjective opinion">I think this is nice.</feeling>',
+            "trust": 0.4,
+            "content": '<feeling>I think this is nice.</feeling>',
             "time": "2026-03-01T00:00:00Z",
         }
         entry = _normalize_trust_entry(raw)
         self.assertEqual(entry["id"], "feel_01")
-        self.assertAlmostEqual(entry["certainty"], 0.4)
+        self.assertAlmostEqual(entry["trust"], 0.4)
         self.assertIn("<feeling", entry["content"])
 
     def test_feeling_not_filtered_by_static_truth(self):
         """static_truth() includes <feeling> entries (they are propositional content)."""
         entries = [
-            {"id": "fact_01", "content": '<fact id="fact_01" certainty="0.9" title="A">A fact.</fact>'},
-            {"id": "feel_01", "content": '<feeling id="feel_01" certainty="0.5" title="B">A feeling.</feeling>'},
-            {"id": "prov_01", "content": '<provider id="prov_01" name="x" api_url="http://x" model="m"/>'},
+            {"id": "fact_01", "content": '<fact>A fact.</fact>'},
+            {"id": "feel_01", "content": '<feeling>A feeling.</feeling>'},
+            {"id": "prov_01", "content": '<provider api_url="http://x" model="m"/>'},
         ]
         result = static_truth(entries)
         ids = [e["id"] for e in result]
@@ -910,16 +901,16 @@ class TestFeelingTruthType(unittest.TestCase):
                 "type": "truth",
                 "id": "feel_01",
                 "title": "A feeling",
-                "certainty": 0.5,
-                "content": '<feeling id="feel_01" certainty="0.5" title="A feeling">Just vibes.</feeling>',
+                "trust": 0.5,
+                "content": '<feeling>Just vibes.</feeling>',
                 "time": "2026-03-01T00:00:00Z",
             },
             {
                 "type": "truth",
                 "id": "fact_01",
                 "title": "A fact",
-                "certainty": 0.9,
-                "content": '<fact id="fact_01" certainty="0.9" title="A fact">The sky is blue.</fact>',
+                "trust": 0.9,
+                "content": '<fact>The sky is blue.</fact>',
                 "time": "2026-03-01T00:00:00Z",
             },
         ]
@@ -960,13 +951,10 @@ class TestFeelingTruthType(unittest.TestCase):
 
     def test_parse_root_attrs_recognizes_feeling(self):
         """_parse_root_attrs should recognize <feeling> as a valid root tag."""
-        content = '<feeling id="f1" certainty="0.5" title="Intuition">Some intuition.</feeling>'
+        content = '<feeling>Some intuition.</feeling>'
         parsed = _parse_root_attrs(content)
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed["tag"], "feeling")
-        self.assertEqual(parsed["id"], "f1")
-        self.assertAlmostEqual(parsed["certainty"], 0.5)
-        self.assertEqual(parsed["title"], "Intuition")
 
     def test_normalize_trust_entry_preserves_feeling(self):
         """_normalize_trust_entry should preserve <feeling> content as-is."""
@@ -974,21 +962,21 @@ class TestFeelingTruthType(unittest.TestCase):
             "type": "truth",
             "id": "f1",
             "title": "Intuition",
-            "certainty": 0.5,
-            "content": '<feeling id="f1" certainty="0.5" title="Intuition">Some intuition.</feeling>',
+            "trust": 0.5,
+            "content": '<feeling>Some intuition.</feeling>',
             "time": "2026-03-01T00:00:00Z",
         }
         result = _normalize_trust_entry(entry)
         self.assertEqual(result["id"], "f1")
-        self.assertAlmostEqual(result["certainty"], 0.5)
+        self.assertAlmostEqual(result["trust"], 0.5)
         self.assertIn("<feeling", result["content"])
 
     def test_static_truth_includes_feeling(self):
         """static_truth should include <feeling> entries (they are content, not structure)."""
         entries = [
-            {"id": "f1", "content": '<fact id="f1" certainty="1.0" title="A">A.</fact>'},
-            {"id": "f2", "content": '<feeling id="f2" certainty="0.5" title="B">B.</feeling>'},
-            {"id": "p1", "content": '<provider id="p1" name="x" api_url="http://x" model="m"/>'},
+            {"id": "f1", "content": '<fact>A.</fact>'},
+            {"id": "f2", "content": '<feeling>B.</feeling>'},
+            {"id": "p1", "content": '<provider api_url="http://x" model="m"/>'},
         ]
         result = static_truth(entries)
         ids = [e["id"] for e in result]
@@ -1005,16 +993,16 @@ class TestFeelingTruthType(unittest.TestCase):
                 "type": "truth",
                 "id": "f1",
                 "title": "Intuition",
-                "certainty": 0.5,
-                "content": '<feeling id="f1" certainty="0.5" title="Intuition">Some opinion.</feeling>',
+                "trust": 0.5,
+                "content": '<feeling>Some opinion.</feeling>',
                 "time": "2026-03-01T00:00:00Z",
             },
             {
                 "type": "truth",
                 "id": "fact1",
                 "title": "A fact",
-                "certainty": 0.9,
-                "content": '<fact id="fact1" certainty="0.9" title="A fact">Verified claim.</fact>',
+                "trust": 0.9,
+                "content": '<fact>Verified claim.</fact>',
                 "time": "2026-03-01T00:00:01Z",
             },
         ]
@@ -1032,9 +1020,9 @@ class TestFeelingTruthType(unittest.TestCase):
     def test_feeling_not_filtered_by_static_truth(self):
         """Feelings should pass through static_truth just like facts."""
         entries = [
-            {"id": "feel", "content": '<feeling id="feel" certainty="0.3" title="Hunch">A hunch.</feeling>'},
-            {"id": "op1", "content": '<and id="op1" certainty="0.0" title="Op"><child id="a"/><child id="b"/></and>'},
-            {"id": "auth1", "content": '<authority id="auth1" did="did:web:x" url="http://x"/>'},
+            {"id": "feel", "content": '<feeling>A hunch.</feeling>'},
+            {"id": "op1", "content": '<and><child id="a"/><child id="b"/></and>'},
+            {"id": "auth1", "content": '<authority url="http://x"/>'},
         ]
         result = static_truth(entries)
         ids = [e["id"] for e in result]
@@ -1051,6 +1039,257 @@ class TestFeelingTruthType(unittest.TestCase):
         feeling_entries = [e for e in lines if "<feeling" in e.get("content", "")]
         self.assertGreaterEqual(len(feeling_entries), 1,
                                 "hme.jsonl should have at least one <feeling> entry")
+
+
+class TestDiamondConversationTree(unittest.TestCase):
+    """Verify process_chat produces a diamond conversation tree during votes."""
+
+    def test_vote_creates_diamond_structure(self):
+        """When providers exist, process_chat should create:
+          vote_root: [user_query, alpha_prelim]
+            ├── beta1_conv: [beta1_response]
+            ├── beta2_conv: [beta2_response]
+            └── final_conv: [alpha_final]  ← selected
+        """
+        from state import ensure_minimal_state
+        from response import process_chat
+        from config import Config
+        import unittest.mock as mock
+
+        state = ensure_minimal_state({}, strict=False)
+        state["truth"] = [
+            {"type": "truth", "id": "fact_01", "title": "Fact", "trust": 0.9,
+             "content": "<fact>Paris is the capital.</fact>",
+             "time": "2026-03-01T00:00:00Z"},
+            {"type": "truth", "id": "prov_b1", "title": "Beta1", "trust": 0.8,
+             "content": '<provider api_url="http://test/b1" model="m"/>',
+             "time": "2026-03-01T00:00:01Z"},
+            {"type": "truth", "id": "prov_b2", "title": "Beta2", "trust": 0.7,
+             "content": '<provider api_url="http://test/b2" model="m"/>',
+             "time": "2026-03-01T00:00:02Z"},
+        ]
+
+        cfg = Config(state_file=Path("/tmp/test.jsonl"))
+        body = {"message": "Should we raise taxes?"}
+        runtime_cfg = {
+            "providers": {
+                "gemini": {
+                    "name": "gemini",
+                    "url": "http://test/alpha",
+                    "api_key": "k",
+                    "default_model": "test",
+                },
+            },
+            "chat": {"rag": True},
+            "ui": {"default_provider": "gemini"},
+            "user": {"name": "Tester"},
+        }
+
+        call_count = {"n": 0}
+        def mock_provider_call(url, **kwargs):
+            call_count["n"] += 1
+            resp = mock.MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {
+                "choices": [{"message": {"content": f"Response #{call_count['n']}"}}]
+            }
+            return resp
+
+        with mock.patch("response.requests.post", side_effect=mock_provider_call), \
+             mock.patch("response.PROVIDERS", {
+                "gemini": {
+                    "name": "gemini",
+                    "api_key": "k",
+                    "url": "http://test/alpha",
+                    "default_model": "test",
+                },
+             }), \
+             mock.patch("config.STATELESS_MODE", True), \
+             mock.patch("config.is_url_allowed", return_value=True):
+            text, result_state = process_chat(cfg, state, body, runtime_cfg)
+
+        convs = result_state.get("conversations", [])
+        # 1 root conversation with nested children
+        self.assertEqual(len(convs), 1, "Should have exactly one root conversation")
+
+        root = convs[0]
+        self.assertEqual(len(root["messages"]), 2,
+                         "Root should have user query + alpha prelim")
+        self.assertEqual(root["messages"][0]["role"], "user")
+        self.assertEqual(root["messages"][1]["role"], "assistant")
+        self.assertIsNone(root.get("parentId"),
+                          "Root parentId should be None")
+
+        # Root has only betas as direct children (not final)
+        betas = root.get("children", [])
+        self.assertGreaterEqual(len(betas), 2,
+                                f"Root should have >=2 beta children, got {len(betas)}")
+
+        # Each beta has 1 assistant message and final as its child
+        for beta in betas:
+            self.assertEqual(len(beta["messages"]), 1)
+            self.assertEqual(beta["messages"][0]["role"], "assistant")
+            beta_children = beta.get("children", [])
+            self.assertGreaterEqual(len(beta_children), 1,
+                                    f"Beta '{beta['id']}' should have final as child")
+
+        # Final is the same node under every beta (shared object)
+        finals = [b["children"][-1] for b in betas]
+        final_ids = set(f["id"] for f in finals)
+        self.assertEqual(len(final_ids), 1,
+                         f"All betas should share the same final node, got {final_ids}")
+
+        final = finals[0]
+        self.assertEqual(result_state["selected_conversation"], final["id"],
+                         "Selected conversation should be the final node")
+        self.assertEqual(len(final["messages"]), 1)
+        self.assertEqual(final["messages"][0]["role"], "assistant")
+
+        # Final has two parents (both betas) — true diamond
+        self.assertIsInstance(final["parentId"], list,
+                              "Final parentId should be a list (diamond merge)")
+        beta_ids = [b["id"] for b in betas]
+        self.assertEqual(sorted(final["parentId"]), sorted(beta_ids),
+                         "Final parentId should list all beta IDs")
+
+    def test_no_vote_creates_flat_conversation(self):
+        """Without providers, process_chat creates a simple linear conversation."""
+        from state import ensure_minimal_state
+        from response import process_chat
+        from config import Config
+        import unittest.mock as mock
+
+        state = ensure_minimal_state({}, strict=False)
+        state["truth"] = [
+            {"type": "truth", "id": "fact_01", "title": "Fact", "trust": 0.9,
+             "content": "<fact>Paris is the capital.</fact>",
+             "time": "2026-03-01T00:00:00Z"},
+        ]
+
+        cfg = Config(state_file=Path("/tmp/test.jsonl"))
+        body = {"message": "Hello"}
+        runtime_cfg = {
+            "providers": {
+                "gemini": {
+                    "name": "gemini",
+                    "url": "http://test/alpha",
+                    "api_key": "k",
+                    "default_model": "test",
+                },
+            },
+            "chat": {"rag": True},
+            "ui": {"default_provider": "gemini"},
+            "user": {"name": "Tester"},
+        }
+
+        def mock_call(url, **kwargs):
+            resp = mock.MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {
+                "choices": [{"message": {"content": "Hi there!"}}]
+            }
+            return resp
+
+        with mock.patch("response.requests.post", side_effect=mock_call), \
+             mock.patch("response.PROVIDERS", {
+                "gemini": {
+                    "name": "gemini",
+                    "api_key": "k",
+                    "url": "http://test/alpha",
+                    "default_model": "test",
+                },
+             }), \
+             mock.patch("config.STATELESS_MODE", True), \
+             mock.patch("config.is_url_allowed", return_value=True):
+            text, result_state = process_chat(cfg, state, body, runtime_cfg)
+
+        convs = result_state.get("conversations", [])
+        self.assertEqual(len(convs), 1)
+        root = convs[0]
+        # No voting — flat conversation with user + assistant
+        self.assertEqual(len(root["messages"]), 2)
+        self.assertEqual(root["messages"][0]["role"], "user")
+        self.assertEqual(root["messages"][1]["role"], "assistant")
+        self.assertEqual(root.get("children", []), [])
+
+
+class TestAlphaOutputDiamond(unittest.TestCase):
+    """Integration test: verify diamond pattern in output/alpha.jsonl.
+
+    Run after `make vote` to validate that the output file contains
+    the expected diamond conversation structure:
+
+           root (query + prelim)     ← 1 root, 2 messages
+          /    \\
+        beta1  beta2                 ← children of root, 1 message each
+          \\    /
+           final                     ← parentId: [beta1, beta2], 1 message, selected
+    """
+
+    OUTPUT_FILE = Path(__file__).resolve().parent.parent / "output" / "alpha.jsonl"
+
+    def test_diamond_in_output_alpha(self):
+        from state import load_state_file
+
+        if not self.OUTPUT_FILE.exists():
+            self.skipTest("output/alpha.jsonl not found — run 'make vote' first")
+
+        state = load_state_file(self.OUTPUT_FILE, strict=False)
+
+        if not state.get("conversations"):
+            self.skipTest("output/alpha.jsonl has no conversations — run 'make vote' first")
+
+        convs = state.get("conversations", [])
+        self.assertGreaterEqual(len(convs), 1,
+                                "output/alpha.jsonl should have at least one root conversation")
+
+        root = convs[0]
+
+        # Root should have 2 messages: user query + alpha preliminary
+        self.assertEqual(len(root["messages"]), 2,
+                         "Diamond root should have user query + alpha prelim")
+        self.assertEqual(root["messages"][0]["role"], "user")
+        self.assertEqual(root["messages"][1]["role"], "assistant")
+
+        # Root has only betas as direct children
+        betas = root.get("children", [])
+        self.assertGreaterEqual(len(betas), 2,
+                                f"Root should have >=2 beta children, got {len(betas)}")
+
+        # Each beta has 1 message and final as a child
+        for i, beta in enumerate(betas):
+            self.assertEqual(len(beta["messages"]), 1,
+                             f"Beta {i} should have exactly one message")
+            self.assertEqual(beta["messages"][0]["role"], "assistant",
+                             f"Beta {i} first message should be assistant")
+            self.assertGreaterEqual(len(beta.get("children", [])), 1,
+                                    f"Beta {i} should have final as child")
+
+        # Final is shared across all betas (same ID)
+        finals = [b["children"][-1] for b in betas]
+        final_ids = set(f["id"] for f in finals)
+        self.assertEqual(len(final_ids), 1,
+                         f"All betas should share the same final, got {final_ids}")
+        final = finals[0]
+
+        # Final should be the selected conversation
+        self.assertEqual(state.get("selected_conversation"), final["id"],
+                         "selected_conversation should point to the final node")
+
+        # Final has two parents (both betas) — true diamond
+        self.assertIsInstance(final.get("parentId"), list,
+                              "Final parentId should be a list (diamond merge)")
+        beta_ids = [b["id"] for b in betas]
+        self.assertEqual(sorted(final["parentId"]), sorted(beta_ids),
+                         "Final parentId should list all beta IDs")
+
+        # Root title should exist (was a prior bug)
+        self.assertTrue(root.get("title"),
+                        "Diamond root should have a non-empty title")
+
+        print(f"\n  Diamond verified: root '{root['title']}' → "
+              f"{len(betas)} betas, final '{final.get('title', '?')}'  "
+              f"(parentId: {final['parentId']})")
 
 
 if __name__ == "__main__":

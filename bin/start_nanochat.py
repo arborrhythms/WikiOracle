@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # NanoChat's chat_web module parses args at import time, so we must import
 # it *after* sys.argv is set up (which it already is from our CLI).
-from nanochat.scripts.chat_web import app, args  # noqa: E402
+from scripts.chat_web import app, args  # noqa: E402
 from nanochat_ext import mount_train_route  # noqa: E402
 
 mount_train_route(app)

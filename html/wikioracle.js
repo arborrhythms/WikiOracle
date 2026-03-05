@@ -706,7 +706,7 @@ function renderMessages() {
 
     // NanoChat server status (async — updates after fetch completes)
     var ncStatus = document.createElement("div");
-    ncStatus.className = "root-nanochat-status";
+    ncStatus.className = "root-status-line";
     ncStatus.textContent = "NanoChat: checking\u2026";
     summary.appendChild(ncStatus);
     api("GET", "/nanochat_status").then(function(data) {
@@ -722,6 +722,20 @@ function renderMessages() {
       ncStatus.textContent = "NanoChat: unknown";
       ncStatus.classList.add("status-offline");
     });
+
+    // Online training status (from /server_info)
+    var otStatus = document.createElement("div");
+    otStatus.className = "root-status-line";
+    api("GET", "/server_info").then(function(data) {
+      if (data && data.online_training) {
+        otStatus.textContent = "Online training: on";
+        otStatus.classList.add("status-online");
+      } else {
+        otStatus.textContent = "Online training: off";
+        otStatus.classList.add("status-offline");
+      }
+    });
+    summary.appendChild(otStatus);
 
     // Date info (single line, aligned with NanoChat status)
     if (state.time) {

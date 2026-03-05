@@ -173,9 +173,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     @app.route(url_prefix + "/server_info", methods=["GET"])
     def server_info():
         """Expose server-mode flags that do not require state access."""
+        ot = _CONFIG_YAML.get("server", {}).get("online_training", {})
         return jsonify({
             "stateless": config_mod.STATELESS_MODE,
             "url_prefix": url_prefix,
+            "online_training": ot.get("enabled", False) and not config_mod.STATELESS_MODE,
         })
 
     @app.route(url_prefix + "/bootstrap", methods=["GET"])

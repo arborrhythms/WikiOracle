@@ -17,6 +17,7 @@ import html as html_mod
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -1711,41 +1712,58 @@ def process_chat(
                   f"(server={len(server_truth)} entries, client={len(client_truth)} entries)")
 
             # Stage 4: train NanoChat (online SFT, if provider is wikioracle)
+            # Runs in a background thread so the chat response returns immediately —
+            # CPU training on a non-GPU machine can take many seconds.
             if provider == "wikioracle":
                 nanochat_url = cfg.base_url.rstrip("/")
                 # Build the full prompt messages for training
                 train_messages = _bundle_to_messages(bundle, provider)
                 # Append the response as the final assistant turn
                 train_messages.append({"role": "assistant", "content": response_text})
-                try:
-                    train_device = ot_cfg.get("device", "cpu")
-                    # Tag messages with XML structure (Sensation preprocessing)
-                    # so the LLM learns WikiOracle's <fact>/<feeling>/<Q>/<R> protocol.
-                    tagged_messages = preprocess_training_example(
-                        [{"role": m["role"], "content": m.get("content", "")}
-                         for m in train_messages],
-                        degree_of_truth=dot,
-                    )
-                    train_resp = requests.post(
-                        f"{nanochat_url}/train",
-                        json={
-                            "messages": tagged_messages,
-                            "degree_of_truth": dot,
-                            "device": train_device,
-                        },
-                        timeout=30,
-                    )
-                    if train_resp.ok:
-                        result = train_resp.json()
-                        loss = result.get("loss")
-                        if loss is not None:
-                            print(f"[WikiOracle] Online training: loss={loss:.4f}")
+                train_device = ot_cfg.get("device", "cpu")
+                # Snapshot everything the thread needs — no shared mutable state.
+                _train_payload = {
+                    "messages": [{"role": m["role"], "content": m.get("content", "")}
+                                 for m in train_messages],
+                    "dot": dot,
+                    "device": train_device,
+                    "url": nanochat_url,
+                }
+
+                def _do_train(payload: dict) -> None:
+                    try:
+                        tagged = preprocess_training_example(
+                            payload["messages"],
+                            degree_of_truth=payload["dot"],
+                        )
+                        resp = requests.post(
+                            f"{payload['url']}/train",
+                            json={
+                                "messages": tagged,
+                                "degree_of_truth": payload["dot"],
+                                "device": payload["device"],
+                            },
+                            timeout=300,
+                        )
+                        if resp.ok:
+                            result = resp.json()
+                            loss = result.get("loss")
+                            gain = result.get("gain")
+                            if gain is not None:
+                                print(f"[WikiOracle] Online training: gain={gain:.4f}")
+                            elif loss is not None:
+                                print(f"[WikiOracle] Online training: loss={loss:.4f}")
+                            else:
+                                print(f"[WikiOracle] Online training: {result.get('message', 'no-op')}")
                         else:
-                            print(f"[WikiOracle] Online training: {result.get('message', 'no-op')}")
-                    else:
-                        print(f"[WikiOracle] Online training: HTTP {train_resp.status_code}")
-                except requests.RequestException as exc:
-                    print(f"[WikiOracle] Online training: request failed: {exc}")
+                            print(f"[WikiOracle] Online training: HTTP {resp.status_code}")
+                    except Exception as exc:
+                        print(f"[WikiOracle] Online training (bg): {exc}")
+
+                t = threading.Thread(target=_do_train, args=(_train_payload,),
+                                     name="wikioracle-train", daemon=True)
+                t.start()
+                print("[WikiOracle] Online training: dispatched to background thread")
         except Exception as exc:
             print(f"[WikiOracle] Online training pipeline error: {exc}")
 

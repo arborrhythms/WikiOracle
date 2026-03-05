@@ -158,7 +158,7 @@ class TestOnlineTraining(unittest.TestCase):
         self.assertIn("skipped", data.get("message", ""))
 
     def test_train_negative_dot_trains(self):
-        """Negative DoT (false statement) should still train (|DoT| > 0)."""
+        """Negative DoT (false statement) should still train, returns gain."""
         resp = _req.post(f"{_URL}/train", json={
             "messages": [
                 {"role": "user", "content": "Is the earth flat?"},
@@ -169,8 +169,8 @@ class TestOnlineTraining(unittest.TestCase):
         }, timeout=30)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
-        self.assertIsInstance(data["loss"], float)
-        self.assertGreater(data["loss"], 0.0)
+        self.assertIsInstance(data["gain"], float)
+        self.assertGreater(data["gain"], 0.0)
 
     def test_train_empty_messages_skips(self):
         """Empty messages should produce a skip, not an error."""

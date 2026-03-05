@@ -81,7 +81,7 @@ VOTE_Q           ?= Lets have a vote on taxes. Should we raise them?
         report clean clean-all \
         remote remote-retrieve remote-ssh remote-status remote-logs \
         remote-deploy remote-deploy-launch \
-        wo-start wo-stop wo-restart wo-status wo-logs \
+        wo-deploy wo-start wo-stop wo-restart wo-status wo-logs \
         wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs \
         checkpoint-pull checkpoint-push \
         preprocess
@@ -139,6 +139,7 @@ help:
 	@echo "  make remote-deploy         Deploy from running EC2 to WikiOracle"
 	@echo ""
 	@echo "WikiOracle Server (NanoChat LLM):"
+	@echo "  make wo-deploy             Deploy nanochat.service to WikiOracle"
 	@echo "  make wo-start              Start NanoChat server on WikiOracle"
 	@echo "  make wo-stop               Stop NanoChat server on WikiOracle"
 	@echo "  make wo-restart            Restart NanoChat server on WikiOracle"
@@ -176,7 +177,7 @@ help:
 
 # ---- All ----------------------------------------------------------------------
 
-all: wo-chat-deploy wo-restart wo-chat-restart
+all: wo-deploy wo-chat-deploy wo-restart wo-chat-restart
 
 all-gpu: setup-gpu train-gpu eval-gpu report
 
@@ -242,6 +243,13 @@ remote-deploy:
 # --- WikiOracle Server (NanoChat LLM) -----------------------------------------
 
 WO_SSH := ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10 $(WO_USER)@$(WO_HOST)
+
+wo-deploy:
+	@echo "Deploying nanochat.service to $(WO_HOST) ..."
+	scp -i $(WO_KEY_FILE) -o ConnectTimeout=10 \
+		data/nanochat.service $(WO_USER)@$(WO_HOST):/tmp/nanochat.service
+	$(WO_SSH) "sudo cp /tmp/nanochat.service /etc/systemd/system/ && sudo systemctl daemon-reload && rm /tmp/nanochat.service"
+	@echo "nanochat.service deployed. Run 'make wo-restart' to apply."
 
 wo-start:
 	$(WO_SSH) "sudo systemctl start nanochat"

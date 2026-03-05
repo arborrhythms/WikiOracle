@@ -60,7 +60,7 @@ In the context of WikiOracle, truth is the subject of the entire project. For th
 - [`WhatIsTruth.md`](./WhatIsTruth.md) — plural truth, points of view, certainty semantics.
 - [`HierarchicalMixtureOfExperts.md`](./HierarchicalMixtureOfExperts.md) — HME logic, distributed truth vs consensus.
 - [`Authority.md`](./Authority.md) — transitive trust and authority delegation.
-- [`Implication.md`](./Implication.md) — logical operators and derived truth computation.
+- [`Logic.md`](./Logic.md) — logical operators (and/or/not/non) and derived truth computation.
 
 The key commitments: truth must remain open, auditable, and non-proprietary. It must not collapse into proprietary capital. And it must preserve real disagreement rather than averaging it away.
 

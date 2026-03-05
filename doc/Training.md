@@ -225,7 +225,7 @@ moved back to the inference device afterward.
 The server truth table is stored as `truth.jsonl` in the same JSONL
 format used for state files.  Each line is a truth entry:
 
-    {"type": "truth", "id": "...", "title": "...", "trust": 0.8,
+    {"type": "truth", "id": "...", "title": "...", "certainty": 0.8,
      "content": "<fact>...</fact>", "time": "...", "author": "user-guid"}
 
 Entry types stored: `<fact>`, `<reference>`, `<authority>`, and operators

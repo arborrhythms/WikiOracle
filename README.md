@@ -105,8 +105,13 @@ The full design and governance documentation lives in [`doc/`](doc/README.md):
 | [HierarchicalMixtureOfExperts](doc/HierarchicalMixtureOfExperts.md) | HME logic, distributed truth, conceptual spaces |
 | [Authority](doc/Authority.md) | Transitive trust and authority import format |
 | [Logic](doc/Logic.md) | Logical operators (and/or/not/non) under Strong Kleene semantics |
-| [Non](doc/non.md) | Non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity |
+| [Non](doc/Non.md) | Non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity |
+| [Voting](doc/Voting.md) | Voting protocol: dom steering, sub fan-out, cycle prevention, truth-only output |
 | [FreedomEmpathyTruth](doc/FreedomEmpathyTruth.md) | Freedom, Empathy, and Truth — safety principles |
 | [Architecture](doc/Architecture.md) | Local-first software architecture |
+| [Training](doc/Training.md) | DegreeOfTruth, Sensation preprocessing, online training pipeline |
 | [Security](doc/Security.md) | Security considerations |
 | [Installation](doc/Installation.md) | Build, deploy, and runtime instructions |
+| [BuddhistLogic](doc/BuddhistLogic.md) | Buddhist pramana theory, tetralemma, Kleene logic mapping |
+| [FutureWork](doc/FutureWork.md) | Roadmap: trust network, sentence-level prediction, mereological operations, MCP integration |
+| [WikiOracle](doc/WikiOracle.md) | Consistency-first design note |

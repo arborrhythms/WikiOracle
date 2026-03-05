@@ -9,7 +9,7 @@ Recommended reading order:
 3. `HierarchicalMixtureOfExperts.md` (HME logic, distributed truth vs consensus, conceptual spaces)
 4. `Authority.md` (transitive trust and the authority import format)
 5. `Logic.md` (logical operators: and/or/not/non under Strong Kleene semantics)
-   - `non.md` (non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity)
+   - `Non.md` (non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity)
 6. `Voting.md` (voting protocol: dom steering, sub fan-out, cycle prevention, truth-only output)
 7. `FreedomEmpathyTruth.md` (Freedom, Empathy, and Truth — safety principles)
 8. `Architecture.md` (current local-first software architecture)
@@ -17,7 +17,8 @@ Recommended reading order:
 10. `Security.md` (concrete security considerations)
 11. `Installation.md` (build, deploy, and runtime instructions)
 12. `FutureWork.md` (roadmap)
-12. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
+13. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
+14. `BuddhistLogic.md` (pramana theory, tetralemma, Kleene logic mapping)
 
 ## Core Documents (doc/)
 
@@ -27,15 +28,16 @@ Recommended reading order:
 - [`HierarchicalMixtureOfExperts.md`](./HierarchicalMixtureOfExperts.md): HME logic, Wikipedia-inspired distributed truth framing, conceptual spaces model.
 - [`Authority.md`](./Authority.md): authority blocks (`<authority>`), transitive trust, certainty scaling, namespacing, and fetch/security constraints.
 - [`Logic.md`](./Logic.md): logical operators (and/or/not/non); Strong Kleene evaluation; derived truth engine.
-- [`non.md`](./non.md): non-affirming negation — Buddhist philosophical motivation (prasajya-pratisedha), fuzzy logic interpretation, and proof of expressive necessity.
+- [`Non.md`](./Non.md): non-affirming negation — Buddhist philosophical motivation (prasajya-pratisedha), fuzzy logic interpretation, and proof of expressive necessity.
 - [`Voting.md`](./Voting.md): voting protocol — dom steering, sub fan-out, cycle prevention, `<feeling>` as truth type, truth-only output.
 - [`FreedomEmpathyTruth.md`](./FreedomEmpathyTruth.md): Freedom, Empathy, and Truth — safety principles and architectural commitments.
 - [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).
 - [`Architecture.md`](./Architecture.md): implementation architecture (Flask shim + UI + `llm.jsonl` state model).
 - [`Training.md`](./Training.md): DegreeOfTruth (−1..+1), Korzybski IS detection (Sensation preprocessing), online training pipeline, checkpoint backup/restore, Hopfield network dynamics.
 - [`Installation.md`](./Installation.md): build, deploy, and runtime instructions.
-- [`FutureWork.md`](./FutureWork.md): future directions (trust network, sentence-level prediction, conceptual-space operations).
+- [`FutureWork.md`](./FutureWork.md): future directions (trust network, sentence-level prediction, conceptual-space operations, MCP integration).
 - [`WikiOracle.md`](./WikiOracle.md): a consistency-first design note (historically labeled "OpenMind" in the text).
+- [`BuddhistLogic.md`](./BuddhistLogic.md): Buddhist pramana theory, tetralemma interpretation, Kleene logic mapping.
 
 Build, deploy, and runtime details are in [`Installation.md`](./Installation.md).
 

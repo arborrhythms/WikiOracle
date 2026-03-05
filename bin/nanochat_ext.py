@@ -175,7 +175,8 @@ def mount_train_route(app: FastAPI) -> None:
             if model_device != train_device:
                 model.to(model_device)
 
-            return {"status": "ok", "loss": loss_val}
+            key = "gain" if dot < 0 else "loss"
+            return {"status": "ok", key: loss_val}
 
         except Exception as e:
             logger.error("[TRAIN] Error: %s", e)

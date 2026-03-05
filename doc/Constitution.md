@@ -13,7 +13,7 @@ WikiOracle is the Wikipedia model applied to LLMs:
 Truthfulness is not a one-time achievement. It is an ongoing, open engineering and governance effort.
 
 Even if the reasoning machine is large and unified, the data and trust it operates on must remain distributed and under individual control.
-Epistemic ontributions are people-owned and revocable by the data providers.
+Epistemic contributions are people-owned and revocable by the data providers.
 Answers must be conditioned on what each user chooses to trust and believe to be true, not forced into a single impoverished consensus view of reality.
 
 This constitution defines the non-negotiable invariants for WikiOracle's truth system and for changes to it. Implementation details and deeper theory live in the rest of the `doc/` directory.
@@ -98,7 +98,7 @@ This constitution is intentionally compact. For the rest of the system design:
 - `WhatIsTruth.md`: plural truth, POVs, certainty semantics, and HME-style fan-out.
 - `HierarchicalMixtureOfExperts.md`: HME logic, distributed truth vs consensus, conceptual spaces framing.
 - `Authority.md`: transitive trust and authority import format/security.
-- `Implication.md`: logical operators (and/or/not) and derived truth computation.
+- `Logic.md`: logical operators (and/or/not/non) and derived truth computation.
 - `FreedomEmpathyTruth.md`: the Freedom/Empathy/Truth safety frame.
 - `Security.md`: concrete security considerations for the local-first implementation.
 - `Architecture.md`: the current software architecture (Flask shim + UI + `llm.jsonl`).

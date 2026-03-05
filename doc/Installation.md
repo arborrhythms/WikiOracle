@@ -89,9 +89,9 @@ WikiOracle includes a local Flask server (`bin/wikioracle.py`) that enables chat
 | `bin/wikioracle.py` | Local shim server (binds to `0.0.0.0:8888` with TLS). Proxies chat requests upstream and persists state to a single `llm.jsonl` file. Also supports CLI merge: `python bin/wikioracle.py merge llm_*.jsonl` |
 | `bin/config.py` | Config dataclass, YAML loader, provider registry, schema-driven YAML writer, normalization |
 | `bin/state.py` | State validation, JSONL I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction |
-| `bin/response.py` | Chat pipeline, provider coordination, state I/O |
-| `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not) |
-| `test/test_*.py` | Automated tests for state, stateless contract, prompt bundles, authority, derived truth |
+| `bin/response.py` | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4) |
+| `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth |
+| `test/test_*.py` | Automated tests for state, stateless contract, prompt bundles, authority, derived truth, DoT, sensation, online training |
 | `html/index.html` | Single-page web UI shell with chat, settings, and merge tools |
 | `llm.jsonl` | Client-owned state file (line-delimited JSON). See `data/llm_state_v2.json` for the formal schema |
 

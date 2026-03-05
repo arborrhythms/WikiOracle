@@ -1,6 +1,6 @@
-## HME Logic
+# Hierarchical Mixture of Experts
 
-The WikiOracle logic is similar to a hierarchical mixture of experts, where trust is based on truth values with associated certainty values in the range [-1, 1]. Those propositions can be static facts, references to other bodies of knowledge, or computed by other minds that are trusted and/or distrusted. Finally, truth is computed by logical operators (and/or/not under Strong Kleene semantics) over that body of propositions; see [Implication.md](./Implication.md) (Operator documentation).
+The WikiOracle logic is similar to a hierarchical mixture of experts, where trust is based on truth values with associated certainty values in the range [-1, 1]. Those propositions can be static facts, references to other bodies of knowledge, or computed by other minds that are trusted and/or distrusted. Finally, truth is computed by logical operators (and/or/not under Strong Kleene semantics) over that body of propositions; see [Logic.md](./Logic.md) (Operator documentation).
 
 ## Distributed Truth vs Consensus: 
 

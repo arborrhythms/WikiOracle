@@ -1,4 +1,4 @@
-## Voting Protocol
+# Voting Protocol
 
 The current HME fan-out is single-shot: beta providers receive the query but not the alpha's reasoning, and the alpha synthesises their responses into a final answer. The voting protocol extends this to a two-round exchange where the alpha's initial response steers the betas before the alpha makes its final evaluation.
 

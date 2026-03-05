@@ -21,11 +21,11 @@ The four operators:
 - **and(a, b, …)** = min(certainty_a, certainty_b, …) — conjunction is only as strong as the weakest operand.
 - **or(a, b, …)** = max(certainty_a, certainty_b, …) — disjunction takes the strongest operand.
 - **not(a)** = −certainty_a — negation flips the sign (affirming negation).
-- **non(a)** = 1 − 2|a| — non-affirming negation. Measures epistemic openness: how much certainty room remains. Full certainty in either direction (±1) yields −1 (fully closed); ignorance (0) yields +1 (fully open). See `doc/non.md` for the Buddhist philosophical motivation.
+- **non(a)** = 1 − 2|a| — non-affirming negation. Measures epistemic openness: how much certainty room remains. Full certainty in either direction (±1) yields −1 (fully closed); ignorance (0) yields +1 (fully open). See `doc/Non.md` for the Buddhist philosophical motivation.
 
 These operators compose freely — for instance, material implication (A → B) falls out as `or(not(A), B)`.
 
-The key insight behind `non`: Kleene logic cannot detect uncertainty; it can only transmit it. `non` introduces uncertainty as a first-class observable. If WikiOracle needs to reason about openness rather than merely propagate it, then `non` is not ornamental — it is structurally necessary. See [`doc/non.md`](non.md) for the proof and the Buddhist philosophical motivation.
+The key insight behind `non`: Kleene logic cannot detect uncertainty; it can only transmit it. `non` introduces uncertainty as a first-class observable. If WikiOracle needs to reason about openness rather than merely propagate it, then `non` is not ornamental — it is structurally necessary. See [`doc/Non.md`](Non.md) for the proof and the Buddhist philosophical motivation.
 
 ---
 

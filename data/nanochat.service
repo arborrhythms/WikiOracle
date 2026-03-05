@@ -1,0 +1,27 @@
+# NanoChat LLM Server — systemd service
+# Install: sudo cp nanochat.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable nanochat
+#
+# Runs the NanoChat inference server with WikiOracle's /train extension.
+# Listens on 127.0.0.1:8000 (internal only — not exposed via reverse proxy).
+# The WikiOracle chat shim (wikioracle-chat.service) calls it via
+# WIKIORACLE_BASE_URL=http://127.0.0.1:8000.
+
+[Unit]
+Description=NanoChat LLM Server (with WikiOracle /train extension)
+After=network.target
+
+[Service]
+Type=simple
+User=bitnami
+WorkingDirectory=/opt/bitnami/wordpress/files/wikiOracle.org/nanochat
+ExecStart=/opt/bitnami/wordpress/files/wikiOracle.org/nanochat/.venv/bin/python3 \
+    /opt/bitnami/wordpress/files/wikiOracle.org/chat/bin/start_nanochat.py \
+    --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=NANOCHAT_BASE_DIR=/opt/bitnami/wordpress/files/wikiOracle.org/nanochat
+
+[Install]
+WantedBy=multi-user.target

@@ -161,7 +161,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         import requests as _req
         url = cfg.base_url.rstrip("/")
         try:
-            resp = _req.get(url + "/health", timeout=5, verify=False)
+            health_timeout = PROVIDERS.get("wikioracle", {}).get("timeout") or 15
+            resp = _req.get(url + "/health", timeout=health_timeout, verify=False)
             if resp.ok:
                 return jsonify({"ok": True, "url": url, "status": "online"})
             return jsonify({"ok": False, "url": url, "status": f"HTTP {resp.status_code}"})

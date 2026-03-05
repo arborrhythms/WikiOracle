@@ -533,13 +533,13 @@ def main() -> int:
         print(f"    {pi}")
     print(f"  Config YAML: {_CONFIG_YAML_STATUS}")
     print(f"  Stateless  : {'ON' if config_mod.STATELESS_MODE else 'off'}")
-    ot_cfg = config_mod._CONFIG_YAML.get("server", {}).get("wikioracle", {}).get("online_training", {})
+    ot_cfg = _CONFIG_YAML.get("server", {}).get("online_training", {})
     ot_on = ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE
     ot_device = ot_cfg.get("device", "cpu")
     if ot_on:
-        print(f"  Online training : \033[32mON\033[0m (device={ot_device})")
+        print(f"  Online trn : \033[32mON\033[0m (device={ot_device})")
     else:
-        print(f"  Online training : \033[31moff\033[0m")
+        print(f"  Online trn : \033[31moff\033[0m")
     print(f"  Debug      : {'ON' if config_mod.DEBUG_MODE else 'off'}")
     print(f"  UI         : {scheme}://{cfg.bind_host}:{cfg.bind_port}{url_prefix}/")
     if cfg.bind_host == "0.0.0.0":

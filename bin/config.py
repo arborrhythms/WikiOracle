@@ -344,17 +344,16 @@ CONFIG_SCHEMA = [
     ("ui.swipe_nav_horizontal",     "Swipe left/right to navigate siblings"),
     ("ui.swipe_nav_vertical",       "Swipe up/down to navigate siblings"),
     ("server",                      "Runtime parameters (usually set via CLI flags)"),
-    ("server.wikioracle",           "WikiOracle-specific settings"),
-    ("server.wikioracle.online_training",  "Online learning from interactions (see doc/Training.md)"),
-    ("server.wikioracle.online_training.enabled",     "Enable continuous truth corpus updates"),
-    ("server.wikioracle.online_training.truth_corpus_path", "Append-only truth log"),
-    ("server.wikioracle.online_training.alpha_base",  "Base learning rate"),
-    ("server.wikioracle.online_training.alpha_min",   "Minimum learning rate floor"),
-    ("server.wikioracle.online_training.alpha_max",   "Maximum learning rate ceiling"),
-    ("server.wikioracle.online_training.merge_rate",  "Slow-moving average rate for truth merge"),
-    ("server.wikioracle.online_training.dissonance_enabled", "Detect and penalize contradictions"),
-    ("server.wikioracle.online_training.device",  "Training device: auto | cpu | cuda (default: cpu)"),
-    ("server.wikioracle.online_training.operators_dynamic_enabled", "Load custom operators from operators/operators.jsonl"),
+    ("server.online_training",  "Online learning from interactions (see doc/Training.md)"),
+    ("server.online_training.enabled",     "Enable continuous truth corpus updates"),
+    ("server.online_training.truth_corpus_path", "Append-only truth log"),
+    ("server.online_training.alpha_base",  "Base learning rate"),
+    ("server.online_training.alpha_min",   "Minimum learning rate floor"),
+    ("server.online_training.alpha_max",   "Maximum learning rate ceiling"),
+    ("server.online_training.merge_rate",  "Slow-moving average rate for truth merge"),
+    ("server.online_training.dissonance_enabled", "Detect and penalize contradictions"),
+    ("server.online_training.device",  "Training device: auto | cpu | cuda (default: cpu)"),
+    ("server.online_training.operators_dynamic_enabled", "Load custom operators from operators/operators.jsonl"),
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
     ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
@@ -608,18 +607,7 @@ def _normalize_config(cfg_yaml: dict) -> dict:
     chat.setdefault("url_fetch", False)
     chat.setdefault("confirm_actions", False)
     server = cfg.setdefault("server", {})
-    # Migrate legacy top-level online_training → server.wikioracle.online_training
-    if "online_training" in cfg:
-        wo = server.setdefault("wikioracle", {})
-        wo.setdefault("online_training", cfg.pop("online_training"))
-    # Migrate legacy top-level wikioracle → server.wikioracle
-    if "wikioracle" in cfg:
-        legacy_wo = cfg.pop("wikioracle")
-        wo = server.setdefault("wikioracle", {})
-        for k, v in legacy_wo.items():
-            wo.setdefault(k, v)
-    wo = server.setdefault("wikioracle", {})
-    ot = wo.setdefault("online_training", {})
+    ot = server.setdefault("online_training", {})
     ot.setdefault("enabled", False)
     ot.setdefault("truth_corpus_path", "data/truth.jsonl")
     ot.setdefault("alpha_base", 0.01)

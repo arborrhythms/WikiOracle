@@ -283,7 +283,7 @@ wo-chat-deploy:
 	@echo "Deploying WikiOracle chat shim to $(WO_HOST):$(WO_CHAT_DEST) ..."
 	rsync -avz --delete --exclude .venv \
 		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
-		--files-from=<(git ls-files -- bin html data requirements.txt; echo $(WO_CHAT_EXTRA)) \
+		--files-from=<(git ls-files -- bin html data test requirements.txt; echo $(WO_CHAT_EXTRA)) \
 		. $(WO_USER)@$(WO_HOST):$(WO_CHAT_DEST)/
 	$(WO_SSH) "sudo cp $(WO_CHAT_DEST)/data/wikioracle-chat.service /etc/systemd/system/ && sudo systemctl daemon-reload"
 	@echo "Chat shim deployed. Run 'make wo-chat-restart' to apply."

@@ -211,7 +211,7 @@ and training happen after the response is delivered.
 ### Device Configuration
 
 Online training runs on the device specified by
-`wikioracle.online_training.device` in `config.yaml`.  Valid values:
+`server.online_training.device` in `config.yaml`.  Valid values:
 
 - `cpu` (default) — safe for the WikiOracle production server
 - `cuda` — use NVIDIA GPU if available

@@ -74,17 +74,16 @@ server:
   url_prefix: ""
   # --- Online Training -------------------------------------------------------
   # Continuous learning from user interactions (see doc/Training.md).
-  wikioracle:
-    online_training:
-      enabled: false                        # enable continuous truth corpus updates
-      truth_corpus_path: "data/truth.jsonl" # append-only truth log
-      alpha_base: 0.01                      # base learning rate
-      alpha_min: 0.001                      # minimum learning rate floor
-      alpha_max: 0.1                        # maximum learning rate ceiling
-      merge_rate: 0.1                       # slow-moving average rate for truth merge
-      device: cpu                           # training device: auto | cpu | cuda
-      dissonance_enabled: true              # detect and penalize contradictions
-      operators_dynamic_enabled: true       # load custom operators from operators/operators.jsonl
+  online_training:
+    enabled: false                        # enable continuous truth corpus updates
+    truth_corpus_path: "data/truth.jsonl" # append-only truth log
+    alpha_base: 0.01                      # base learning rate
+    alpha_min: 0.001                      # minimum learning rate floor
+    alpha_max: 0.1                        # maximum learning rate ceiling
+    merge_rate: 0.1                       # slow-moving average rate for truth merge
+    device: cpu                           # training device: auto | cpu | cuda
+    dissonance_enabled: true              # detect and penalize contradictions
+    operators_dynamic_enabled: true       # load custom operators from operators/operators.jsonl
   # URL prefixes allowed for authority and dynamic provider fetches.
   # file:// URLs are always blocked.  Only https:// URLs matching one of
   # these prefixes are permitted.

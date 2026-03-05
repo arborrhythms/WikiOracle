@@ -1669,8 +1669,7 @@ def process_chat(
     # ── Post-response pipeline: DoT + truth merge + online training ──
     # These stages run after the user has received the response.
     server_cfg = runtime_cfg.get("server", {})
-    wo_cfg = server_cfg.get("wikioracle", {})
-    ot_cfg = wo_cfg.get("online_training", {})
+    ot_cfg = server_cfg.get("online_training", {})
     if ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE:
         try:
             client_truth = state.get("truth") or []

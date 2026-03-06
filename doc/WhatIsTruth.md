@@ -122,7 +122,7 @@ That is the foundation for WikiOracle.
 
 WikiOracle implements a Hierarchical Mixture of Experts (HME) architecture for evaluating claims. The system operates on two file types:
 
-- **State files** (`.xml`): contain conversations, trust entries, and context (WikiOracle State format, validated by `data/state.xsd`). Legacy `.jsonl` files are auto-detected and supported for migration.
+- **State files** (`.xml`): contain conversations, trust entries, and context (WikiOracle State format, validated by `data/state.xsd`).
 - **Config files** (`.xml`): contain provider credentials, chat settings, and retrieval parameters (WikiOracle Config format, validated by `data/config.xsd`).
 
 ### Certainty: Kleene Ternary Logic
@@ -227,3 +227,15 @@ The identity-collapse detector covers: email addresses, phone numbers,
 @handles, usernames, IP addresses, GPS/DMS coordinates, street addresses,
 specific clock times and ISO timestamps, and named individuals combined
 with temporal or spatial prepositions.
+
+---
+
+## See also
+
+- [Constitution.md](./Constitution.md) — non-negotiable invariants for truth and governance.
+- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — HME logic, distributed truth, conceptual spaces.
+- [Logic.md](./Logic.md) — logical operators (and/or/not/non) under Strong Kleene semantics.
+- [BuddhistLogic.md](./BuddhistLogic.md) — pramana theory, tetralemma, Kleene logic mapping (anumāna/pratyakṣa).
+- [Entanglement.md](./Entanglement.md) — worldline entanglement policy and spatiotemporal persistence.
+- [Authority.md](./Authority.md) — transitive trust and authority import format.
+- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — Freedom, Empathy, and Truth safety principles.

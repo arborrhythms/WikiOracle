@@ -17,7 +17,7 @@ Browser  ──HTTP──▸  wikioracle.py  ──HTTP──▸  Upstream LLM
 |---|---|---|
 | Server | `bin/wikioracle.py` | Flask app — `/chat`, `/state`, `/merge`, `/config`, `/bootstrap` endpoints; reads/writes `state.xml` |
 | Config | `bin/config.py` | Config dataclass, XML loader, provider registry, schema-driven XML writer, normalization |
-| State library | `bin/state.py` | Pure-Python tree operations, XML and JSONL serialisation, legacy migration |
+| State library | `bin/state.py` | Pure-Python tree operations, XML serialisation, merge with deterministic ID suffixing |
 | Response | `bin/response.py` | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4) |
 | Truth | `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, spacetime fact classification, PII detection |
 | Sensation | `bin/sensation.py` | Preprocessing: Korzybski IS detection, XML tagging (`<fact>`/`<feeling>`/`<Q>`/`<R>` with `<place>`/`<time>` child elements), corpus conversion |
@@ -75,8 +75,6 @@ State is persisted as XML (WikiOracle State format, validated by `data/state.xsd
   </truth>
 </state>
 ```
-
-JSONL is supported as a legacy format for migration (auto-detected by file extension or content prefix).
 
 ### In memory — nested tree
 
@@ -246,7 +244,7 @@ When no conversation is selected (root view), a placeholder prompts the user to 
 
 ```
 state.xml on disk
-    ↓  [xml_to_state / jsonl_to_state]
+    ↓  [xml_to_state]
 In-memory state with nested conversation tree
     ↓  [GET /state]
 Client receives state JSON
@@ -299,9 +297,7 @@ Key functions:
 | `state_to_xml(state)` | Serialise nested tree → XML string |
 | `xml_to_state(text)` | Parse XML → nested tree |
 | `atomic_write_xml(path, state)` | Atomic XML file write (temp + fsync + rename) |
-| `state_to_jsonl(state)` | Serialise nested tree → JSONL lines (legacy) |
-| `jsonl_to_state(lines)` | Parse JSONL → nested tree (legacy) |
-| `load_state_file(path)` | Auto-detect XML or JSONL by extension/content |
+| `load_state_file(path)` | Load state from XML file |
 | `find_conversation(convs, id)` | Recursive tree lookup |
 | `get_ancestor_chain(convs, id)` | Walk up to root, return list of ancestors |
 | `get_context_messages(convs, id)` | Ancestor chain messages in order (for LLM context) |
@@ -309,3 +305,18 @@ Key functions:
 | `add_child_conversation(convs, parent_id, child)` | Insert a new branch |
 | `remove_conversation(convs, id)` | Delete a subtree |
 | `ensure_minimal_state(state)` | Fill in missing fields with defaults |
+
+---
+
+## See also
+
+- [Constitution.md](./Constitution.md) — the invariants this architecture implements.
+- [Security.md](./Security.md) — CSP, CORS, API keys, and file system safety.
+- [Training.md](./Training.md) — the online training pipeline (Stages 2–4) in `response.py`.
+- [Logic.md](./Logic.md) — operators evaluated in the dynamic truth phase.
+- [Authority.md](./Authority.md) — authority resolution in the HME pipeline.
+- [Voting.md](./Voting.md) — voting protocol extending the chat pipeline.
+- [Entanglement.md](./Entanglement.md) — client-owned state and data persistence policies.
+- [Config.md](./Config.md) — configuration format and settings reference.
+- [State.md](./State.md) — state file format, conversation tree, truth table.
+- [Installation.md](./Installation.md) — deployment and runtime configuration.

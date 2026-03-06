@@ -367,6 +367,67 @@ function showErrorDialog(title, message) {
   return dlg;
 }
 
+// ─── Symmetry rejection dialog (Ethics.md §5-8) ───
+// Shows rejected truth entries with option to convert to feelings.
+function showSymmetryDialog(rejected) {
+  if (!rejected || !rejected.length) return;
+  var items = rejected.map(function(r) {
+    var plain = (r.content || "").replace(/<[^>]+>/g, "").trim();
+    return (
+      '<div style="margin:0 0 1rem;padding:0.75rem;border:1px solid var(--border);border-radius:6px;">' +
+        '<p style="margin:0 0 0.5rem;"><strong>Rejected:</strong> ' + escapeHtml(plain) + '</p>' +
+        '<p style="margin:0 0 0.5rem;font-size:0.9em;color:var(--text-secondary);">' + escapeHtml(r.reason || "") + '</p>' +
+        '<div style="display:flex;gap:0.5rem;">' +
+          '<button class="btn btn-primary" data-sym-action="feeling" data-sym-id="' + escapeHtml(r.id || "") + '">Record as Feeling</button>' +
+          '<button class="btn" data-sym-action="discard" data-sym-id="' + escapeHtml(r.id || "") + '">Discard</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join("");
+  var body =
+    '<p style="margin:0 0 1rem;">Your statement expresses a perspective but cannot be admitted as a ' +
+    'universal truth because it produces asymmetric harm when identities are exchanged. ' +
+    'Would you like to record it as a feeling instead?</p>' +
+    items +
+    '<div class="settings-actions"><button class="btn" data-dialog-close>Close</button></div>';
+  var dlg = _createDialog("symmetryDialog_" + Date.now(), "Symmetry Check", body, null, function() {
+    if (dlg.overlay.parentNode) dlg.overlay.parentNode.removeChild(dlg.overlay);
+  });
+  // Handle button clicks
+  dlg.overlay.addEventListener("click", function(e) {
+    var btn = e.target.closest("[data-sym-action]");
+    if (!btn) {
+      if (e.target === dlg.overlay) dlg.close();
+      return;
+    }
+    var action = btn.getAttribute("data-sym-action");
+    var entryId = btn.getAttribute("data-sym-id");
+    if (action === "feeling" && entryId && state && Array.isArray(state.truth)) {
+      // Convert fact → feeling in local truth
+      for (var i = 0; i < state.truth.length; i++) {
+        if (state.truth[i].id === entryId) {
+          var content = state.truth[i].content || "";
+          // Rewrap <fact ...>text</fact> → <feeling>text</feeling>
+          content = content.replace(/<fact[^>]*>([\s\S]*?)<\/fact>/g, "<feeling>$1</feeling>");
+          state.truth[i].content = content;
+          delete state.truth[i].trust;
+          break;
+        }
+      }
+    } else if (action === "discard" && entryId && state && Array.isArray(state.truth)) {
+      state.truth = state.truth.filter(function(e) { return e.id !== entryId; });
+    }
+    // Remove the item card from the dialog
+    var card = btn.closest("div[style]");
+    if (card) card.remove();
+    // If no more items, close the dialog
+    if (!dlg.overlay.querySelector("[data-sym-action]")) dlg.close();
+    _persistState();
+  });
+  requestAnimationFrame(function() { dlg.overlay.classList.add("active"); });
+  return dlg;
+}
+
 // ─── Context editor (floating modal, triggered from root node) ───
 function _toggleContextEditor() {
   let overlay = document.getElementById("contextOverlay");
@@ -671,7 +732,7 @@ function _openTruthEditor() {
       not: '<not/>',
       non: '<non/>',
       provider: '<provider api_url="https://api.example.com" model="model_name"/>',
-      authority: '<authority url="https://example.com/kb.jsonl"/>'
+      authority: '<authority url="https://example.com/kb.xml"/>'
     };
 
     // Brief description shown above the editor for each truth type
@@ -684,7 +745,7 @@ function _openTruthEditor() {
       not:       "NOT \u2014 negation of a child entry.",
       non:       "NON \u2014 non-affirming negation (weakens trust toward zero).",
       provider:  "Provider \u2014 an LLM API endpoint.",
-      authority: "Authority \u2014 a remote knowledge base (JSONL URL)."
+      authority: "Authority \u2014 a remote knowledge base (XML URL)."
     };
 
     function _setTruthEditLabel(tag) {
@@ -884,7 +945,7 @@ function _truthRenderList() {
   const entries = Array.isArray(state.truth) ? state.truth : [];
 
   if (entries.length === 0) {
-    container.innerHTML = '<div class="trust-empty">No truth entries. Use <b>Add</b> or <b>Open</b> a .jsonl file.</div>';
+    container.innerHTML = '<div class="trust-empty">No truth entries. Use <b>Add</b> or <b>Open</b> a state file.</div>';
     return;
   }
 

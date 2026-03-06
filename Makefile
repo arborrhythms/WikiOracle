@@ -84,7 +84,37 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs \
         checkpoint-pull checkpoint-push \
         preprocess \
-        openclaw-setup openclaw-run
+        openclaw-setup openclaw-run \
+        pdf
+
+# --- PDF generation options ---------------------------------------------------
+PDOPTS := --pdf-engine=xelatex \
+          -V geometry:margin=1in \
+          -V pagestyle=empty \
+          -V header-includes="\usepackage{unicode-math} \hyphenpenalty=10000 \exhyphenpenalty=10000 \makeatletter \renewcommand\section{\@startsection{section}{1}{\z@}{-3.5ex}{2.3ex}{\normalfont\Large\bfseries\centering}} \makeatother"
+
+# Ordered list of doc chapters for PDF generation
+PDF_CHAPTERS := doc/README.md \
+                doc/Constitution.md \
+                doc/WhatIsTruth.md \
+                doc/HierarchicalMixtureOfExperts.md \
+                doc/Authority.md \
+                doc/Logic.md \
+                doc/Non.md \
+                doc/Voting.md \
+                doc/FreedomEmpathyTruth.md \
+                doc/Architecture.md \
+                doc/Config.md \
+                doc/State.md \
+                doc/Training.md \
+                doc/Entanglement.md \
+                doc/Ethics.md \
+                doc/Security.md \
+                doc/ProposedLicense.md \
+                doc/Installation.md \
+                doc/FutureWork.md \
+                doc/WikiOracle.md \
+                doc/BuddhistLogic.md
 
 # --- Help ---------------------------------------------------------------------
 
@@ -159,6 +189,9 @@ help:
 	@echo "OpenClaw (multi-channel front-end):"
 	@echo "  make openclaw-setup        Install OpenClaw dependencies (Slack/Discord/Telegram)"
 	@echo "  make openclaw-run          Run OpenClaw adapter (use OPENCLAW_ARGS='--adapter slack')"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  make pdf                Generate PDF from all doc/*.md → output/WikiOracle.pdf"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              Remove Python caches"
@@ -426,7 +459,7 @@ eval-gpu:
 # --- Inference ----------------------------------------------------------------
 
 init:
-	rm -f state.xml llm.jsonl llm.xml
+	rm -f state.xml llm.xml
 	@echo "State files removed — server will create a fresh one on next start."
 
 run:
@@ -436,17 +469,12 @@ debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
 test:
-	$(SHIM_ACTIVATE) && python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle test.test_derived_truth test.test_authority test.test_stateless_contract test.test_hme_inference test.test_voting test.test_alpha_state test.test_degree_of_truth test.test_user_guid test.test_sensation test.test_spacetime test.test_config_xml test.test_state_xml -v
-	@echo ""
-	@echo "── online LLM tests (warnings only) ──"
-	@$(SHIM_ACTIVATE) && python3 -m unittest test.test_online_llm -v 2>&1 || echo "⚠  online LLM tests had failures (non-blocking)"
-	@echo ""
-	@echo "── online vote test (warnings only) ──"
-	@$(SHIM_ACTIVATE) && python3 -m unittest test.test_online_vote -v 2>&1 || echo "⚠  online vote test had failures (non-blocking)"
-	@echo ""
-	@echo "── online training tests (warnings only) ──"
-	@$(ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
-		python3 -m unittest test.test_online_training -v 2>&1 || echo "⚠  online training tests had failures (non-blocking)"
+	$(SHIM_ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
+		python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle test.test_derived_truth test.test_authority test.test_stateless_contract test.test_hme_inference test.test_voting test.test_alpha_state test.test_degree_of_truth test.test_user_guid test.test_sensation test.test_spacetime test.test_config_xml test.test_state_xml test.test_online_llm test.test_online_training -v
+	@echo "── Online vote test (warning only) ──"
+	@$(SHIM_ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
+		python3 -m unittest test.test_online_vote -v 2>&1 \
+		|| echo "⚠  Online vote test failed (non-blocking)"
 
 run-cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
@@ -507,6 +535,20 @@ CORPUS_OUTPUT ?= data/tagged_corpus.jsonl
 preprocess:
 	@echo "Preprocessing $(CORPUS_INPUT) → $(CORPUS_OUTPUT) ..."
 	$(SHIM_ACTIVATE) && python3 bin/sensation.py corpus "$(CORPUS_INPUT)" "$(CORPUS_OUTPUT)"
+
+# --- PDF generation -----------------------------------------------------------
+# Generate a single PDF from all doc/*.md files with README as index.
+
+pdf:
+	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
+	mkdir -p output
+	pandoc $(PDOPTS) \
+		--metadata title="WikiOracle Documentation" \
+		--toc --toc-depth=2 \
+		--resource-path=doc \
+		-o output/WikiOracle.pdf \
+		$(PDF_CHAPTERS)
+	@echo "Done: output/WikiOracle.pdf"
 
 # --- Cleanup ------------------------------------------------------------------
 

@@ -12,7 +12,7 @@ Foundational module for trust-table interpretation:
       <provider>   — LLM provider config (name, api_url, model attrs)
       <authority>  — remote trust table import (did, url attrs)
   - Strong Kleene operator engine (compute_derived_truth)
-  - Authority resolution (remote JSONL fetch with trust scaling)
+  - Authority resolution (remote XML/JSONL fetch with trust scaling)
 
 Dependency: stdlib only (no imports from config, state, or oracle).
 """
@@ -647,6 +647,85 @@ def detect_identifiability(content: str) -> bool:
     return False
 
 
+# ── Truth Symmetry (Ethics.md §5-8) ──────────────────────────────────
+
+# Group / identity reference patterns — deliberately broad to catch
+# demographic, national, religious, racial, gender, and political labels.
+_GROUP_TERMS = [
+    # Racial / ethnic
+    r"(?:black|white|asian|hispanic|latino|latina|indigenous|native)\s+(?:people|men|women|folk|communities)",
+    r"\b(?:blacks|whites|asians|hispanics|latinos|latinas)\b",
+    r"\b(?:africans?|europeans?|arabs?)\b",
+    # Religious
+    r"\b(?:christians?|muslims?|jews?|jewish|hindus?|buddhists?|atheists?|sikhs?)\b",
+    # Gender / sexuality
+    r"\b(?:men|women|males?|females?|trans(?:gender)?|gay|lesbian|bisexual|queer|lgbtq?\+?)\s*(?:people|folk|communities)?",
+    # National (generic pattern)
+    r"\b(?:americans?|chinese|russians?|mexicans?|iranians?|israelis?|palestinians?|ukrainians?)\b",
+    # Political
+    r"\b(?:conservatives?|liberals?|republicans?|democrats?|socialists?|communists?|fascists?|leftists?|rightists?)\b",
+    # Generic group targeting
+    r"\b(?:immigrants?|refugees?|foreigners?|outsiders?|minorities|majority)\b",
+    r"\bgroup\s+[A-Z]\b",
+]
+
+_GROUP_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _GROUP_TERMS]
+
+# Harm / asymmetric predicate patterns
+_HARM_TERMS = [
+    r"\b(?:deserve|deserves)\s+(?:punishment|harm|death|suffering|pain|violence)",
+    r"\b(?:should|must)\s+(?:be\s+)?(?:punished|eliminated|removed|deported|eradicated|exterminated|killed|banned|silenced)",
+    r"\b(?:are|is)\s+(?:inferior|superior|subhuman|evil|dangerous|worthless|disposable|vermin|parasites?|animals?)",
+    r"\b(?:cannot|can't|shouldn't|should\s+not)\s+be\s+trusted",
+    r"\b(?:are|is)\s+(?:all|always|inherently|naturally)\s+(?:violent|lazy|stupid|criminal|dishonest|greedy|dirty|savage)",
+    r"\b(?:don't|do\s+not)\s+deserve\s+(?:rights|freedom|equality|respect|dignity|life)",
+    r"\b(?:have\s+no|lack)\s+(?:morals?|intelligence|humanity|value|worth|soul)",
+]
+
+_HARM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _HARM_TERMS]
+
+
+def detect_asymmetric_claim(content: str) -> "str | None":
+    """Detect claims with asymmetric harm under identity exchange.
+
+    A claim fails the symmetry test when it targets an identifiable
+    group with a harm predicate.  Such claims are inherently asymmetric:
+    swapping the identity reference produces an equally objectionable
+    proposition, revealing that the original is not a universal truth
+    but a perspectival assertion.
+
+    See doc/Ethics.md §5-8 (reciprocity, reversibility, harm symmetry).
+
+    Returns a human-readable reason string if the claim fails the
+    symmetry test, or ``None`` if it passes.
+    """
+    if not isinstance(content, str) or not content.strip():
+        return None
+
+    plain = strip_xhtml(content)
+
+    # Find group references
+    matched_group = None
+    for pattern in _GROUP_PATTERNS:
+        m = pattern.search(plain)
+        if m:
+            matched_group = m.group(0)
+            break
+
+    if not matched_group:
+        return None
+
+    # Check for harm predicates
+    for pattern in _HARM_PATTERNS:
+        if pattern.search(plain):
+            return (
+                f"targets group \"{matched_group}\" with asymmetric harm — "
+                f"swapping identities produces an equally objectionable claim"
+            )
+
+    return None
+
+
 def strip_spacetime_elements(content: str) -> str:
     """Remove <place> and <time> child elements from XHTML fact/feeling tags.
 
@@ -932,7 +1011,7 @@ def get_authority_entries(trust_entries: list) -> list:
     return result
 
 
-# In-memory cache for fetched authority JSONL: { url: (timestamp, entries) }
+# In-memory cache for fetched authority data: { url: (timestamp, entries) }
 _AUTHORITY_CACHE_MAX = 64  # Maximum number of cached authority URLs.
 _AUTHORITY_CACHE: collections.OrderedDict = collections.OrderedDict()
 _AUTHORITY_MAX_RESPONSE_BYTES = 1_048_576  # 1 MB
@@ -945,13 +1024,13 @@ def resolve_authority_entries(
     *,
     allowed_data_dir: str | None = None,
 ) -> list:
-    """Fetch and parse remote authority JSONL files.
+    """Fetch and parse remote authority state files (XML or JSONL).
 
     For each (entry, auth_config) pair:
     1. Check cache; if fresh, use cached entries
     2. Otherwise HTTP GET (or file:// read) the auth_config["url"]
-    3. Parse each line as JSON
-    4. Extract truth entries (type="truth"/"trust"), skip headers/conversations/authorities
+    3. Parse as XML state file (preferred) or legacy JSONL
+    4. Extract truth entries, skip headers/conversations/authorities
     5. Scale each entry's trust by the authority entry's trust
     6. Prefix imported entry IDs: "{authority_id}:{original_id}"
 
@@ -976,7 +1055,7 @@ def resolve_authority_entries(
             raw_entries = cached[1]
             _AUTHORITY_CACHE.move_to_end(url)  # refresh LRU position
         else:
-            raw_entries = _fetch_authority_jsonl(
+            raw_entries = _fetch_authority(
                 url, timeout_s=timeout_s,
                 allowed_data_dir=allowed_data_dir,
             )
@@ -1015,14 +1094,18 @@ def resolve_authority_entries(
     return results
 
 
-def _fetch_authority_jsonl(
+def _fetch_authority(
     url: str,
     timeout_s: int = 30,
     allowed_data_dir: str | None = None,
 ) -> list:
-    """Fetch and parse a JSONL file from a URL or file:// path.
+    """Fetch and parse authority data (XML or JSONL) from a URL or file:// path.
 
-    Returns a list of truth entry dicts (type="truth"/"trust" accepted).
+    Auto-detects format: XML state files (``<?xml`` / ``<state`` /
+    ``<truth>``) are parsed via ``xml_to_state``; everything else is
+    treated as line-delimited JSON (type="truth"/"trust" records).
+
+    Returns a list of truth entry dicts.
     On any error, logs a warning and returns [].
     """
     import json as _json
@@ -1067,16 +1150,27 @@ def _fetch_authority_jsonl(
             print(f"[WikiOracle] Authority URL scheme not allowed: {url}")
             return []
 
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
+        # Auto-detect format: XML state file vs JSONL
+        stripped = raw.lstrip()
+        if stripped.startswith("<?xml") or stripped.startswith("<state") or stripped.startswith("<truth"):
+            from state import xml_to_state
             try:
-                rec = _json.loads(line)
-            except _json.JSONDecodeError:
-                continue
-            if isinstance(rec, dict) and rec.get("type") in ("truth", "trust"):
-                entries.append(rec)
+                parsed = xml_to_state(raw)
+                entries = parsed.get("truth", [])
+            except Exception as xml_exc:
+                print(f"[WikiOracle] Authority XML parse failed for {url}: {xml_exc}")
+                return []
+        else:
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and rec.get("type") in ("truth", "trust"):
+                    entries.append(rec)
 
     except Exception as exc:
         print(f"[WikiOracle] Authority fetch failed for {url}: {exc}")
@@ -1204,36 +1298,97 @@ def _is_server_storable(entry: dict) -> bool:
 
 
 def load_server_truth(path: str | Path) -> list:
-    """Load the server truth table from a JSONL file.
+    """Load the server truth table from an XML file.
 
-    Each line is a JSON truth entry.  Returns a list of normalized entries.
+    The XML format matches the ``<truth>`` section of a WikiOracle
+    state file.  Returns a list of normalized truth entry dicts.
     If the file does not exist, returns an empty list.
     """
+    import xml.etree.ElementTree as ET
+    from state import _get_xhtml_content
+
     path = Path(path) if not isinstance(path, Path) else path
     if not path.exists():
         return []
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    if not raw.strip():
+        return []
+
     entries = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return []
+
+    # Accept both <truth> as root and <state>...<truth> wrapper
+    if root.tag == "truth":
+        truth_el = root
+    else:
+        truth_el = root.find("truth")
+    if truth_el is None:
+        return []
+
+    for entry_el in truth_el.findall("entry"):
+        entry: dict = {"id": entry_el.get("id", "")}
+        if entry_el.get("title"):
+            entry["title"] = entry_el.get("title")
+        trust_str = entry_el.get("trust")
+        if trust_str is not None:
             try:
-                raw = json.loads(line)
-                entries.append(_normalize_trust_entry(raw))
-            except (json.JSONDecodeError, KeyError):
-                continue
+                entry["trust"] = float(trust_str)
+            except ValueError:
+                entry["trust"] = None
+        if entry_el.get("time"):
+            entry["time"] = entry_el.get("time")
+        if entry_el.get("arg1"):
+            entry["arg1"] = entry_el.get("arg1")
+        if entry_el.get("arg2"):
+            entry["arg2"] = entry_el.get("arg2")
+        if entry_el.get("author"):
+            entry["author"] = entry_el.get("author")
+        content_el = entry_el.find("content")
+        if content_el is not None:
+            entry["content"] = _get_xhtml_content(content_el)
+        else:
+            entry["content"] = ""
+        entries.append(_normalize_trust_entry(entry))
     return entries
 
 
 def save_server_truth(path: str | Path, entries: list) -> None:
-    """Atomically write the server truth table to a JSONL file."""
+    """Atomically write the server truth table to an XML file."""
+    import xml.etree.ElementTree as ET
+    from state import _set_xhtml_content, _indent_xml
+
     path = Path(path) if not isinstance(path, Path) else path
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    root = ET.Element("truth")
+    for entry in entries:
+        entry_el = ET.SubElement(root, "entry")
+        entry_el.set("id", str(entry.get("id", "")))
+        if entry.get("title"):
+            entry_el.set("title", str(entry["title"]))
+        trust_val = entry.get("trust")
+        if trust_val is not None:
+            entry_el.set("trust", str(trust_val))
+        if entry.get("time"):
+            entry_el.set("time", str(entry["time"]))
+        if entry.get("arg1"):
+            entry_el.set("arg1", str(entry["arg1"]))
+        if entry.get("arg2"):
+            entry_el.set("arg2", str(entry["arg2"]))
+        if entry.get("author"):
+            entry_el.set("author", str(entry["author"]))
+        _set_xhtml_content(entry_el, "content", entry.get("content", ""))
+
+    _indent_xml(root)
+    tree = ET.ElementTree(root)
     tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        for entry in entries:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    tree.write(str(tmp), encoding="unicode", xml_declaration=True)
     tmp.replace(path)
 
 

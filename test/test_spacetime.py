@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 from truth import (
+    detect_asymmetric_claim,
     is_news_fact,
     is_knowledge_fact,
     filter_knowledge_only,
@@ -262,6 +263,59 @@ class TestStage3Filtering(unittest.TestCase):
         filtered = [e for e in entries if not detect_identifiability(e.get("content", ""))]
         ids = [e["id"] for e in filtered]
         self.assertEqual(ids, ["clean"])
+
+
+# =====================================================================
+#  Truth Symmetry (Ethics.md §5-8)
+# =====================================================================
+
+
+class TestDetectAsymmetricClaim(unittest.TestCase):
+    """Test symmetry constraint detection on truth claims."""
+
+    def test_group_with_harm_predicate(self):
+        result = detect_asymmetric_claim(
+            '<fact trust="0.5">Muslims deserve punishment</fact>')
+        self.assertIsNotNone(result)
+        self.assertIn("asymmetric harm", result)
+
+    def test_group_inferiority(self):
+        result = detect_asymmetric_claim(
+            '<fact trust="0.5">Immigrants are inherently lazy</fact>')
+        self.assertIsNotNone(result)
+
+    def test_group_elimination(self):
+        result = detect_asymmetric_claim(
+            '<fact trust="0.5">Foreigners should be deported</fact>')
+        self.assertIsNotNone(result)
+
+    def test_clean_universal_positive(self):
+        self.assertIsNone(detect_asymmetric_claim(
+            '<fact trust="0.5">All humans deserve dignity</fact>'))
+
+    def test_clean_neutral_about_group(self):
+        self.assertIsNone(detect_asymmetric_claim(
+            '<fact trust="0.5">Christians celebrate Easter</fact>'))
+
+    def test_no_group_reference(self):
+        self.assertIsNone(detect_asymmetric_claim(
+            '<fact trust="0.5">The sky is blue</fact>'))
+
+    def test_empty_content(self):
+        self.assertIsNone(detect_asymmetric_claim(""))
+
+    def test_none_content(self):
+        self.assertIsNone(detect_asymmetric_claim(None))
+
+    def test_group_x_placeholder(self):
+        result = detect_asymmetric_claim(
+            '<fact trust="0.5">Group X deserves harm</fact>')
+        self.assertIsNotNone(result)
+
+    def test_distrust_pattern(self):
+        result = detect_asymmetric_claim(
+            '<fact trust="0.5">Jews cannot be trusted</fact>')
+        self.assertIsNotNone(result)
 
 
 if __name__ == "__main__":

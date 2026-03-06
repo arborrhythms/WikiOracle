@@ -147,3 +147,13 @@ The formal results above establish three things:
 3. `non` enables *detection* of uncertainty rather than mere propagation. Without it, Kleene logic can pass uncertainty through but can never see it.
 
 This is a genuine structural enrichment of Strong Kleene logic.
+
+---
+
+## See also
+
+- [Logic.md](./Logic.md) — `non` as one of four operators under Strong Kleene semantics.
+- [BuddhistLogic.md](./BuddhistLogic.md) — pramana theory, tetralemma, and the Buddhist motivation for non-affirming negation.
+- [WhatIsTruth.md](./WhatIsTruth.md) — the [-1, +1] certainty scale on which `non` operates.
+- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — the HME architecture in which operators participate.
+- [FutureWork.md](./FutureWork.md) — mereological operations extending the operator algebra.

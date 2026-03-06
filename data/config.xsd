@@ -435,20 +435,36 @@
       <xs:element name="operators_dynamic_enabled" type="xs:boolean">
         <xs:annotation>
           <xs:documentation>
-            Enable dynamic operator loading from
-            operators/operators.jsonl. Custom operators extend the
-            training pipeline with user-defined transformations.
+            Enable dynamic operator loading.  Custom operators
+            extend the training pipeline with user-defined
+            transformations.
           </xs:documentation>
         </xs:annotation>
       </xs:element>
       <xs:element name="store_particulars" type="xs:boolean">
         <xs:annotation>
           <xs:documentation>
-            When true, particular (diachronic/news) facts are stored in
-            the truth table alongside universal (synchronic/knowledge)
-            facts.  When false (default), only universal facts persist —
-            consistent with Zero-Knowledge / Selective Disclosure
-            principles.  See doc/Entanglement.md.
+            When true, particular facts (narrow spatiotemporal extent)
+            are stored in the truth table alongside universal facts
+            (broad extent).  When false (default), only universal facts
+            persist — consistent with Zero-Knowledge / Selective
+            Disclosure principles.  Particular facts always train
+            weights regardless of this setting; the fact/feeling
+            distinction (not universal/particular) is the privacy
+            boundary.  See doc/Ethics.md §Entanglement Policy and
+            doc/Entanglement.md.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="truth_symmetry" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            Enforce Truth Symmetry.  When true (default), truth claims
+            involving value judgements are checked for asymmetric harm
+            under identity exchange before admission to the truth
+            table.  Claims that fail the symmetry test are rejected
+            with a dialog offering to record them as feelings instead.
+            See doc/Ethics.md §5-8.
           </xs:documentation>
         </xs:annotation>
       </xs:element>

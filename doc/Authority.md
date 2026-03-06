@@ -24,7 +24,7 @@ Authority entries are trust entries whose `content` field contains an `<authorit
   "id": "a_aristotle_01",
   "title": "Aristotle's Knowledge Base",
   "certainty": 0.85,
-  "content": "<authority id=\"a_aristotle_01\" certainty=\"0.85\" title=\"Aristotle's Knowledge Base\" did=\"did:web:aristotle.example\" url=\"https://aristotle.example/kb.jsonl\"/>",
+  "content": "<authority id=\"a_aristotle_01\" certainty=\"0.85\" title=\"Aristotle's Knowledge Base\" did=\"did:web:aristotle.example\" url=\"https://aristotle.example/kb.xml\"/>",
   "time": "2026-02-27T00:00:01Z"
 }
 ```
@@ -58,14 +58,20 @@ This preserves the [-1, +1] Kleene range and naturally dampens remote beliefs pr
 
 ---
 
-## Abbreviated JSONL
+## Remote state format
 
-The remote state file may be **abbreviated** — it does not need to contain a header or conversation records. Lines that are valid JSON with `"type": "truth"` are extracted; all other lines (headers, conversations, malformed JSON) are skipped.
+The remote state file is an XML document containing a `<truth>` section. It may be a full WikiOracle State file (with `<state>` root) or an abbreviated file with just a `<truth>` root:
 
-Example abbreviated file:
-```jsonl
-{"type":"truth","id":"remote_01","title":"Water is wet","certainty":1.0,"content":"<fact id=\"remote_01\" certainty=\"1.0\" title=\"Water is wet\">Water is wet.</fact>","time":"2026-02-27T00:00:01Z"}
-{"type":"truth","id":"remote_02","title":"Fire is hot","certainty":0.9,"content":"<fact id=\"remote_02\" certainty=\"0.9\" title=\"Fire is hot\">Fire is hot.</fact>","time":"2026-02-27T00:00:02Z"}
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<truth>
+  <entry id="remote_01" title="Water is wet" trust="1.0" time="2026-02-27T00:00:01Z">
+    <content><fact trust="1.0">Water is wet.</fact></content>
+  </entry>
+  <entry id="remote_02" title="Fire is hot" trust="0.9" time="2026-02-27T00:00:02Z">
+    <content><fact trust="0.9">Fire is hot.</fact></content>
+  </entry>
+</truth>
 ```
 
 ---
@@ -84,7 +90,7 @@ This means the same remote entry imported through different authorities will hav
 
 ## Fetch and caching
 
-- Remote JSONL files are fetched via HTTP GET (for `https://` URLs) or local file read (for `file://` within the allowed data directory)
+- Remote state files are fetched via HTTP GET (for `https://` URLs) or local file read (for `file://` within the allowed data directory)
 - Results are cached in memory with a TTL equal to the `refresh` field (default: 3600 seconds)
 - If a fetch fails, the error is logged and the authority is skipped (no crash)
 - The cache is keyed by URL
@@ -94,9 +100,9 @@ This means the same remote entry imported through different authorities will hav
 ## Security considerations
 
 - **URL scheme restriction**: Only `https://` and `file://` (within `ALLOWED_DATA_DIR`) are permitted
-- **Max response size**: Fetched JSONL is capped at 1 MB
+- **Max response size**: Fetched data is capped at 1 MB
 - **Max entries per authority**: At most 1000 trust entries are imported per authority
-- **No recursive authorities**: If a remote JSONL contains `<authority>` entries, they are skipped. There is no transitive fetch chain — only one level of authority delegation is supported.
+- **No recursive authorities**: If a remote state file contains `<authority>` entries, they are skipped. There is no transitive fetch chain — only one level of authority delegation is supported.
 - **Rate limiting**: The in-memory cache prevents excessive re-fetching within the refresh interval
 
 ---
@@ -105,9 +111,21 @@ This means the same remote entry imported through different authorities will hav
 
 | File | Function |
 |---|---|
-| `bin/truth.py` | `parse_authority_block()`, `ensure_authority_id()`, `get_authority_entries()`, `resolve_authority_entries()`, `_fetch_authority_jsonl()` |
+| `bin/truth.py` | `parse_authority_block()`, `ensure_authority_id()`, `get_authority_entries()`, `resolve_authority_entries()`, `_fetch_authority()` |
 | `bin/response.py` | Excludes `<authority>` entries from RAG; resolves authority entries and includes their scaled trust entries as `kind="authority"` sources |
 | `client/util.js` | Trust editor UI: unified XHTML textarea with authority template, authority badge display |
 | `test/hme.xml` | Test data with example authority entry (`auth_test_01`) |
 | `test/hme_authority_fragment.xml` | Test fragment XML with two remote trust entries |
 | `tests/test_authority.py` | Unit tests covering parsing, ID generation, resolution, certainty scaling, and security |
+
+---
+
+## See also
+
+- [Constitution.md](./Constitution.md) — Section V defines authority delegation invariants.
+- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — authorities as part of the HME pipeline.
+- [Logic.md](./Logic.md) — certainty scaling follows Kleene [-1, +1] semantics.
+- [Security.md](./Security.md) — broader security considerations for the local-first system.
+- [Entanglement.md](./Entanglement.md) — persistence policies governing imported entries.
+- [BuddhistLogic.md](./BuddhistLogic.md) — authorities map to testimony (āgama/śabda) in pramana theory.
+- [FutureWork.md](./FutureWork.md) — the "Network of Trust" roadmap extends authority delegation.

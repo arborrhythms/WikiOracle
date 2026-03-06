@@ -85,11 +85,11 @@ class StatelessContractBase(unittest.TestCase):
 
         # Use a temp dir for state file (should never be written in stateless)
         self._tmpdir = tempfile.mkdtemp()
-        self._state_path = Path(self._tmpdir) / "llm.jsonl"
+        self._state_path = Path(self._tmpdir) / "state.xml"
         # Write initial seed state so _load_state doesn't fail for /bootstrap
         initial = ensure_minimal_state({}, strict=False)
-        from state import atomic_write_jsonl
-        atomic_write_jsonl(self._state_path, initial, reject_symlinks=False)
+        from state import atomic_write_xml
+        atomic_write_xml(self._state_path, initial, reject_symlinks=False)
 
         self.cfg = Config(state_file=self._state_path)
         self.app = create_app(self.cfg, url_prefix="")
@@ -161,7 +161,7 @@ class TestStatelessChatNoDiskWrites(StatelessContractBase):
     """Verify stateless /chat does NOT write to disk."""
 
     def test_no_state_file_write(self):
-        """Stateless chat must not write llm.jsonl to disk."""
+        """Stateless chat must not write state.xml to disk."""
         mtime_before = self._state_path.stat().st_mtime
 
         # Mock _call_nanochat to avoid network call
@@ -303,10 +303,10 @@ class TestStatefulChatUnaffected(unittest.TestCase):
         config_mod.DEBUG_MODE = False
 
         self._tmpdir = tempfile.mkdtemp()
-        self._state_path = Path(self._tmpdir) / "llm.jsonl"
+        self._state_path = Path(self._tmpdir) / "state.xml"
         initial = ensure_minimal_state({}, strict=False)
-        from state import atomic_write_jsonl
-        atomic_write_jsonl(self._state_path, initial, reject_symlinks=False)
+        from state import atomic_write_xml
+        atomic_write_xml(self._state_path, initial, reject_symlinks=False)
 
         self.cfg = Config(state_file=self._state_path)
         self.app = create_app(self.cfg, url_prefix="")

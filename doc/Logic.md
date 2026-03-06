@@ -112,7 +112,7 @@ The classification is stored in the `kind` attribute of `<fact>` tags:
 <fact trust="0.7" kind="news" spacetime="Paris, 2026-03-05">The Eiffel Tower is lit up tonight.</fact>
 ```
 
-Knowledge facts are persisted to the server truth table (`truth.jsonl`) because they represent universal claims.  News facts are session-only because they are spatiotemporally bound — persisting them risks "worldline capture" where an observer could reconstruct a user's physical trajectory through time and space.
+Knowledge facts are persisted to the server truth table (`truth.xml`) because they represent universal claims.  News facts are session-only because they are spatiotemporally bound — persisting them risks "worldline capture" where an observer could reconstruct a user's physical trajectory through time and space.
 
 The `detect_identifiability()` function in `bin/truth.py` provides an additional safety layer by scanning content for PII patterns (email addresses, phone numbers, GPS coordinates, street addresses, etc.) that could identify a user through spatiotemporal observation.
 
@@ -135,4 +135,15 @@ The current operator set covers propositional logic under Strong Kleene semantic
 | `bin/response.py` | Excludes operator entries from RAG via `_has_operator_tag()`; uses `_derived_certainty` for ranking |
 | `client/util.js` | Trust editor UI: unified XHTML textarea with template dropdown (AND/OR/NOT/NON), IDs visible for `<child id>` references |
 | `test/hme.xml` | Test data with AND, OR, NOT, NON operator entries |
-| `test/test_derived_truth.py` | Unit tests covering parsing, ID generation, and/or/not/non evaluation, chaining, cycles, and hme.jsonl integration |
+| `test/test_derived_truth.py` | Unit tests covering parsing, ID generation, and/or/not/non evaluation, chaining, cycles, and hme.xml integration |
+
+---
+
+## See also
+
+- [Non.md](./Non.md) — full treatment of non-affirming negation: Buddhist motivation, fuzzy interpretation, completeness proof.
+- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — operators as part of the HME pipeline.
+- [WhatIsTruth.md](./WhatIsTruth.md) — Kleene certainty semantics and plural truth model.
+- [BuddhistLogic.md](./BuddhistLogic.md) — tetralemma, fact kinds (anumāna/pratyakṣa), feelings as "neither" position.
+- [Entanglement.md](./Entanglement.md) — knowledge vs news classification corresponds to universal/particular channels.
+- [Training.md](./Training.md) — feelings excluded from training; fact classification affects persistence.

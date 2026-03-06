@@ -5,7 +5,7 @@ Tests:
   - Deterministic from same name
   - Different names → different GUIDs
   - GUID format (valid UUID)
-  - GUID stored in state and round-trips through JSONL
+  - GUID stored in state and round-trips through XML
 """
 
 import os
@@ -17,7 +17,7 @@ import uuid
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 from truth import user_guid, WIKIORACLE_UUID_NS
-from state import ensure_minimal_state, state_to_jsonl, jsonl_to_state
+from state import ensure_minimal_state, state_to_xml, xml_to_state
 
 
 class TestUserGuid(unittest.TestCase):
@@ -80,21 +80,21 @@ class TestUserGuid(unittest.TestCase):
 
 class TestUserGuidInState(unittest.TestCase):
 
-    def test_guid_round_trips_through_jsonl(self):
-        """user_guid stored at root level round-trips through JSONL."""
+    def test_guid_round_trips_through_xml(self):
+        """user_guid stored at root level round-trips through XML."""
         state = ensure_minimal_state({})
         state["user_guid"] = user_guid("Alec")
 
-        jsonl = state_to_jsonl(state)
-        restored = jsonl_to_state(jsonl)
+        xml = state_to_xml(state)
+        restored = xml_to_state(xml)
 
         assert restored.get("user_guid") == user_guid("Alec")
 
     def test_guid_absent_if_not_set(self):
         """State without user_guid set does not inject a fake one."""
         state = ensure_minimal_state({})
-        jsonl = state_to_jsonl(state)
-        restored = jsonl_to_state(jsonl)
+        xml = state_to_xml(state)
+        restored = xml_to_state(xml)
         # user_guid should not be present or should be None/empty
         assert not restored.get("user_guid")
 

@@ -116,3 +116,14 @@ If freedom, empathy, and truth grow together, development stabilizes.
 If truth grows openly under these constraints, it strengthens society rather than destabilizing it.
 
 WikiOracle must therefore be architected not merely as a system of prediction, but as a shared epistemic commons.
+
+---
+
+## See also
+
+- [Ethics.md](./Ethics.md) — ethical AI through truth architecture, symmetry constraints, LFGC.
+- [Entanglement.md](./Entanglement.md) — data sovereignty implemented through entanglement avoidance.
+- [Security.md](./Security.md) — security implications of local-first design.
+- [ProposedLicense.md](./ProposedLicense.md) — open licensing implementing freedom and anti-capture.
+- [Training.md](./Training.md) — anti-capture mechanisms in the training pipeline.
+- [Voting.md](./Voting.md) — preserving diverse perspectives through multi-provider voting.

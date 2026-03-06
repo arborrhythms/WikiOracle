@@ -5,11 +5,11 @@
 To avoid **worldline entanglement**, the system separates knowledge
 into three channels, each with a different persistence policy:
 
-  Data type          Truth table   Train weights   Session only
-  ------------------ ------------- --------------- --------------
-  synchronic facts   ✔             ✔               ✔
-  diachronic facts   optional      ✔               ✔
-  feelings           ✘             ✘               ✔
+| Data type | Truth table | Train weights | Session only |
+|-----------|-------------|---------------|--------------|
+| universal facts | $\checkmark$ | $\checkmark$ | $\checkmark$ |
+| particular facts | optional | $\checkmark$ | $\checkmark$ |
+| feelings | $\times$ | $\times$ | $\checkmark$ |
 
 This preserves empirical learning while preventing historical worldline
 capture. The system **learns from events but never stores worldline
@@ -19,7 +19,7 @@ histories**.
 
 ## Three Channels
 
-### Synchronic Knowledge (Database)
+### Universal Knowledge (Database)
 
 Stored knowledge should be **spatiotemporally broad generalizations** —
 propositions whose validity extends over a large subspace of spacetime.
@@ -36,9 +36,9 @@ Criterion:
 
     remove(entity,time) → proposition still meaningful
 
-### Diachronic Knowledge (Training Input)
+### Particular Knowledge (Training Input)
 
-Diachronic statements are **observations tied to narrow spatiotemporal
+Particular statements are **observations tied to narrow spatiotemporal
 subspaces** — specific events, measurements, or comparisons.
 
 Examples:
@@ -47,14 +47,14 @@ Examples:
 -   the temperature yesterday was 20°C
 -   model A outperformed model B
 
-  Action                     Reason
-  -------------------------- ----------------------------------
-  train weights              they contain empirical evidence
-  truth table (optional)     user controls via `store_particulars`
+| Action | Reason |
+|---|---|
+| train weights | they contain empirical evidence |
+| truth table (optional) | user controls via `store_particulars` |
 
 Pipeline:
 
-    diachronic facts → pattern extraction → weight update
+    particular facts → pattern extraction → weight update
 
 Weights encode **statistical structure**, not specific historical
 events.
@@ -69,11 +69,11 @@ Examples:
 -   I feel unsafe
 -   this explanation feels clear
 
-  Use                       Allowed
-  ------------------------- ---------
-  evaluation of responses   ✔
-  truth tables              ✘
-  training weights          ✘
+| Use | Allowed |
+|---|---|
+| evaluation of responses | $\checkmark$ |
+| truth tables | $\times$ |
+| training weights | $\times$ |
 
 This avoids turning subjective states into truth claims.
 
@@ -81,7 +81,7 @@ This avoids turning subjective states into truth claims.
 
 ## Spatiotemporal Extent
 
-The synchronic/diachronic distinction is not a binary between "eternal"
+The universal/particular distinction is not a binary between "eternal"
 and "momentary." All times and places are **ranges, not points** —
 every proposition occupies a spatiotemporal subspace that is larger or
 smaller, never infinite or infinitesimal.
@@ -94,9 +94,9 @@ yesterday was 20°C" is *narrow*: it holds at one place, one day.
 
 The policy table operationalizes this gradient:
 
--   **Broad extent** (synchronic) → truth table + training.
+-   **Broad extent** (universal) → truth table + training.
     The proposition is stable enough to serve as a reasoning premise.
--   **Narrow extent** (diachronic) → training + optionally truth table.
+-   **Narrow extent** (particular) → training + optionally truth table.
     The observation carries empirical signal.  Whether it persists as a
     stored premise is the user's choice (`store_particulars` in
     config.xml, default false).  Storing particulars supports communal
@@ -105,19 +105,19 @@ The policy table operationalizes this gradient:
     Subjective reports have no spatiotemporal generalizability.
 
 The criterion `remove(entity, time) → proposition still meaningful`
-is a heuristic for identifying broad extent. When a synchronic-looking
+is a heuristic for identifying broad extent. When a universal-looking
 fact is later discovered to be narrower than assumed, it should be
-reclassified as diachronic.
+reclassified as particular.
 
 ------------------------------------------------------------------------
 
 ## Resulting Architecture
 
-  Mode       Function                   Pipeline
-  ---------- -------------------------- ------------------------------------------
-  knowing    synchronic structure       synchronic rules → truth table → reasoning
-  learning   diachronic evidence        diachronic observations → abstraction → weights
-  valuing    feelings                   feelings → response evaluation
+| Mode | Function | Pipeline |
+|------|----------|----------|
+| knowing | universal structure | universal rules → truth table → reasoning |
+| learning | particular evidence | particular observations → abstraction → weights |
+| valuing | feelings | feelings → response evaluation |
 
 ------------------------------------------------------------------------
 
@@ -161,7 +161,7 @@ flattened into a single parameter space during training and a single
 context window during inference.
 
 The policy table enforces the separation structurally. The rule that
-diachronic facts train weights but enter the truth table only at the
+particular facts train weights but enter the truth table only at the
 user's discretion (`store_particulars` in config.xml) is the key
 architectural move — the system can learn from experience without
 accumulating a *personal history* unless the user explicitly opts in.
@@ -177,7 +177,7 @@ epistemic capture: trained preferences about what is "helpful" reshape
 what the model treats as true.
 
 **The abstraction boundary is load-bearing.** The pipeline
-`diachronic → abstraction → weights` depends on the quality of the
+`particular → abstraction → weights` depends on the quality of the
 abstraction step. Too faithful, and it preserves worldline information
 in the weights (entanglement through the back door). Too aggressive,
 and it discards genuine empirical signal. The hard work happens at this
@@ -192,3 +192,18 @@ personal relationship history is a system that can be emotionally
 captured, and emotional capture is the most effective vector for
 epistemic capture. The session-only constraint on feelings is the
 architecture's most important safety boundary.
+
+---
+
+## See also
+
+- [Training.md](./Training.md) — the online training pipeline governed by entanglement policy.
+- [Logic.md](./Logic.md) — knowledge/news fact classification and feelings as "neither" position.
+- [Constitution.md](./Constitution.md) — Section VII (local-first data) and Section VIII (safety).
+- [Security.md](./Security.md) — worldline capture as a security concern; PII detection.
+- [Ethics.md](./Ethics.md) — entanglement-resistant design as an ethical mechanism.
+- [BuddhistLogic.md](./BuddhistLogic.md) — universal/particular maps to anumāna/pratyakṣa.
+- [Config.md](./Config.md) — `store_particulars` and online training configuration.
+- [State.md](./State.md) — state file format and client-owned data model.
+- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — data sovereignty and privacy as freedom.
+- [FutureWork.md](./FutureWork.md) — point-free spacetime extending the extent model.

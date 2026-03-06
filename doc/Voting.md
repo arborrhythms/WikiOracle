@@ -101,3 +101,14 @@ The current `evaluate_providers()` in `response.py` implements the single-shot f
 The cycle constraint is enforced by threading a `call_chain` (list of alpha provider IDs) through `evaluate_providers()`. Before a beta responds, it checks whether its own ID appears in the chain; if so, it stays silent. A beta that initiates its own nested vote appends its ID to the chain before calling its own betas.
 
 The output format is amended to encourage providers to append trust statements as escaped XHTML, so that the alpha's final synthesis has a richer trust surface to draw from.
+
+---
+
+## See also
+
+- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — single-shot HME fan-out that voting extends.
+- [Architecture.md](./Architecture.md) — implementation: `response.py` and `evaluate_providers()`.
+- [Logic.md](./Logic.md) — truth types (fact, feeling, reference) and their semantics.
+- [Constitution.md](./Constitution.md) — plurality and dispute preservation commitments.
+- [BuddhistLogic.md](./BuddhistLogic.md) — truth types map to Buddhist epistemological categories.
+- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — voting preserves diverse perspectives (freedom).

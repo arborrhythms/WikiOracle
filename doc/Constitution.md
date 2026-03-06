@@ -102,4 +102,10 @@ This constitution is intentionally compact. For the rest of the system design:
 - `FreedomEmpathyTruth.md`: the Freedom/Empathy/Truth safety frame.
 - `Security.md`: concrete security considerations for the local-first implementation.
 - `Architecture.md`: the current software architecture (Flask shim + UI + `state.xml`).
+- `Voting.md`: voting protocol — dom steering, sub fan-out, cycle prevention, truth-only output.
+- `Training.md`: DegreeOfTruth, Sensation preprocessing, online training pipeline.
+- `Entanglement.md`: worldline entanglement policy, spatiotemporal persistence, three-channel separation.
+- `Ethics.md`: ethical AI through truth architecture, symmetry constraints, LFGC.
+- `ProposedLicense.md`: licensing architecture (GPL-3.0, CC BY-SA 4.0, Apache-2.0).
+- `BuddhistLogic.md`: pramana theory, tetralemma, Kleene logic mapping.
 - `FutureWork.md`: roadmap items (trust network, sentence-level prediction, conceptual-space operations).

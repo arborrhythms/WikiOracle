@@ -11,7 +11,7 @@ WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:88
 
 **Trust entries** may contain user-authored facts, external source references, and provider configuration. Entries with high certainty influence every LLM response via RAG retrieval.
 
-**Exports** (`llm_*.jsonl` files) are full snapshots of state. They should be treated as sensitive if conversations contain private information.
+**Exports** (`llm_*.xml` files) are full snapshots of state. They should be treated as sensitive if conversations contain private information.
 
 ## 2. API Keys
 
@@ -75,9 +75,22 @@ The server applies CORS headers only for requests whose `Origin` header matches 
 ## 6. File System
 
 - **Symlink rejection:** By default (`WIKIORACLE_REJECT_SYMLINKS=true`), the server refuses to read or write state files that are symlinks, preventing path-traversal attacks via symlinked state files.
-- **Static file serving** is restricted to a whitelist of safe extensions (`.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.jsonl`) and path-traversal is checked (`str(fp).startswith(str(ui_dir.resolve()))`).
+- **Static file serving** is restricted to a whitelist of safe extensions (`.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.xml`) and path-traversal is checked (`str(fp).startswith(str(ui_dir.resolve()))`).
 - **State size limit:** `max_state_bytes` (default 5 MB) prevents unbounded growth from malicious imports.
 
 ## 7. Third-party Scraping
 
 Scraping of publicly-accessible data is inevitable. However, a network of truth prevents capture. In one sense, it cannot be captured because it is a dynamic network of trust, overlaid on people and resources that trust one another, and we chose not to trust any authoritarian sources of knowledge. On a practical level,  anyone who tries to appropriate the truth of the network entails doing so in a distributed way (which preserves the multicultural component), since monolithic capture of that truth will cause consensus to collapse it.
+
+---
+
+## See also
+
+- [Architecture.md](./Architecture.md) — system architecture with CSP, CORS, and reverse proxy details.
+- [Constitution.md](./Constitution.md) — Section VII (local-first data and auditability).
+- [Authority.md](./Authority.md) — authority-specific security: URL restrictions, size limits.
+- [Entanglement.md](./Entanglement.md) — worldline capture prevention and PII detection.
+- [Config.md](./Config.md) — API key precedence and allowed URL configuration.
+- [State.md](./State.md) — state file format and symlink rejection.
+- [Ethics.md](./Ethics.md) — ethical foundation for no-worldline-storage, local-first design.
+- [Installation.md](./Installation.md) — deployment and environment variable configuration.

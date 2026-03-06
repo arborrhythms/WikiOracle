@@ -121,3 +121,14 @@ provenance tracking, anomaly detection, and multi-stakeholder oversight.
   rationale or explicitly mark a boundary/uncertainty.
 
 - Publish a “consistency report” and changelog for major releases.
+
+---
+
+## See also
+
+- [Constitution.md](./Constitution.md) — invariant commitments that consistency-first reasoning implements.
+- [Training.md](./Training.md) — DegreeOfTruth and anti-capture mechanisms for online learning.
+- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — public epistemic infrastructure and safety framework.
+- [Ethics.md](./Ethics.md) — consistency-first design as an ethical principle.
+- [WhatIsTruth.md](./WhatIsTruth.md) — plural truth and explicit dispute handling.
+- [Entanglement.md](./Entanglement.md) — capture resistance through entanglement avoidance.

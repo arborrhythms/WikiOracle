@@ -122,7 +122,7 @@ class Config:
     max_state_bytes: int = 5_000_000  # Hard upper bound for serialized state size.
     max_context_chars: int = 40_000  # Context rewrite cap for merge appendix generation.
     reject_symlinks: bool = True  # Refuse symlinked state files for safer local ownership.
-    auto_merge_on_start: bool = True  # Auto-import llm_*.jsonl/.json files at startup.
+    auto_merge_on_start: bool = True  # Auto-import llm_*.xml/.json files at startup.
     auto_context_rewrite: bool = False  # Enable delta-based context append during merges.
     merged_suffix: str = ".merged"  # Suffix applied to files after successful import.
     allowed_origins: set = field(default_factory=lambda: {
@@ -451,8 +451,9 @@ CONFIG_SCHEMA = [
     ("server.online_training.merge_rate",  "Slow-moving average rate for truth merge"),
     ("server.online_training.dissonance_enabled", "Detect and penalize contradictions"),
     ("server.online_training.device",  "Training device: auto | cpu | cuda (default: cpu)"),
-    ("server.online_training.operators_dynamic_enabled", "Load custom operators from operators/operators.jsonl"),
-    ("server.online_training.store_particulars", "Store particular (diachronic/news) facts in truth table (see doc/Entanglement.md)"),
+    ("server.online_training.operators_dynamic_enabled", "Load custom operators"),
+    ("server.online_training.store_particulars", "Store particular facts in truth table (see doc/Ethics.md §Entanglement Policy)"),
+    ("server.online_training.truth_symmetry", "Enforce Truth Symmetry (see doc/Ethics.md)"),
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
     ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
@@ -720,7 +721,7 @@ def _normalize_config(cfg_data: dict) -> dict:
     server = cfg.setdefault("server", {})
     ot = server.setdefault("online_training", {})
     ot.setdefault("enabled", False)
-    ot.setdefault("truth_corpus_path", "data/truth.jsonl")
+    ot.setdefault("truth_corpus_path", "data/truth.xml")
     ot.setdefault("alpha_base", 0.01)
     ot.setdefault("alpha_min", 0.001)
     ot.setdefault("alpha_max", 0.1)
@@ -729,6 +730,7 @@ def _normalize_config(cfg_data: dict) -> dict:
     ot.setdefault("dissonance_enabled", True)
     ot.setdefault("operators_dynamic_enabled", True)
     ot.setdefault("store_particulars", False)
+    ot.setdefault("truth_symmetry", True)
     server.setdefault("stateless", False)
     server.setdefault("url_prefix", "")
     server.setdefault("allowed_urls", _default_allowed_urls())
@@ -803,6 +805,6 @@ def parse_args() -> argparse.Namespace:
                         help="URL path prefix (e.g. /chat) for reverse-proxy deployments")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("serve", help="Run Flask shim server (default)")
-    merge_parser = sub.add_parser("merge", help="Merge llm_*.jsonl files into state")
+    merge_parser = sub.add_parser("merge", help="Merge llm_*.xml files into state")
     merge_parser.add_argument("incoming", nargs="+", help="incoming llm state files")
     return parser.parse_args()

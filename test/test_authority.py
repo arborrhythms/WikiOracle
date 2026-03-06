@@ -27,7 +27,7 @@ from truth import (
 def _make_temp_entries(records):
     """Create a temp JSONL file and return (path, entries_list).
 
-    The returned entries_list is what _fetch_authority_jsonl would return
+    The returned entries_list is what _fetch_authority would return
     for valid truth/trust records.
     """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
@@ -175,7 +175,7 @@ def test_resolve_authority_entries_with_mock():
         )
     ]
 
-    with patch("truth._fetch_authority_jsonl", return_value=mock_entries):
+    with patch("truth._fetch_authority", return_value=mock_entries):
         results = resolve_authority_entries(authority_entries, timeout_s=5)
     assert len(results) == 1
     auth_entry, scaled = results[0]
@@ -204,7 +204,7 @@ def test_resolve_authority_id_namespacing():
             {"url": "https://example.com/kb.jsonl", "refresh": 3600},
         )
     ]
-    with patch("truth._fetch_authority_jsonl", return_value=mock_entries):
+    with patch("truth._fetch_authority", return_value=mock_entries):
         results = resolve_authority_entries(authority_entries, timeout_s=5)
     scaled = results[0][1]
     assert scaled[0]["id"] == "a_ns_test:t_fact_42"
@@ -225,7 +225,7 @@ def test_resolve_authority_skips_nested_authorities():
             {"url": "https://example.com/kb.jsonl", "refresh": 3600},
         )
     ]
-    with patch("truth._fetch_authority_jsonl", return_value=mock_entries):
+    with patch("truth._fetch_authority", return_value=mock_entries):
         results = resolve_authority_entries(authority_entries, timeout_s=5)
     scaled = results[0][1]
     assert len(scaled) == 1  # nested authority should be skipped
@@ -246,7 +246,7 @@ def test_resolve_authority_abbreviated_jsonl():
             {"url": "https://example.com/kb.jsonl", "refresh": 3600},
         )
     ]
-    with patch("truth._fetch_authority_jsonl", return_value=mock_entries):
+    with patch("truth._fetch_authority", return_value=mock_entries):
         results = resolve_authority_entries(authority_entries, timeout_s=5)
     scaled = results[0][1]
     assert len(scaled) == 1
@@ -283,7 +283,7 @@ def test_resolve_authority_negative_trust():
             {"url": "https://example.com/kb.jsonl", "refresh": 3600},
         )
     ]
-    with patch("truth._fetch_authority_jsonl", return_value=mock_entries):
+    with patch("truth._fetch_authority", return_value=mock_entries):
         results = resolve_authority_entries(authority_entries, timeout_s=5)
     scaled = results[0][1]
     # -0.5 * 0.8 = -0.4
@@ -307,13 +307,13 @@ def test_resolve_authority_caching():
     ]
 
     # First call: populates cache
-    with patch("truth._fetch_authority_jsonl", return_value=mock_entries):
+    with patch("truth._fetch_authority", return_value=mock_entries):
         results1 = resolve_authority_entries(authority_entries, timeout_s=5)
     assert len(results1[0][1]) == 1
     assert url in _AUTHORITY_CACHE
 
-    # Second call: _fetch_authority_jsonl returns [] but cache should still provide data
-    with patch("truth._fetch_authority_jsonl", return_value=[]):
+    # Second call: _fetch_authority returns [] but cache should still provide data
+    with patch("truth._fetch_authority", return_value=[]):
         results2 = resolve_authority_entries(authority_entries, timeout_s=5)
     assert len(results2[0][1]) == 1
 
@@ -380,9 +380,9 @@ def test_hme_authority_resolution():
 
     authority_entries = get_authority_entries(entries)
 
-    # Mock _fetch_authority_jsonl since the spec fixture uses file:// URLs
+    # Mock _fetch_authority since the spec fixture uses file:// URLs
     # which are blocked in production.
-    with patch("truth._fetch_authority_jsonl", return_value=fragment_entries):
+    with patch("truth._fetch_authority", return_value=fragment_entries):
         results = resolve_authority_entries(authority_entries, timeout_s=5)
 
     # Find the result for auth_test_01

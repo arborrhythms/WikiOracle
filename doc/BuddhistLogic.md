@@ -180,3 +180,14 @@ consistent with the logical structure described by Dharmakīrti.
 
 Plural frames coexist, inference operates within frames,
 and non-affirming negation preserves epistemic openness.
+
+---
+
+## See also
+
+- [Non.md](./Non.md) — full formal treatment of non-affirming negation (prasajya-pratisedha).
+- [Logic.md](./Logic.md) — Kleene operators and operator evaluation under Strong Kleene semantics.
+- [WhatIsTruth.md](./WhatIsTruth.md) — knowledge/news distinction using anumāna/pratyakṣa.
+- [Entanglement.md](./Entanglement.md) — universal/particular channels map to inferential/perceptual truth.
+- [Authority.md](./Authority.md) — authorities as testimony (āgama/śabda).
+- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — providers/authorities/operators in the epistemic pipeline.

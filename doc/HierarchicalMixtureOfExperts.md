@@ -46,3 +46,14 @@ See [Architecture.md](./Architecture.md) for the implementation details of the c
 ## Conceptual Spaces
 
 The architecture of WikiOracle is designed as a conceptual space, in the sense of Gardenfors. Conceptual spaces are similarity spaces, where similar concepts occupy regions of space close to one another. As spaces also of truth, they are amenable to logical calculation. This is similar to existing LLM architecture: Embedding spaces encode meaningful vectors in the same way, and separating hypersurfaces (the neurons of the network) categorize that space in numerous ways, allowing calculation on that space. Summing over multiplicative connections provides the basic Boolean architectural primitives {or, and} in a continuous and learnable way, which allows logical computation on that space. However, it allows such voluminous computation that the syntax and semantics are dense compared to the English language. The trust computed by the contextual structure provided here is explicit, subject to interpretation, and much higher level. The values of certainty propagate, giving not only a next-token prediction but a measure of confidence in the computed answer.
+
+---
+
+## See also
+
+- [WhatIsTruth.md](./WhatIsTruth.md) — plural truth model, POVs, and certainty semantics.
+- [Voting.md](./Voting.md) — voting protocol extending single-shot fan-out to multi-round deliberation.
+- [Authority.md](./Authority.md) — transitive trust and authority import format.
+- [Non.md](./Non.md) — non-affirming negation extending the Kleene operator set.
+- [Training.md](./Training.md) — DegreeOfTruth and online training pipeline.
+- [FutureWork.md](./FutureWork.md) — mereological operations on conceptual spaces.

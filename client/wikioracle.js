@@ -1042,6 +1042,10 @@ async function sendMessage() {
     _persistState();
     renderMessages();
     setStatus("Ready");
+    // Show symmetry rejection dialog if the server flagged entries
+    if (data.symmetry_rejected && data.symmetry_rejected.length > 0) {
+      showSymmetryDialog(data.symmetry_rejected);
+    }
   } catch (e) {
     // Rollback: reload conversations from sessionStorage (stateless) or
     // server (stateful).  Truth/context/output are client-owned and are
@@ -1084,59 +1088,80 @@ function bindEvents() {
     }
   });
 
-  // Export JSONL
+  // Export XML
   document.getElementById("btnExport").addEventListener("click", function() {
     if (!state) { setStatus("No state to export"); return; }
     const now = new Date();
     const pad2 = n => String(n).padStart(2, "0");
-    const fn = `llm_${now.getFullYear()}.${pad2(now.getMonth()+1)}.${pad2(now.getDate())}.${pad2(now.getHours())}${pad2(now.getMinutes())}.jsonl`;
+    const fn = `llm_${now.getFullYear()}.${pad2(now.getMonth()+1)}.${pad2(now.getDate())}.${pad2(now.getHours())}${pad2(now.getMinutes())}.xml`;
 
-    const lines = [];
-    const header = {
-      type: "header", version: 2,
-      schema: state.schema || "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json",
-      date: new Date().toISOString(),
-      title: state.title || "WikiOracle",
-      context: state.context || "<div/>",
-    };
-    if (state.selected_conversation) header.selected_conversation = state.selected_conversation;
-    lines.push(JSON.stringify(header));
+    const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const escAttr = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<state>\n';
 
-    // Flatten conversations tree with parent references
+    // Header
+    xml += '  <header>\n';
+    xml += '    <version>2</version>\n';
+    xml += '    <schema>' + esc(state.schema || 'https://wikioracle.org/schemas/state/v2') + '</schema>\n';
+    xml += '    <time>' + esc(now.toISOString()) + '</time>\n';
+    xml += '    <title>' + esc(state.title || 'WikiOracle') + '</title>\n';
+    xml += '    <context>' + (state.context || '<div/>') + '</context>\n';
+    if (state.selected_conversation)
+      xml += '    <selected_conversation>' + esc(state.selected_conversation) + '</selected_conversation>\n';
+    if (state.user_guid)
+      xml += '    <user_guid>' + esc(state.user_guid) + '</user_guid>\n';
+    if (state.output)
+      xml += '    <output>' + (state.output || '') + '</output>\n';
+    xml += '  </header>\n';
+
+    // Conversations (nested tree — no flattening needed)
+    xml += '  <conversations>\n';
     var _seen = {};
-    function flattenConvs(convs, parentId) {
-      for (const conv of convs) {
-        if (_seen[conv.id]) continue;   // diamond: already emitted
-        _seen[conv.id] = true;
-        const rec = {
-          type: "conversation",
-          id: conv.id,
-          title: conv.title || "",
-          messages: (conv.messages || []).map(m => {
-            const clean = { ...m };
-            delete clean._pending;
-            return clean;
-          }),
-        };
-        // parentId on node wins (may be list for diamond); else structural parent
-        var pid = conv.parentId;
-        if (pid !== undefined && pid !== null) {
-          rec.parent = pid;             // string or array
-        } else if (parentId) {
-          rec.parent = parentId;
-        }
-        lines.push(JSON.stringify(rec));
-        flattenConvs(conv.children || [], conv.id);
+    function convToXml(conv, indent) {
+      if (_seen[conv.id]) return;
+      _seen[conv.id] = true;
+      let attrs = ' id="' + escAttr(conv.id) + '"';
+      const pid = conv.parentId;
+      if (pid !== undefined && pid !== null) {
+        if (Array.isArray(pid)) attrs += ' parentId="' + escAttr(pid.join(',')) + '"';
+        else attrs += ' parentId="' + escAttr(pid) + '"';
       }
+      xml += indent + '<conversation' + attrs + '>\n';
+      xml += indent + '  <title>' + esc(conv.title || '') + '</title>\n';
+      xml += indent + '  <messages>\n';
+      for (const m of (conv.messages || [])) {
+        const clean = { ...m }; delete clean._pending;
+        xml += indent + '    <message id="' + escAttr(clean.id) + '" role="' + escAttr(clean.role) + '"'
+          + ' username="' + escAttr(clean.username || '') + '" time="' + escAttr(clean.time || '') + '">\n';
+        xml += indent + '      <content>' + (clean.content || '') + '</content>\n';
+        xml += indent + '    </message>\n';
+      }
+      xml += indent + '  </messages>\n';
+      xml += indent + '  <children>\n';
+      for (const child of (conv.children || [])) convToXml(child, indent + '    ');
+      xml += indent + '  </children>\n';
+      xml += indent + '</conversation>\n';
     }
-    flattenConvs(state.conversations || [], null);
+    for (const conv of (state.conversations || [])) convToXml(conv, '    ');
+    xml += '  </conversations>\n';
 
-    // Truth entries
+    // Truth
+    xml += '  <truth>\n';
     for (const t of (Array.isArray(state.truth) ? state.truth : [])) {
-      lines.push(JSON.stringify({type: "truth", ...t}));
+      let attrs = ' id="' + escAttr(t.id || '') + '"';
+      if (t.title) attrs += ' title="' + escAttr(t.title) + '"';
+      if (t.trust !== undefined && t.trust !== null) attrs += ' trust="' + t.trust + '"';
+      if (t.time) attrs += ' time="' + escAttr(t.time) + '"';
+      if (t.arg1) attrs += ' arg1="' + escAttr(t.arg1) + '"';
+      if (t.arg2) attrs += ' arg2="' + escAttr(t.arg2) + '"';
+      xml += '    <entry' + attrs + '>\n';
+      xml += '      <content>' + (t.content || '') + '</content>\n';
+      xml += '    </entry>\n';
     }
+    xml += '  </truth>\n';
+    xml += '</state>\n';
 
-    const blob = new Blob([lines.join("\n") + "\n"], { type: "application/x-jsonlines" });
+    const blob = new Blob([xml], { type: "application/xml" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1182,77 +1207,90 @@ function bindEvents() {
     try {
       _showProgress(-1, "Reading file\u2026");
       const text = await file.text();
-      const lines = text.trim().split("\n").filter(l => l.trim());
-      if (lines.length === 0) throw new Error("Empty file");
-      const first = JSON.parse(lines[0]);
-      if (first.type !== "header" && !first.version) throw new Error("Not a WikiOracle state file");
+      const trimmed = text.trim();
+      if (!trimmed) throw new Error("Empty file");
 
-      // Build state from JSONL
       let importState;
-      if (first.type === "header") {
+
+      if (trimmed.startsWith("<?xml") || trimmed.startsWith("<state")) {
+        // Parse XML state file
+        _showProgress(40, "Parsing XML\u2026");
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(text, "application/xml");
+        if (doc.querySelector("parsererror")) throw new Error("Invalid XML");
+        const root = doc.documentElement;
+        const hdr = root.querySelector("header");
         importState = {
-          version: first.version || 2,
-          schema: first.schema || "",
-          time: first.time || first.date || "",
-          title: first.title || "",
-          context: first.context || "<div/>",
+          version: parseInt(hdr?.querySelector("version")?.textContent || "2"),
+          schema: hdr?.querySelector("schema")?.textContent || "",
+          time: hdr?.querySelector("time")?.textContent || "",
+          title: hdr?.querySelector("title")?.textContent || "",
+          context: hdr?.querySelector("context")?.innerHTML || "<div/>",
           conversations: [],
-          selected_conversation: first.selected_conversation || null,
+          selected_conversation: hdr?.querySelector("selected_conversation")?.textContent || null,
           truth: [],
         };
-        const convRecords = [];
-        const total = lines.length - 1;
-        for (let i = 1; i < lines.length; i++) {
-          const rec = JSON.parse(lines[i]);
-          if (rec.type === "conversation") {
-            const { type, ...rest } = rec;
-            convRecords.push(rest);
-          } else if (rec.type === "truth" || rec.type === "trust") {
-            const { type, ...rest } = rec;
-            importState.truth.push(rest);
+        if (hdr?.querySelector("user_guid"))
+          importState.user_guid = hdr.querySelector("user_guid").textContent;
+        if (hdr?.querySelector("output"))
+          importState.output = hdr.querySelector("output").innerHTML || "";
+
+        // Parse conversations recursively
+        function parseConv(el) {
+          const conv = {
+            id: el.getAttribute("id") || "",
+            title: el.querySelector(":scope > title")?.textContent || "",
+            messages: [],
+            children: [],
+            parentId: el.getAttribute("parentId") || null,
+          };
+          el.querySelectorAll(":scope > messages > message").forEach(function(mel) {
+            conv.messages.push({
+              id: mel.getAttribute("id") || "",
+              role: mel.getAttribute("role") || "user",
+              username: mel.getAttribute("username") || "",
+              time: mel.getAttribute("time") || "",
+              content: mel.querySelector("content")?.innerHTML || "",
+            });
+          });
+          const childrenEl = el.querySelector(":scope > children");
+          if (childrenEl) {
+            childrenEl.querySelectorAll(":scope > conversation").forEach(function(cel) {
+              conv.children.push(parseConv(cel));
+            });
           }
-          // Update progress bar during parse (yield every 200 lines for large files)
-          if (total > 200 && i % 200 === 0) {
-            _showProgress((i / total) * 80, "Parsing\u2026 " + i + " / " + total + " lines");
-            await new Promise(r => setTimeout(r, 0));
-          }
+          return conv;
+        }
+        const convsEl = root.querySelector("conversations");
+        if (convsEl) {
+          convsEl.querySelectorAll(":scope > conversation").forEach(function(cel) {
+            importState.conversations.push(parseConv(cel));
+          });
+        }
+
+        // Parse truth entries
+        const truthEl = root.querySelector("truth");
+        if (truthEl) {
+          truthEl.querySelectorAll(":scope > entry").forEach(function(eel) {
+            const entry = { id: eel.getAttribute("id") || "" };
+            if (eel.getAttribute("title")) entry.title = eel.getAttribute("title");
+            if (eel.getAttribute("trust")) entry.trust = parseFloat(eel.getAttribute("trust"));
+            if (eel.getAttribute("time")) entry.time = eel.getAttribute("time");
+            if (eel.getAttribute("arg1")) entry.arg1 = eel.getAttribute("arg1");
+            if (eel.getAttribute("arg2")) entry.arg2 = eel.getAttribute("arg2");
+            const cel = eel.querySelector("content");
+            entry.content = cel ? cel.innerHTML : "";
+            importState.truth.push(entry);
+          });
         }
         _showProgress(80);
-        if (convRecords.length > 0) {
-          const byId = {};
-          const roots = [];
-          for (const rec of convRecords) {
-            byId[rec.id] = { ...rec, children: [], parentId: rec.parent || null };
-          }
-          var _placed = {};
-          for (const rec of convRecords) {
-            const node = byId[rec.id];
-            var rawParent = rec.parent;
-            if (Array.isArray(rawParent)) {
-              // Diamond merge: place under each parent
-              var ok = false;
-              for (var pi = 0; pi < rawParent.length; pi++) {
-                if (byId[rawParent[pi]]) {
-                  byId[rawParent[pi]].children.push(node);
-                  ok = true;
-                }
-              }
-              if (!ok) roots.push(node);
-            } else if (rawParent && byId[rawParent]) {
-              byId[rawParent].children.push(node);
-            } else {
-              roots.push(node);
-            }
-            delete node.parent;
-          }
-          importState.conversations = roots;
-        }
       } else {
+        // Legacy JSON (monolithic)
         importState = JSON.parse(text);
         _showProgress(80);
       }
 
-      if (!importState.schema || !importState.schema.includes("llm_state")) throw new Error("Not a WikiOracle state file");
+      if (!importState.schema) throw new Error("Not a WikiOracle state file");
       _validateImport(importState);
 
       // Merge: client-side in stateless mode, server-side otherwise

@@ -1,13 +1,12 @@
 """WikiOracle state management: data model, I/O, conversation tree, merge logic.
 
 State data model and persistence:
-  - XML and JSONL serialization and deserialization of conversation state
+  - XML serialization and deserialization of conversation state
   - Conversation tree structure and traversal
   - State merging logic for multi-branch conversations
   - Snapshot and session management utilities
 
-The canonical state format is XML ("WikiOracle State").  JSONL is retained
-for backward compatibility and migration.
+The canonical state format is XML ("WikiOracle State").
 """
 
 from __future__ import annotations
@@ -159,7 +158,7 @@ def normalize_conversation(raw: Any, parent_id: str | None = None) -> dict:
         children = []
     conv_id = item["id"]
     item["children"] = [normalize_conversation(c, parent_id=conv_id) for c in children]
-    # Strip JSONL-only fields
+    # Strip legacy flat-format fields
     item.pop("parent", None)
     item.pop("type", None)
     return item
@@ -242,190 +241,17 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
     return state
 
 
-# ---------------------------------------------------------------------------
-# JSONL I/O
-# ---------------------------------------------------------------------------
-def _flatten_conversations(convs: list, parent_id: str | None = None) -> list:
-    """Flatten nested conversations into JSONL records with 'parent' references.
-
-    ``parentId`` may be a list (diamond merge node with multiple parents).
-    In JSONL the ``parent`` field is either a string or a list of strings.
-    """
-    seen: set = set()
-    records: list = []
-
-    def _walk(convs_inner: list, pid: str | None) -> None:
-        for conv in convs_inner:
-            cid = conv["id"]
-            if cid in seen:          # diamond: already emitted
-                continue
-            seen.add(cid)
-            record: dict = {
-                "type": "conversation",
-                "id": cid,
-                "messages": conv.get("messages", []),
-            }
-            # Persist explicit title so it round-trips through JSONL
-            title = conv.get("title")
-            if title:
-                record["title"] = title
-            # parentId on the node wins; fall back to structural parent
-            explicit = conv.get("parentId")
-            if explicit is not None:
-                record["parent"] = explicit       # str or list
-            elif pid is not None:
-                record["parent"] = pid
-            records.append(record)
-            _walk(conv.get("children", []), cid)
-
-    _walk(convs, parent_id)
-    return records
-
-
-def _nest_conversations(flat_records: list) -> list:
-    """Rebuild conversation tree from flat JSONL records with 'parent' references.
-
-    ``parent`` may be a single ID string or a list of ID strings (diamond
-    merge node).  A multi-parent node is placed as a child of each parent
-    and keeps its full ``parentId`` list.
-    """
-    by_id: dict = {}
-    roots: list = []
-
-    # First pass: create all nodes
-    for rec in flat_records:
-        cid = rec.get("id", "")
-        raw_parent = rec.get("parent", None)
-        node_dict: dict = {
-            "id": cid,
-            "messages": rec.get("messages", []),
-            "children": [],
-            "parentId": raw_parent,
-        }
-        if rec.get("title"):
-            node_dict["title"] = rec["title"]
-        by_id[cid] = node_dict
-
-    # Second pass: link parents
-    for rec in flat_records:
-        cid = rec.get("id", "")
-        node = by_id.get(cid)
-        if not node:
-            continue
-        raw_parent = rec.get("parent")
-        if isinstance(raw_parent, list):
-            # Diamond merge: place under each parent, but only once in output
-            placed = False
-            for pid in raw_parent:
-                if pid in by_id:
-                    by_id[pid]["children"].append(node)
-                    placed = True
-            if not placed:
-                roots.append(node)
-        elif raw_parent and raw_parent in by_id:
-            by_id[raw_parent]["children"].append(node)
-        else:
-            roots.append(node)
-
-    return roots
-
-
-def state_to_jsonl(state: dict) -> str:
-    """Convert a state dict to JSONL string."""
-    lines = []
-
-    header = {
-        "type": "header",
-        "version": state.get("version", STATE_VERSION),
-        "schema": state.get("schema", SCHEMA_URL),
-        "time": state.get("time", utc_now_iso()),
-        "title": state.get("title", "WikiOracle"),
-        "context": state.get("context", "<div/>"),
-    }
-    sel = state.get("selected_conversation")
-    if sel is not None:
-        header["selected_conversation"] = sel
-    uguid = state.get("user_guid")
-    if uguid:
-        header["user_guid"] = uguid
-    lines.append(json.dumps(header, ensure_ascii=False))
-
-    # Conversation records (flattened)
-    flat_convs = _flatten_conversations(state.get("conversations", []))
-    for rec in flat_convs:
-        lines.append(json.dumps(rec, ensure_ascii=False))
-
-    # Truth records
-    for entry in (state.get("truth") or []):
-        record = {k: v for k, v in entry.items()}
-        record["type"] = "truth"
-        lines.append(json.dumps(record, ensure_ascii=False))
-
-    return "\n".join(lines) + "\n"
-
-
-def jsonl_to_state(text: str) -> dict:
-    """Parse a JSONL string into a state dict (conversation-based)."""
-    state = {
-        "version": STATE_VERSION,
-        "schema": SCHEMA_URL,
-        "time": utc_now_iso(),
-        "context": "<div/>",
-        "conversations": [],
-        "truth": [],
-        "selected_conversation": None,
-    }
-
-    conv_records = []
-
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        record_type = obj.get("type", "")
-
-        if record_type == "header":
-            state["version"] = obj.get("version", STATE_VERSION)
-            state["schema"] = obj.get("schema", SCHEMA_URL)
-            state["time"] = obj.get("time") or obj.get("date") or state["time"]
-            state["context"] = obj.get("context", state["context"])
-            if "title" in obj:
-                state["title"] = obj["title"]
-            if "selected_conversation" in obj:
-                state["selected_conversation"] = obj["selected_conversation"]
-            if "user_guid" in obj:
-                state["user_guid"] = obj["user_guid"]
-            if "output" in obj and isinstance(obj["output"], str) and obj["output"].strip():
-                state["output"] = obj["output"].strip()  # legacy compat
-        elif record_type == "conversation":
-            conv_records.append({k: v for k, v in obj.items() if k != "type"})
-        elif record_type in ("truth", "trust"):  # "trust" accepted for legacy compat
-            entry = {k: v for k, v in obj.items() if k != "type"}
-            state["truth"].append(entry)
-        elif "messages" in obj and "version" in obj:
-            return ensure_minimal_state(obj, strict=False)
-
-    if conv_records:
-        state["conversations"] = _nest_conversations(conv_records)
-
-    return state
 
 
 def load_state_file(path: Path, *, strict: bool = True, max_bytes: int | None = None,
                     reject_symlinks: bool = False) -> dict:
-    """Load state from an .xml, .jsonl, or legacy .json file.
+    """Load state from an ``.xml`` or legacy ``.json`` file.
 
     Auto-detects format by file extension and content:
       - ``.xml`` → ``xml_to_state()``
-      - ``.jsonl`` → ``jsonl_to_state()``
-      - ``.json`` (legacy) → ``json.loads()`` → ``ensure_minimal_state()``
+      - ``.json`` (legacy monolithic) → ``json.loads()`` → ``ensure_minimal_state()``
       - Content starting with ``<?xml`` or ``<state`` → XML
-      - Content starting with ``{`` → legacy JSON or JSONL
+      - Content starting with ``{`` → legacy JSON
     """
     if reject_symlinks and path.is_symlink():
         raise StateValidationError("State file cannot be a symlink")
@@ -456,29 +282,7 @@ def load_state_file(path: Path, *, strict: bool = True, max_bytes: int | None = 
         except json.JSONDecodeError:
             pass
 
-    # JSONL
-    state = jsonl_to_state(data)
-    return ensure_minimal_state(state, strict=strict)
-
-
-def atomic_write_jsonl(path: Path, state: dict, *, reject_symlinks: bool = False) -> None:
-    """Write state to a .jsonl file atomically."""
-    if reject_symlinks and path.exists() and path.is_symlink():
-        raise StateValidationError("Refusing to write symlink state file")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = state_to_jsonl(state)
-
-    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as tmp:
-            tmp.write(content)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        os.replace(tmp_name, str(path))
-    finally:
-        if os.path.exists(tmp_name):
-            os.remove(tmp_name)
+    return ensure_minimal_state({}, strict=False)
 
 
 def atomic_write_json(path: Path, payload: dict) -> None:

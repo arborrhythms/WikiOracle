@@ -48,16 +48,25 @@ Root (/)
 
 ## Data model
 
-State is persisted as line-delimited JSON (`.jsonl`):
+State is persisted as XML (WikiOracle State format, validated by `data/state.xsd`):
 
-```
-{"type":"header", "schema":"…", "date":"…", "context":"…", "selected_conversation":"c_abc"}
-{"type":"conversation", "id":"c_abc", "title":"Animals", "messages":[…]}
-{"type":"conversation", "id":"c_def", "title":"Dogs", "parent":"c_abc", "messages":[…]}
-{"type":"truth", "id":"t_001", "content":"…", "certainty":0.9}
+```xml
+<state>
+  <header version="2" schema="..." time="..." selected_conversation="c_abc">
+    <context>...</context>
+  </header>
+  <conversations>
+    <conversation id="c_abc" title="Animals">
+      <messages><message role="user">...</message></messages>
+    </conversation>
+  </conversations>
+  <truth>
+    <entry id="t_001" trust="0.9">...</entry>
+  </truth>
+</state>
 ```
 
-In memory, conversations are nested via `children` arrays. The `parent` field in JSONL is used only for serialisation — on load, the tree is reconstructed from parent references.
+In memory, conversations are nested via `children` arrays.
 
 ## Key concepts
 
@@ -73,7 +82,7 @@ In memory, conversations are nested via `children` arrays. The `parent` field in
 
 ## Development
 
-The server (`bin/wikioracle.py`) serves everything in this directory for extensions matching `.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.jsonl`. No build step is required — edit files and refresh.
+The server (`bin/wikioracle.py`) serves everything in this directory for extensions matching `.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.xml`. No build step is required — edit files and refresh.
 
 Cache-busting is handled via query-string versions on the script tags in `index.html` (e.g. `tree.js?v=10`). Bump the version number after changes.
 

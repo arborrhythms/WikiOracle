@@ -111,8 +111,11 @@ The full design and governance documentation lives in [`doc/`](doc/README.md):
 | [Voting](doc/Voting.md) | Voting protocol: dom steering, sub fan-out, cycle prevention, truth-only output |
 | [FreedomEmpathyTruth](doc/FreedomEmpathyTruth.md) | Freedom, Empathy, and Truth — safety principles |
 | [Architecture](doc/Architecture.md) | Local-first software architecture |
+| [Config](doc/Config.md) | Configuration format, settings reference, environment variables |
+| [State](doc/State.md) | State file format, conversation tree, truth table, merge |
 | [Training](doc/Training.md) | DegreeOfTruth, Sensation preprocessing, online training pipeline |
 | [Entanglement](doc/Entanglement.md) | Worldline entanglement policy, spatiotemporal persistence, three-channel separation |
+| [Ethics](doc/Ethics.md) | Ethical AI through truth architecture, symmetry constraints, LFGC |
 | [Security](doc/Security.md) | Security considerations |
 | [ProposedLicense](doc/ProposedLicense.md) | Licensing architecture: GPL-3.0 code, CC BY-SA 4.0 content, Apache-2.0 weights |
 | [Installation](doc/Installation.md) | Build, deploy, and runtime instructions |

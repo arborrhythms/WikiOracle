@@ -29,7 +29,7 @@ _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project))
 sys.path.insert(0, str(_project / "bin"))
 
-from state import jsonl_to_state, load_state_file
+from state import load_state_file
 from response import (
     ProviderBundle,
     Source,

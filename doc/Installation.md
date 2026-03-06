@@ -72,7 +72,7 @@ This invokes `bin/wikioracle.py` via the `WIKIORACLE_APP` Make variable (default
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `WIKIORACLE_STATE_FILE` | `state.xml` | Path to local state file (XML preferred; JSONL supported for migration) |
+| `WIKIORACLE_STATE_FILE` | `state.xml` | Path to local state file (WikiOracle State XML) |
 | `WIKIORACLE_BASE_URL` | `https://wikioracle.org` | Upstream base URL |
 | `WIKIORACLE_API_PATH` | `/chat/chat/completions` | Upstream chat path |
 | `WIKIORACLE_STATELESS` | (unset) | Set truthy to disable all writes and use in-memory state |
@@ -88,7 +88,7 @@ WikiOracle includes a local Flask server (`bin/wikioracle.py`) that enables chat
 |---|---|
 | `bin/wikioracle.py` | Local shim server (binds to `0.0.0.0:8888` with TLS). Proxies chat requests upstream and persists state to `state.xml`. Also supports CLI merge: `python bin/wikioracle.py merge llm_*.xml` |
 | `bin/config.py` | Config dataclass, XML loader, provider registry, schema-driven XML writer, normalization |
-| `bin/state.py` | State validation, XML and JSONL I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction |
+| `bin/state.py` | State validation, XML I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction |
 | `bin/response.py` | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4) |
 | `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, spacetime classification, PII detection |
 | `test/test_*.py` | Automated tests for state, stateless contract, prompt bundles, authority, derived truth, DoT, sensation, online training |
@@ -105,4 +105,15 @@ python bin/wikioracle.py
 
 ### Session portability
 
-Export conversations from phone/browser as `llm_YYYY.MM.DD.HHMM.xml`, then merge them into a local project's `state.xml` later. This provides a clean integration path with Claude Code, OpenAI Codex, or any local tooling that can read the state file for project context. Legacy `.jsonl` exports are also supported — `load_state_file()` auto-detects the format.
+Export conversations from phone/browser as `llm_YYYY.MM.DD.HHMM.xml`, then merge them into a local project's `state.xml` later. This provides a clean integration path with Claude Code, OpenAI Codex, or any local tooling that can read the state file for project context.
+
+---
+
+## See also
+
+- [Architecture.md](./Architecture.md) — system components and data flow.
+- [Config.md](./Config.md) — configuration format, settings, and environment variables.
+- [State.md](./State.md) — state file format and session portability.
+- [Security.md](./Security.md) — security considerations for deployment.
+- [Training.md](./Training.md) — remote training flow and device configuration.
+- [Constitution.md](./Constitution.md) — project purpose and invariants.

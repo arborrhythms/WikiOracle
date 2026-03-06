@@ -56,7 +56,7 @@ SAMPLE_XML = """\
     <url_prefix></url_prefix>
     <online_training>
       <enabled>false</enabled>
-      <truth_corpus_path>data/truth.jsonl</truth_corpus_path>
+      <truth_corpus_path>data/truth.xml</truth_corpus_path>
       <alpha_base>0.01</alpha_base>
       <alpha_min>0.001</alpha_min>
       <alpha_max>0.1</alpha_max>
@@ -178,7 +178,7 @@ class TestConfigToXml(unittest.TestCase):
                 "url_prefix": "",
                 "online_training": {
                     "enabled": False,
-                    "truth_corpus_path": "data/truth.jsonl",
+                    "truth_corpus_path": "data/truth.xml",
                     "alpha_base": 0.01,
                     "alpha_min": 0.001,
                     "alpha_max": 0.1,

@@ -19,18 +19,18 @@ from state import (
     add_message_to_conversation,
     all_conversation_ids,
     all_message_ids,
-    atomic_write_jsonl,
+    atomic_write_xml,
     build_context_draft,
     ensure_minimal_state,
     extract_context_deltas,
     find_conversation,
     get_ancestor_chain,
     get_context_messages,
-    jsonl_to_state,
     load_state_file,
     merge_llm_states,
     remove_conversation,
-    state_to_jsonl,
+    state_to_xml,
+    xml_to_state,
 )
 from truth import (
     ALLOWED_DATA_DIR,
@@ -128,7 +128,7 @@ class TestEnsureMinimalState(unittest.TestCase):
         self.assertNotIn("active_path", state)
 
 
-class TestJSONLRoundTrip(unittest.TestCase):
+class TestXMLRoundTrip(unittest.TestCase):
 
     def test_roundtrip(self):
         original = ensure_minimal_state(_make_state(
@@ -145,17 +145,10 @@ class TestJSONLRoundTrip(unittest.TestCase):
             ]
         ), strict=True)
 
-        jsonl_text = state_to_jsonl(original)
-        lines = jsonl_text.strip().split("\n")
-        self.assertGreaterEqual(len(lines), 3)  # header + 1 conv + 1 trust
-
-        # Parse header
-        header = json.loads(lines[0])
-        self.assertEqual(header["type"], "header")
-        self.assertEqual(header["version"], 2)
+        xml_text = state_to_xml(original)
 
         # Roundtrip
-        restored = jsonl_to_state(jsonl_text)
+        restored = xml_to_state(xml_text)
         restored = ensure_minimal_state(restored, strict=True)
         self.assertEqual(len(restored["conversations"]), 1)
         self.assertEqual(len(restored["conversations"][0]["messages"]), 2)
@@ -163,7 +156,7 @@ class TestJSONLRoundTrip(unittest.TestCase):
         self.assertEqual(len(restored["truth"]), 1)
 
     def test_roundtrip_with_children(self):
-        """Conversations with children survive JSONL roundtrip."""
+        """Conversations with children survive XML roundtrip."""
         original = ensure_minimal_state(_make_state(
             conversations=[
                 _make_conv("c_1", "root", [
@@ -177,8 +170,8 @@ class TestJSONLRoundTrip(unittest.TestCase):
             selected_conversation="c_2",
         ), strict=True)
 
-        jsonl_text = state_to_jsonl(original)
-        restored = jsonl_to_state(jsonl_text)
+        xml_text = state_to_xml(original)
+        restored = xml_to_state(xml_text)
         restored = ensure_minimal_state(restored, strict=True)
 
         self.assertEqual(len(restored["conversations"]), 1)
@@ -188,8 +181,8 @@ class TestJSONLRoundTrip(unittest.TestCase):
         self.assertEqual(root["children"][0]["id"], "c_2")
         self.assertEqual(restored["selected_conversation"], "c_2")
 
-    def test_hme_jsonl_roundtrip(self):
-        """test/hme.xml survives load → serialize → reload with all trust entries intact."""
+    def test_hme_xml_roundtrip(self):
+        """test/hme.xml survives load -> serialize -> reload with all trust entries intact."""
         spec_path = Path(__file__).resolve().parent / "hme.xml"
         if not spec_path.exists():
             self.skipTest("test/hme.xml not found")
@@ -198,7 +191,7 @@ class TestJSONLRoundTrip(unittest.TestCase):
 
         # Verify initial parse has expected trust entries
         trust = original.get("truth", [])
-        self.assertGreaterEqual(len(trust), 10, "hme.xml should have ≥10 trust entries")
+        self.assertGreaterEqual(len(trust), 10, "hme.xml should have >=10 trust entries")
         ids_orig = {e["id"] for e in trust if "id" in e}
         self.assertIn("axiom_01", ids_orig)
         self.assertIn("false_01", ids_orig)
@@ -207,9 +200,9 @@ class TestJSONLRoundTrip(unittest.TestCase):
         # Context should describe Kleene ternary logic
         self.assertIn("Kleene", original.get("context", ""))
 
-        # Round-trip: serialize → parse → normalize
-        jsonl_text = state_to_jsonl(original)
-        restored = jsonl_to_state(jsonl_text)
+        # Round-trip: serialize -> parse -> normalize
+        xml_text = state_to_xml(original)
+        restored = xml_to_state(xml_text)
         restored = ensure_minimal_state(restored, strict=True)
 
         # Trust entries preserved
@@ -228,8 +221,8 @@ class TestJSONLRoundTrip(unittest.TestCase):
 
         # Write to disk and reload (full disk round-trip)
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "hme_roundtrip.jsonl"
-            atomic_write_jsonl(path, original)
+            path = Path(tmpdir) / "hme_roundtrip.xml"
+            atomic_write_xml(path, original)
             reloaded = load_state_file(path, strict=True)
             trust_disk = reloaded.get("truth", [])
             ids_disk = {e["id"] for e in trust_disk if "id" in e}
@@ -423,7 +416,7 @@ class TestMerge(unittest.TestCase):
             ]),
         ]), strict=True)
 
-        # Incoming has c_2 as child of c_1 (in JSONL, parent field)
+        # Incoming has c_2 as child of c_1
         # We test via merge which uses _flatten_all_conversations
         incoming_state = _make_state(conversations=[
             _make_conv("c_1", "parent", [
@@ -471,7 +464,7 @@ class TestContextDeltas(unittest.TestCase):
         self.assertEqual(result, base)
 
 
-class TestAtomicWriteJSONL(unittest.TestCase):
+class TestAtomicWriteXML(unittest.TestCase):
 
     def test_write_and_read_roundtrip(self):
         state = ensure_minimal_state(_make_state(conversations=[
@@ -481,8 +474,8 @@ class TestAtomicWriteJSONL(unittest.TestCase):
         ]), strict=True)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "test.jsonl"
-            atomic_write_jsonl(path, state)
+            path = Path(tmpdir) / "test.xml"
+            atomic_write_xml(path, state)
             self.assertTrue(path.exists())
 
             loaded = load_state_file(path, strict=True)
@@ -494,9 +487,9 @@ class TestSymlinkRejection(unittest.TestCase):
 
     def test_rejects_symlink_on_load(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            real = Path(tmpdir) / "real.jsonl"
-            real.write_text('{"type":"header","version":2,"schema":"' + SCHEMA_URL + '","time":"2026-01-01T00:00:00Z","context":"<div/>"}')
-            link = Path(tmpdir) / "link.jsonl"
+            real = Path(tmpdir) / "real.xml"
+            real.write_text('<?xml version="1.0" ?><state version="2" schema="' + SCHEMA_URL + '" time="2026-01-01T00:00:00Z"><context><div /></context></state>')
+            link = Path(tmpdir) / "link.xml"
             link.symlink_to(real)
             with self.assertRaises(StateValidationError):
                 load_state_file(link, strict=True, reject_symlinks=True)
@@ -596,8 +589,8 @@ class TestSelectedConversationRoundtrip(unittest.TestCase):
                 ]),
             ],
         ), strict=True)
-        jsonl_text = state_to_jsonl(state)
-        restored = jsonl_to_state(jsonl_text)
+        xml_text = state_to_xml(state)
+        restored = xml_to_state(xml_text)
         restored = ensure_minimal_state(restored, strict=True)
         self.assertEqual(restored["selected_conversation"], "c_1")
 
@@ -620,21 +613,6 @@ class TestOutputField(unittest.TestCase):
         state = ensure_minimal_state({})
         self.assertEqual(state["output"], DEFAULT_OUTPUT)
 
-    def test_output_not_in_jsonl_header(self):
-        """Output is not serialized to JSONL (internal runtime field only)."""
-        state = ensure_minimal_state({"output": "Return JSON."})
-        jsonl_text = state_to_jsonl(state)
-        import json as _json
-        header = _json.loads(jsonl_text.split("\n")[0])
-        self.assertNotIn("output", header)
-
-    def test_output_roundtrip_via_legacy_header(self):
-        """Output from a legacy JSONL header is still accepted on import."""
-        legacy_jsonl = '{"type":"header","version":2,"schema":"https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/spec/llm_state_v2.json","time":"2026-01-01T00:00:00Z","context":"<div/>","output":"Return JSON."}'
-        restored = jsonl_to_state(legacy_jsonl)
-        restored = ensure_minimal_state(restored)
-        self.assertEqual(restored["output"], "Return JSON.")
-
     def test_default_output_roundtrip(self):
         """Default output persists through ensure_minimal_state."""
         state = ensure_minimal_state({})
@@ -654,11 +632,11 @@ class TestTitleField(unittest.TestCase):
         state = ensure_minimal_state({})
         self.assertEqual(state["title"], "WikiOracle")
 
-    def test_title_jsonl_roundtrip(self):
-        """Title survives JSONL serialization round-trip."""
+    def test_title_xml_roundtrip(self):
+        """Title survives XML serialization round-trip."""
         state = ensure_minimal_state({"title": "Research Notes"})
-        jsonl_text = state_to_jsonl(state)
-        restored = jsonl_to_state(jsonl_text)
+        xml_text = state_to_xml(state)
+        restored = xml_to_state(xml_text)
         restored = ensure_minimal_state(restored)
         self.assertEqual(restored["title"], "Research Notes")
 

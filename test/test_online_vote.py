@@ -97,6 +97,11 @@ class TestAlphaOutputDiamond(unittest.TestCase):
             err = data.get("error", "unknown") if data else "no response"
             cls._skip_reason = f"Vote call failed: {err}"
             return
+        # Check if the response text is actually a provider error (quota etc.)
+        text = data.get("text", "")
+        if text.startswith("[Error"):
+            cls._skip_reason = f"Provider returned error: {text[:120]}"
+            return
 
         # Load the state that the server wrote to disk
         from state import load_state_file

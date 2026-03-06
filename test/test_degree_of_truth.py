@@ -4,7 +4,7 @@
 Tests:
   - compute_degree_of_truth: agreement scoring between server and client
   - merge_client_truth: slow-moving average merge of client entries
-  - load_server_truth / save_server_truth: JSONL persistence
+  - load_server_truth / save_server_truth: XML persistence
   - _is_server_storable: filter out feelings and providers
 """
 
@@ -181,7 +181,7 @@ class TestServerTruthPersistence(unittest.TestCase):
     def test_save_and_load(self):
         """Round-trip save/load preserves entries."""
         entries = [_fact("a", 0.8), _fact("b", -0.3)]
-        with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as f:
             path = Path(f.name)
         try:
             save_server_truth(path, entries)
@@ -196,12 +196,12 @@ class TestServerTruthPersistence(unittest.TestCase):
 
     def test_load_nonexistent_returns_empty(self):
         """Loading from a missing file returns an empty list."""
-        result = load_server_truth(Path("/tmp/nonexistent_truth_12345.jsonl"))
+        result = load_server_truth(Path("/tmp/nonexistent_truth_12345.xml"))
         assert result == []
 
     def test_atomic_write(self):
         """Save replaces the file atomically (no partial writes)."""
-        with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as f:
             path = Path(f.name)
         try:
             save_server_truth(path, [_fact("a", 0.5)])

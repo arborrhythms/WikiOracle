@@ -198,7 +198,7 @@ and training happen after the response is delivered.
 
 5. Filter client truth per the Entanglement Policy (doc/Entanglement.md):
    - When `store_particulars` is false (default), only universal
-     (synchronic/knowledge) facts pass through (`filter_knowledge_only()`).
+     facts pass through (`filter_knowledge_only()`).
    - Entries with identifiable content are always filtered regardless
      of `store_particulars` (`detect_identifiability()`).
    - Feelings never reach the merge (already excluded by `_extract_facts()`).
@@ -310,3 +310,17 @@ Possible approaches include context/perspective tags on entries,
 truth‑space embeddings with frame clustering, conditional truth values
 indexed by worldview, or explicit user prompts to resolve ambiguity
 when the truth table produces conflicting signals.
+
+---
+
+## See also
+
+- [Entanglement.md](./Entanglement.md) — the entanglement policy governing what persists.
+- [Logic.md](./Logic.md) — operators stored alongside facts in the truth table.
+- [Architecture.md](./Architecture.md) — the response pipeline integrating training stages.
+- [Constitution.md](./Constitution.md) — anti-capture as a constitutional commitment.
+- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — DegreeOfTruth operates over the HME truth table.
+- [Config.md](./Config.md) — online training configuration settings and behavior when disabled.
+- [Ethics.md](./Ethics.md) — entanglement-resistant training as an ethical design choice.
+- [BuddhistLogic.md](./BuddhistLogic.md) — the Sensation pipeline follows Buddhist epistemology.
+- [FutureWork.md](./FutureWork.md) — dissonance detection and pluralistic truth.

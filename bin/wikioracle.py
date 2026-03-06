@@ -68,7 +68,6 @@ from config import (
 from state import (
     SCHEMA_URL,
     STATE_VERSION,
-    atomic_write_jsonl,
     atomic_write_xml,
     build_context_draft,
     ensure_minimal_state,
@@ -316,14 +315,14 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     if "output" in client_state:
                         state["output"] = client_state["output"]
 
-            response_text, state = process_chat(cfg, state, body, runtime_cfg)
+            response_text, state, symmetry_rejected = process_chat(cfg, state, body, runtime_cfg)
 
             if not config_mod.STATELESS_MODE:
                 _save_state(cfg, state)
 
             if config_mod.STATELESS_MODE:
                 # Stateless: client is the only copy — return full state
-                return jsonify({"ok": True, "text": response_text, "state": state})
+                resp = {"ok": True, "text": response_text, "state": state}
             else:
                 # Stateful: truth flows client → server only.  Return
                 # just the conversation delta so the client can merge it.
@@ -333,7 +332,10 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     "conversations": [conv] if conv else [],
                     "selected_conversation": sel,
                 }
-                return jsonify({"ok": True, "text": response_text, "state": response_state})
+                resp = {"ok": True, "text": response_text, "state": response_state}
+            if symmetry_rejected:
+                resp["symmetry_rejected"] = symmetry_rejected
+            return jsonify(resp)
         except Exception as exc:
             log.exception("POST /chat failed")
             return jsonify({"ok": False, "error": "Chat request failed"}), 502
@@ -350,7 +352,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
         if body.get("auto", False):
             root = cfg.state_file.parent
-            import_files = sorted(list(root.glob("llm_*.jsonl")) + list(root.glob("llm_*.json")))
+            import_files = sorted(list(root.glob("llm_*.xml")) + list(root.glob("llm_*.json")))
             import_files = [f for f in import_files if f.resolve() != cfg.state_file
                            and not f.name.endswith(cfg.merged_suffix)]
         elif "state" in body:
@@ -369,7 +371,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         else:
             filenames = body.get("files", [])
             import_files = [cfg.state_file.parent / f for f in filenames
-                          if (f.endswith(".jsonl") or f.endswith(".json") or f.endswith(".xml"))
+                          if (f.endswith(".json") or f.endswith(".xml"))
                           and ".." not in f and "/" not in f and "\\" not in f]
 
         base = _load_state(cfg)
@@ -462,7 +464,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     @app.route(url_prefix + "/<path:filename>", methods=["GET"])
     def static_files(filename):
         """Serve whitelisted static asset extensions from client/."""
-        safe_ext = {".html", ".css", ".js", ".svg", ".png", ".ico", ".json", ".jsonl"}
+        safe_ext = {".html", ".css", ".js", ".svg", ".png", ".ico", ".json", ".xml"}
         if Path(filename).suffix.lower() in safe_ext:
             fp = (ui_dir / filename).resolve()
             if fp.exists() and str(fp).startswith(str(ui_dir.resolve())):
@@ -505,10 +507,7 @@ def main() -> int:
         cfg.state_file.parent.mkdir(parents=True, exist_ok=True)
         if not cfg.state_file.exists():
             initial = ensure_minimal_state({}, strict=False)
-            if cfg.state_file.suffix.lower() == ".xml":
-                atomic_write_xml(cfg.state_file, initial, reject_symlinks=cfg.reject_symlinks)
-            else:
-                atomic_write_jsonl(cfg.state_file, initial, reject_symlinks=cfg.reject_symlinks)
+            atomic_write_xml(cfg.state_file, initial, reject_symlinks=cfg.reject_symlinks)
 
     use_ssl = not args.no_ssl
 

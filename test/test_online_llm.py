@@ -20,7 +20,7 @@ sys.path.insert(0, str(_project / "bin"))
 import config as config_mod
 from config import Config, _load_config
 from wikioracle import create_app
-from state import SCHEMA_URL, STATE_VERSION, ensure_minimal_state, atomic_write_jsonl
+from state import SCHEMA_URL, STATE_VERSION, ensure_minimal_state, atomic_write_xml
 
 
 def _make_state(**overrides):
@@ -73,9 +73,9 @@ class _OnlineLLMBase(unittest.TestCase):
         config_mod.DEBUG_MODE = False
 
         self._tmpdir = tempfile.mkdtemp()
-        self._state_path = Path(self._tmpdir) / "llm.jsonl"
+        self._state_path = Path(self._tmpdir) / "state.xml"
         initial = ensure_minimal_state({}, strict=False)
-        atomic_write_jsonl(self._state_path, initial, reject_symlinks=False)
+        atomic_write_xml(self._state_path, initial, reject_symlinks=False)
 
         self.cfg = Config(state_file=self._state_path)
         self.app = create_app(self.cfg, url_prefix="")

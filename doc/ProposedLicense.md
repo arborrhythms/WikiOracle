@@ -186,3 +186,13 @@ WikiOracle licensing stack:
 
 The architecture protects the software commons, maintains a global
 knowledge commons, and supports open AI development.
+
+---
+
+## See also
+
+- [Constitution.md](./Constitution.md) — forking rights and anti-capture commitments operationalized through licensing.
+- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — open licensing implements the freedom and anti-capture principles.
+- [Training.md](./Training.md) — model weights (Layer 3B) and training data provenance.
+- [Ethics.md](./Ethics.md) — distributed governance and anti-capture as ethical commitments.
+- [Security.md](./Security.md) — open-source requirement as a security mechanism (auditable code).

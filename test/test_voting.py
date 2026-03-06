@@ -349,12 +349,12 @@ class TestPerProviderTruth(unittest.TestCase):
         """parse_provider_block extracts authority_url from nested <authority> element."""
         content = (
             '<provider api_url="http://test" model="m">'
-            '<authority url="file://data/beta_truth.jsonl"/>'
+            '<authority url="file://data/beta_truth.xml"/>'
             '</provider>'
         )
         result = parse_provider_block(content)
         self.assertIsNotNone(result)
-        self.assertEqual(result["authority_url"], "file://data/beta_truth.jsonl")
+        self.assertEqual(result["authority_url"], "file://data/beta_truth.xml")
 
     def test_authority_url_empty_when_absent(self):
         """parse_provider_block returns empty authority_url when not present."""
@@ -1064,7 +1064,7 @@ class TestDiamondConversationTree(unittest.TestCase):
              "time": "2026-03-01T00:00:02Z"},
         ]
 
-        cfg = Config(state_file=Path("/tmp/test.jsonl"))
+        cfg = Config(state_file=Path("/tmp/test.xml"))
         body = {"message": "Should we raise taxes?"}
         runtime_cfg = {
             "providers": {
@@ -1101,7 +1101,7 @@ class TestDiamondConversationTree(unittest.TestCase):
              }), \
              mock.patch("config.STATELESS_MODE", True), \
              mock.patch("config.is_url_allowed", return_value=True):
-            text, result_state = process_chat(cfg, state, body, runtime_cfg)
+            text, result_state, _rejected = process_chat(cfg, state, body, runtime_cfg)
 
         convs = result_state.get("conversations", [])
         # 1 root conversation with nested children
@@ -1161,7 +1161,7 @@ class TestDiamondConversationTree(unittest.TestCase):
              "time": "2026-03-01T00:00:00Z"},
         ]
 
-        cfg = Config(state_file=Path("/tmp/test.jsonl"))
+        cfg = Config(state_file=Path("/tmp/test.xml"))
         body = {"message": "Hello"}
         runtime_cfg = {
             "providers": {
@@ -1196,7 +1196,7 @@ class TestDiamondConversationTree(unittest.TestCase):
              }), \
              mock.patch("config.STATELESS_MODE", True), \
              mock.patch("config.is_url_allowed", return_value=True):
-            text, result_state = process_chat(cfg, state, body, runtime_cfg)
+            text, result_state, _rejected = process_chat(cfg, state, body, runtime_cfg)
 
         convs = result_state.get("conversations", [])
         self.assertEqual(len(convs), 1)

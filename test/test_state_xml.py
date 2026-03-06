@@ -318,12 +318,12 @@ class TestAtomicWriteXml(unittest.TestCase):
 
 
 # =====================================================================
-#  Migration roundtrip: JSONL → XML → verify
+#  XML fixture verification
 # =====================================================================
 
 
 class TestMigrationRoundtrip(unittest.TestCase):
-    """Test that existing JSONL data files can be loaded as XML."""
+    """Test that XML fixture files load correctly."""
 
     def _get_data_dir(self):
         return Path(__file__).resolve().parent

@@ -27,10 +27,11 @@ import requests
 from config import Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config, _PROVIDER_MODELS
 from sensation import preprocess_training_example
 from truth import (
-    _fetch_authority_jsonl,
+    _fetch_authority,
     _has_operator_tag,
     compute_degree_of_truth,
     compute_derived_truth,
+    detect_asymmetric_claim,
     detect_identifiability,
     ensure_xhtml,
     filter_knowledge_only,
@@ -57,7 +58,6 @@ from state import (
     load_state_file,
     merge_llm_states,
     normalize_conversation,
-    atomic_write_jsonl,
     atomic_write_xml,
     state_to_xml,
 )
@@ -173,7 +173,7 @@ def resolve_provider_truth(
 ) -> List[Source]:
     """Resolve a provider's private truth table from its authority_url.
 
-    Uses the same JSONL format and fetch logic as authority resolution.
+    Uses the same fetch logic as authority resolution.
     Trust is scaled by the provider entry's trust.
     Returns Source objects ready for injection into the provider's bundle.
     """
@@ -181,7 +181,7 @@ def resolve_provider_truth(
     if not authority_url:
         return []
 
-    raw_entries = _fetch_authority_jsonl(
+    raw_entries = _fetch_authority(
         authority_url, timeout_s=30,
         allowed_data_dir=allowed_data_dir,
     )
@@ -190,7 +190,7 @@ def resolve_provider_truth(
     provider_trust = provider_entry.get("trust", 0.0)
     sources = []
     for entry in raw_entries:
-        # JSONL files may use "trust" or "certainty" as the key
+        # Legacy files may use "trust" or "certainty" as the key
         remote_trust = entry.get("trust", entry.get("certainty", 0.0))
         try:
             remote_trust = float(remote_trust)
@@ -691,21 +691,14 @@ def _load_state(cfg: Config, *, strict: bool = True) -> Dict[str, Any]:
 
 
 def _save_state(cfg: Config, state: Dict[str, Any]) -> None:
-    """Normalize, size-check, and atomically persist state to disk.
-
-    Writes XML when the state file has an ``.xml`` extension; falls back
-    to JSONL otherwise.
-    """
+    """Normalize, size-check, and atomically persist state to disk as XML."""
     normalized = ensure_minimal_state(state, strict=True)
     normalized["time"] = utc_now_iso()
     # Size check (use JSON for estimation — close enough for both formats)
     serialized = json.dumps(normalized, ensure_ascii=False)
     if len(serialized.encode("utf-8")) > cfg.max_state_bytes:
         raise StateValidationError("State exceeds MAX_STATE_BYTES")
-    if cfg.state_file.suffix.lower() == ".xml":
-        atomic_write_xml(cfg.state_file, normalized, reject_symlinks=cfg.reject_symlinks)
-    else:
-        atomic_write_jsonl(cfg.state_file, normalized, reject_symlinks=cfg.reject_symlinks)
+    atomic_write_xml(cfg.state_file, normalized, reject_symlinks=cfg.reject_symlinks)
 
 
 # ---------------------------------------------------------------------------
@@ -1324,7 +1317,7 @@ def _scan_and_merge_imports(cfg: Config) -> Dict[str, Any]:
 
     root = cfg.state_file.parent
     candidates = sorted(
-        list(root.glob("llm_*.jsonl")) + list(root.glob("llm_*.json")) + list(root.glob("llm_*.xml"))
+        list(root.glob("llm_*.xml")) + list(root.glob("llm_*.json"))
     )
     for path in candidates:
         if path.resolve() == cfg.state_file:
@@ -1386,10 +1379,10 @@ def process_chat(
     state: Dict[str, Any],
     body: Dict[str, Any],
     runtime_cfg: Dict[str, Any],
-) -> tuple[str, Dict[str, Any]]:
+) -> tuple[str, Dict[str, Any], list[dict]]:
     """Process a chat turn: derive truth, call providers, update conversations.
 
-    Returns (response_text, updated_state).
+    Returns (response_text, updated_state, symmetry_rejected).
     """
     import config as config_mod
 
@@ -1550,8 +1543,8 @@ def process_chat(
     #
     # The final node lives as a child of each beta (true DAG merge).
     # The same final object appears in every beta's children list so
-    # that navigating down from *any* beta reaches it.  The JSONL
-    # flatten/nest helpers dedup by ID.
+    # that navigating down from *any* beta reaches it.  The XML
+    # serializer deduplicates by ID.
     #
     # Without voting, it's a simple linear conversation:
     #   conv: [user_query, alpha_response]
@@ -1689,6 +1682,7 @@ def process_chat(
 
     # ── Post-response pipeline: DoT + truth merge + online training ──
     # These stages run after the user has received the response.
+    symmetry_rejected: list[dict] = []
     server_cfg = runtime_cfg.get("server", {})
     ot_cfg = server_cfg.get("online_training", {})
     if ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE:
@@ -1703,7 +1697,7 @@ def process_chat(
             # Ensure user GUID is stored at root level of state
             state["user_guid"] = author_guid
 
-            server_truth_path = Path(ot_cfg.get("truth_corpus_path", "data/truth.jsonl"))
+            server_truth_path = Path(ot_cfg.get("truth_corpus_path", "data/truth.xml"))
             server_truth = load_server_truth(server_truth_path)
 
             # Stage 2: compute DegreeOfTruth (before merge so it measures
@@ -1724,7 +1718,7 @@ def process_chat(
             # Stage 3: merge client truth into server truth
             # Filter per Entanglement Policy (doc/Entanglement.md):
             # - When store_particulars is false (default), only universal
-            #   (synchronic/knowledge) facts persist to the truth table.
+            #   facts persist to the truth table.
             # - Identifiable content is always filtered regardless.
             if not ot_cfg.get("store_particulars", False):
                 client_truth = filter_knowledge_only(client_truth)
@@ -1732,6 +1726,20 @@ def process_chat(
                 e for e in client_truth
                 if not detect_identifiability(e.get("content", ""))
             ]
+            # Symmetry check (doc/Ethics.md §5-8)
+            if ot_cfg.get("truth_symmetry", True):
+                surviving = []
+                for e in client_truth:
+                    reason = detect_asymmetric_claim(e.get("content", ""))
+                    if reason:
+                        symmetry_rejected.append({
+                            "id": e.get("id", ""),
+                            "content": e.get("content", ""),
+                            "reason": reason,
+                        })
+                    else:
+                        surviving.append(e)
+                client_truth = surviving
             merge_rate = float(ot_cfg.get("merge_rate", 0.1))
             server_truth = merge_client_truth(
                 server_truth, client_truth,
@@ -1797,4 +1805,4 @@ def process_chat(
         except Exception as exc:
             print(f"[WikiOracle] Online training pipeline error: {exc}")
 
-    return response_text, state
+    return response_text, state, symmetry_rejected

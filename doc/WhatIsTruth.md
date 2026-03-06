@@ -215,7 +215,7 @@ WikiOracle prevents this by:
    the XHTML content.
 2. **Filtering** server persistence through `filter_knowledge_only()` — only
    knowledge facts reach the server truth table.
-3. **Detecting** identity-collapse risk via `detect_identity_collapse()` —
+3. **Detecting** identifiability via `detect_identifiability()` —
    scanning content for PII patterns (emails, phone numbers, GPS coordinates,
    street addresses, named persons with temporal prepositions).
 4. **Stripping** spacetime child elements via `strip_spacetime_elements()` when

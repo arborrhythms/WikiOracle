@@ -46,7 +46,7 @@ WikiOracle renders user and LLM content as HTML (XHTML subset). Several layers m
 
 ```
 default-src 'self';
-script-src 'self' https://d3js.org https://cdnjs.cloudflare.com;
+script-src 'self';
 style-src 'self';
 img-src 'self' data:;
 connect-src 'self';
@@ -56,7 +56,7 @@ frame-ancestors 'none';
 form-action 'self'
 ```
 
-This blocks inline scripts, inline styles, and external resource loading (except D3 and js-yaml from their CDNs). Even if malicious content is injected into a message, the browser will refuse to execute it.
+This blocks inline scripts, inline styles, and external resource loading. Even if malicious content is injected into a message, the browser will refuse to execute it.
 
 **XHTML enforcement:** The system context instructs the LLM to return strictly valid XHTML. The client validates responses and repairs malformed markup via `validateXhtml()` and `repairXhtml()` before rendering.
 

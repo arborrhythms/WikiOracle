@@ -452,6 +452,7 @@ CONFIG_SCHEMA = [
     ("server.online_training.dissonance_enabled", "Detect and penalize contradictions"),
     ("server.online_training.device",  "Training device: auto | cpu | cuda (default: cpu)"),
     ("server.online_training.operators_dynamic_enabled", "Load custom operators from operators/operators.jsonl"),
+    ("server.online_training.store_particulars", "Store particular (diachronic/news) facts in truth table (see doc/Entanglement.md)"),
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
     ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
@@ -727,6 +728,7 @@ def _normalize_config(cfg_data: dict) -> dict:
     ot.setdefault("device", "cpu")
     ot.setdefault("dissonance_enabled", True)
     ot.setdefault("operators_dynamic_enabled", True)
+    ot.setdefault("store_particulars", False)
     server.setdefault("stateless", False)
     server.setdefault("url_prefix", "")
     server.setdefault("allowed_urls", _default_allowed_urls())

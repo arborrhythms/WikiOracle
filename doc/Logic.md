@@ -114,7 +114,7 @@ The classification is stored in the `kind` attribute of `<fact>` tags:
 
 Knowledge facts are persisted to the server truth table (`truth.jsonl`) because they represent universal claims.  News facts are session-only because they are spatiotemporally bound — persisting them risks "worldline capture" where an observer could reconstruct a user's physical trajectory through time and space.
 
-The `detect_identity_collapse()` function in `bin/truth.py` provides an additional safety layer by scanning content for PII patterns (email addresses, phone numbers, GPS coordinates, street addresses, etc.) that could identify a user through spatiotemporal observation.
+The `detect_identifiability()` function in `bin/truth.py` provides an additional safety layer by scanning content for PII patterns (email addresses, phone numbers, GPS coordinates, street addresses, etc.) that could identify a user through spatiotemporal observation.
 
 ---
 

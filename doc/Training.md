@@ -196,7 +196,13 @@ and training happen after the response is delivered.
 
 **Stage 3 — Update server truth table**
 
-5. Merge the user's truth entries into the server truth table
+5. Filter client truth per the Entanglement Policy (doc/Entanglement.md):
+   - When `store_particulars` is false (default), only universal
+     (synchronic/knowledge) facts pass through (`filter_knowledge_only()`).
+   - Entries with identifiable content are always filtered regardless
+     of `store_particulars` (`detect_identifiability()`).
+   - Feelings never reach the merge (already excluded by `_extract_facts()`).
+6. Merge the surviving truth entries into the server truth table
    (`truth.xml`):
    - **Match found**: nudge the server entry's trust toward the incoming
      value using a slow‑moving average:
@@ -208,11 +214,11 @@ and training happen after the response is delivered.
 
 **Stage 4 — Tag and Train**
 
-6. Preprocess the training example through Sensation (`sensation.py`)
+7. Preprocess the training example through Sensation (`sensation.py`)
    to add `<Q>`/`<R>` and `<fact>`/`<feeling>` XML tags.
-7. Call NanoChat's online training endpoint with the tagged prompt and
+8. Call NanoChat's online training endpoint with the tagged prompt and
    DegreeOfTruth.
-8. NanoChat performs a **single optimizer step** at:
+9. NanoChat performs a **single optimizer step** at:
 
        lr_effective = lr_base × |DegreeOfTruth|
 
@@ -243,14 +249,18 @@ used for state files (WikiOracle State).  Each truth entry is an
 Entry types stored: `<fact>` (knowledge — no `<place>`/`<time>` children),
 `<reference>`, `<authority>`, and operators (`<and>`, `<or>`, `<not>`, `<non>`).
 
-Entry types **not** stored: `<feeling>`, `<provider>`, news facts
-(facts with `<place>` or `<time>` child elements).
+Entry types **not** stored: `<feeling>`, `<provider>`, and (when
+`store_particulars` is false) news facts with `<place>` or `<time>`
+child elements.  Content matching identifiability patterns (PII) is
+always excluded.
 
-News facts are excluded because they are spatiotemporally bound — persisting
-them risks worldline capture.  News facts are identified by the presence
-of `<place>` or `<time>` child elements with real values (not placeholders
-like "[unverified]" or "unknown").  See `filter_knowledge_only()` in
-`bin/truth.py` and `detect_identity_collapse()` for PII detection.
+News facts are spatiotemporally bound — persisting them risks worldline
+capture.  Whether to store them is a user choice controlled by
+`store_particulars` in config.xml (default false), consistent with
+Zero-Knowledge / Selective Disclosure principles.  See
+`filter_knowledge_only()` in `bin/truth.py` and
+`detect_identifiability()` for PII detection.  See
+doc/Entanglement.md for the full policy.
 
 The server truth table includes the user GUID as a trust entry, so the
 server can track per‑user trust alongside factual claims.

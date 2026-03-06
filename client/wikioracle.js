@@ -141,6 +141,13 @@ function confirmAction(msg) {
   return true;
 }
 
+// True if the conversation is a leaf node (no children).
+function _isTerminalNode(convId) {
+  if (!convId) return false;
+  var conv = findConversation(state.conversations, convId);
+  return conv && (!conv.children || conv.children.length === 0);
+}
+
 // ─── Tree navigation ───
 
 function navigateToNode(nodeId, path) {
@@ -834,7 +841,7 @@ function renderMessages() {
     const placeholder = document.createElement("div");
     placeholder.className = "chat-placeholder";
     if (_pendingBranchParent) {
-      placeholder.textContent = "Type a message to create a new branch.";
+      placeholder.textContent = "Type a message, or send empty for another response.";
     } else {
       placeholder.textContent = "No messages in this conversation.";
     }
@@ -919,7 +926,9 @@ function _updatePlaceholder() {
 async function sendMessage() {
   const input = document.getElementById("msgInput");
   const text = input.value.trim();
-  if (!text) return;
+  // Allow empty sends only at terminal (leaf) nodes or pending branches
+  const isTerminal = _pendingBranchParent || _isTerminalNode(state.selected_conversation);
+  if (!text && !isTerminal) return;
 
   input.value = "";
   input.style.height = "auto";
@@ -946,29 +955,29 @@ async function sendMessage() {
   console.log("[WikiOracle] sendMessage: convId=", conversationId,
               "branchFrom=", branchFrom, "newRoot=", isNewRoot);
 
-  // Optimistic UI: show user message immediately
+  // Optimistic UI: show user message immediately (skip for empty sends)
   const optimisticMsgId = generateUUID();
   const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  const userEntry = {
+  const userEntry = text ? {
     id: optimisticMsgId,
     role: "user",
     username: config.user.name || "User",
     time: now,
     content: `<p>${escapeHtml(text)}</p>`,
     _pending: true,
-  };
+  } : null;
 
   if (conversationId) {
     // Append to existing conversation
     const conv = findConversation(state.conversations, conversationId);
-    if (conv) conv.messages.push(userEntry);
+    if (conv && userEntry) conv.messages.push(userEntry);
   } else if (branchFrom || isNewRoot) {
     // Create temporary optimistic conversation
     const optConvId = generateUUID();
     const optConv = {
       id: optConvId,
-      title: text.slice(0, 50),
-      messages: [userEntry],
+      title: text ? text.slice(0, 50) : "(continue)",
+      messages: userEntry ? [userEntry] : [],
       children: [],
       parentId: branchFrom || null,
     };
@@ -1509,7 +1518,7 @@ function bindEvents() {
     (function() {
       var container = document.getElementById("chatContainer");
       var startY = null, startX = null;
-      var SWIPE_THRESHOLD = 80;  // minimum px travel to count as directional swipe
+      var SWIPE_THRESHOLD = 55;  // minimum px travel (~30% more sensitive than 80)
 
       container.addEventListener("touchstart", function(e) {
         if (e.touches.length === 1) {

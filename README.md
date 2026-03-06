@@ -50,6 +50,8 @@ WikiOracle implements a **Hierarchical Mixture of Experts (HME)** architecture f
 - **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the truth table.
 - **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
 - **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
+- **Feelings** are subjective statements (opinions, poetry, hedged claims) occupying the "neither" position in the tetralemma. They influence evaluation but are excluded from training and truth tables.
+- **References** are external source citations (Wikipedia, Snopes, etc.) that ground claims in verifiable sources, participating in the truth table alongside facts.
 
 The UI-selected provider acts as the "mastermind," synthesizing all evidence — facts, references, operator-derived certainty, authority imports, and provider consultations — into a final response.
 
@@ -62,7 +64,7 @@ See the [documentation](doc/README.md) for the full design.
 The initial prototype is intentionally modest and low-cost:
 
 - Hierarchical, multi-LLM architecture for runtime-configurable Hierarchical Mixture of Experts.
-- User-specified truth sets (facts, collections, LLMs, authorities, ...)
+- User-specified truth sets (facts, feelings, references, collections, LLMs, authorities, ...)
 - Online learning constrained by trust and epistemic grounding
 - Extends [NanoChat](https://github.com/karpathy/nanochat) with Retrieval-Augmented Generation (RAG)
 - Allows feasible experiments in LLM architectures on rented compute (~$100 scale)
@@ -110,7 +112,9 @@ The full design and governance documentation lives in [`doc/`](doc/README.md):
 | [FreedomEmpathyTruth](doc/FreedomEmpathyTruth.md) | Freedom, Empathy, and Truth — safety principles |
 | [Architecture](doc/Architecture.md) | Local-first software architecture |
 | [Training](doc/Training.md) | DegreeOfTruth, Sensation preprocessing, online training pipeline |
+| [Entanglement](doc/Entanglement.md) | Worldline entanglement policy, spatiotemporal persistence, three-channel separation |
 | [Security](doc/Security.md) | Security considerations |
+| [ProposedLicense](doc/ProposedLicense.md) | Licensing architecture: GPL-3.0 code, CC BY-SA 4.0 content, Apache-2.0 weights |
 | [Installation](doc/Installation.md) | Build, deploy, and runtime instructions |
 | [BuddhistLogic](doc/BuddhistLogic.md) | Buddhist pramana theory, tetralemma, Kleene logic mapping |
 | [FutureWork](doc/FutureWork.md) | Roadmap: trust network, sentence-level prediction, mereological operations, MCP integration |

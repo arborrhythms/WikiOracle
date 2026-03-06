@@ -14,11 +14,13 @@ Recommended reading order:
 7. `FreedomEmpathyTruth.md` (Freedom, Empathy, and Truth — safety principles)
 8. `Architecture.md` (current local-first software architecture)
 9. `Training.md` (DegreeOfTruth, Sensation preprocessing, online training pipeline, Hopfield dynamics)
-10. `Security.md` (concrete security considerations)
-11. `Installation.md` (build, deploy, and runtime instructions)
-12. `FutureWork.md` (roadmap)
-13. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
-14. `BuddhistLogic.md` (pramana theory, tetralemma, Kleene logic mapping)
+10. `Entanglement.md` (worldline entanglement policy, spatiotemporal persistence, three-channel separation)
+11. `Security.md` (concrete security considerations)
+12. `ProposedLicense.md` (licensing architecture)
+13. `Installation.md` (build, deploy, and runtime instructions)
+14. `FutureWork.md` (roadmap)
+15. `WikiOracle.md` (consistency-first framing; document starts with "OpenMind")
+16. `BuddhistLogic.md` (pramana theory, tetralemma, Kleene logic mapping)
 
 ## Core Documents (doc/)
 
@@ -34,6 +36,8 @@ Recommended reading order:
 - [`Security.md`](./Security.md): local-first security considerations (keys, CSP/XSS, CORS, filesystem, scraping/capture).
 - [`Architecture.md`](./Architecture.md): implementation architecture (Flask shim + UI + `state.xml` state model).
 - [`Training.md`](./Training.md): DegreeOfTruth (−1..+1), Korzybski IS detection (Sensation preprocessing), online training pipeline, checkpoint backup/restore, Hopfield network dynamics.
+- [`Entanglement.md`](./Entanglement.md): worldline entanglement policy, spatiotemporal persistence, three-channel separation (knowing/learning/valuing).
+- [`ProposedLicense.md`](./ProposedLicense.md): licensing architecture — GPL-3.0 for code, CC BY-SA 4.0 for content, Apache-2.0 for weights.
 - [`Installation.md`](./Installation.md): build, deploy, and runtime instructions.
 - [`FutureWork.md`](./FutureWork.md): future directions (trust network, sentence-level prediction, conceptual-space operations, MCP integration).
 - [`WikiOracle.md`](./WikiOracle.md): a consistency-first design note (historically labeled "OpenMind" in the text).

@@ -610,8 +610,12 @@ _IDENTITY_PATTERNS = [
 ]
 
 
-def detect_identity_collapse(content: str) -> bool:
-    """Check if content contains information that could collapse identity.
+def detect_identifiability(content: str) -> bool:
+    """Check if content contains information that identifies a particular entity.
+
+    This is a particular case of detecting *particularity* — content
+    that collapses a general proposition onto a specific identity,
+    place, or time.
 
     Detects:
     - Usernames/handles (user123, @handle)

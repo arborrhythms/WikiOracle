@@ -31,7 +31,9 @@ from truth import (
     _has_operator_tag,
     compute_degree_of_truth,
     compute_derived_truth,
+    detect_identifiability,
     ensure_xhtml,
+    filter_knowledge_only,
     get_authority_entries,
     get_provider_entries,
     load_server_truth,
@@ -1509,19 +1511,22 @@ def process_chat(
     llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
     llm_model = query_config.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
 
-    user_content = ensure_xhtml(user_msg)
+    user_content = ensure_xhtml(user_msg) if user_msg else ""
     assistant_content = ensure_xhtml(response_text)
     assistant_timestamp = utc_now_iso()
     user_display = runtime_cfg.get("user", {}).get("name", "User")
     llm_display = llm_provider_name
 
-    query_entry = {
-        "role": "user",
-        "username": user_display,
-        "time": user_timestamp,
-        "content": user_content,
-    }
-    ensure_message_id(query_entry)
+    if user_msg:
+        query_entry = {
+            "role": "user",
+            "username": user_display,
+            "time": user_timestamp,
+            "content": user_content,
+        }
+        ensure_message_id(query_entry)
+    else:
+        query_entry = None
 
     response_entry = {
         "role": "assistant",
@@ -1554,7 +1559,7 @@ def process_chat(
     has_vote = bool(prelim_response and provider_sources)
 
     if has_vote:
-        first_words = strip_xhtml(user_content)[:50]
+        first_words = strip_xhtml(user_content)[:50] if user_content else "(continue)"
 
         # Root: user question + alpha preliminary
         prelim_entry = {
@@ -1599,9 +1604,11 @@ def process_chat(
         final_normalized["parentId"] = beta_ids
 
         # Assemble the root with betas as children
+        root_messages = ([query_entry, prelim_entry] if query_entry
+                         else [prelim_entry])
         vote_root = {
             "title": first_words,
-            "messages": [query_entry, prelim_entry],
+            "messages": root_messages,
             "children": [normalize_conversation(b) for b in beta_convs],
             "parentId": None,
         }
@@ -1611,10 +1618,11 @@ def process_chat(
         state["selected_conversation"] = final_conv["id"]
     else:
         # No voting — simple linear conversation
-        all_messages = [query_entry, response_entry]
+        all_messages = ([query_entry, response_entry] if query_entry
+                        else [response_entry])
 
         if conversation_id:
-            if not client_owns_query:
+            if query_entry and not client_owns_query:
                 add_message_to_conversation(conversations, conversation_id, query_entry)
             add_message_to_conversation(conversations, conversation_id, response_entry)
             state["selected_conversation"] = conversation_id
@@ -1626,7 +1634,7 @@ def process_chat(
                     opt["messages"].append(response_entry)
                     state["selected_conversation"] = opt["id"]
                 else:
-                    first_words = strip_xhtml(user_content)[:50]
+                    first_words = strip_xhtml(user_content)[:50] if user_content else "(continue)"
                     new_conv = {
                         "title": first_words,
                         "messages": all_messages,
@@ -1637,7 +1645,7 @@ def process_chat(
                     add_child_conversation(conversations, branch_from, new_conv)
                     state["selected_conversation"] = new_conv["id"]
             else:
-                first_words = strip_xhtml(user_content)[:50]
+                first_words = strip_xhtml(user_content)[:50] if user_content else "(continue)"
                 new_conv = {
                     "title": first_words,
                     "messages": all_messages,
@@ -1655,7 +1663,7 @@ def process_chat(
                     opt["messages"].append(response_entry)
                     state["selected_conversation"] = opt["id"]
                 else:
-                    first_words = strip_xhtml(user_content)[:50]
+                    first_words = strip_xhtml(user_content)[:50] if user_content else "(continue)"
                     new_conv = {
                         "title": first_words,
                         "messages": all_messages,
@@ -1666,7 +1674,7 @@ def process_chat(
                     conversations.append(normalize_conversation(new_conv))
                     state["selected_conversation"] = new_conv["id"]
             else:
-                first_words = strip_xhtml(user_content)[:50]
+                first_words = strip_xhtml(user_content)[:50] if user_content else "(continue)"
                 new_conv = {
                     "title": first_words,
                     "messages": all_messages,
@@ -1714,6 +1722,16 @@ def process_chat(
             dot = compute_degree_of_truth(server_truth, client_truth)
 
             # Stage 3: merge client truth into server truth
+            # Filter per Entanglement Policy (doc/Entanglement.md):
+            # - When store_particulars is false (default), only universal
+            #   (synchronic/knowledge) facts persist to the truth table.
+            # - Identifiable content is always filtered regardless.
+            if not ot_cfg.get("store_particulars", False):
+                client_truth = filter_knowledge_only(client_truth)
+            client_truth = [
+                e for e in client_truth
+                if not detect_identifiability(e.get("content", ""))
+            ]
             merge_rate = float(ot_cfg.get("merge_rate", 0.1))
             server_truth = merge_client_truth(
                 server_truth, client_truth,

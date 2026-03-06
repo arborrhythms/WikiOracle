@@ -126,7 +126,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         # Content Security Policy (enforcing)
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' https://cdnjs.cloudflare.com; "
+            "script-src 'self'; "
             "style-src 'self'; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
@@ -274,7 +274,9 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
         body = flask_request.get_json(force=True, silent=True) or {}
         user_msg = (body.get("message") or "").strip()
-        if not user_msg:
+        conversation_id = body.get("conversation_id")
+        branch_from = body.get("branch_from")
+        if not user_msg and not conversation_id and not branch_from:
             return jsonify({"ok": False, "error": "missing_message"}), 400
 
         # ── Stateless mode: client must supply state + runtime_config ──

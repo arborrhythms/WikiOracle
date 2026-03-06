@@ -11,7 +11,7 @@ from truth import (
     is_news_fact,
     is_knowledge_fact,
     filter_knowledge_only,
-    detect_identity_collapse,
+    detect_identifiability,
     strip_spacetime_elements,
 )
 
@@ -119,46 +119,46 @@ class TestFilterKnowledgeOnly(unittest.TestCase):
 
 
 # =====================================================================
-#  PII / identity-collapse detection
+#  Identifiability detection (particularity)
 # =====================================================================
 
 
-class TestDetectIdentityCollapse(unittest.TestCase):
-    """Test PII pattern detection in content."""
+class TestDetectIdentifiability(unittest.TestCase):
+    """Test PII / identifiability pattern detection in content."""
 
     def test_email(self):
-        self.assertTrue(detect_identity_collapse("Contact me at user@example.com"))
+        self.assertTrue(detect_identifiability("Contact me at user@example.com"))
 
     def test_phone(self):
-        self.assertTrue(detect_identity_collapse("Call 555-123-4567"))
+        self.assertTrue(detect_identifiability("Call 555-123-4567"))
 
     def test_phone_intl(self):
-        self.assertTrue(detect_identity_collapse("Call +1-555-123-4567"))
+        self.assertTrue(detect_identifiability("Call +1-555-123-4567"))
 
     def test_handle(self):
-        self.assertTrue(detect_identity_collapse("Follow me @johndoe on Twitter"))
+        self.assertTrue(detect_identifiability("Follow me @johndoe on Twitter"))
 
     def test_ip_address(self):
-        self.assertTrue(detect_identity_collapse("Server at 192.168.1.100"))
+        self.assertTrue(detect_identifiability("Server at 192.168.1.100"))
 
     def test_gps_coords(self):
-        self.assertTrue(detect_identity_collapse("Located at 48.8566, 2.3522"))
+        self.assertTrue(detect_identifiability("Located at 48.8566, 2.3522"))
 
     def test_street_address(self):
-        self.assertTrue(detect_identity_collapse("I live at 123 Main Street"))
+        self.assertTrue(detect_identifiability("I live at 123 Main Street"))
 
     def test_clean_knowledge(self):
-        self.assertFalse(detect_identity_collapse("Water is composed of hydrogen and oxygen"))
+        self.assertFalse(detect_identifiability("Water is composed of hydrogen and oxygen"))
 
     def test_clean_fact(self):
-        self.assertFalse(detect_identity_collapse("The Earth orbits the Sun"))
+        self.assertFalse(detect_identifiability("The Earth orbits the Sun"))
 
     def test_city_name_detection(self):
-        self.assertTrue(detect_identity_collapse("I was in Tokyo yesterday"))
+        self.assertTrue(detect_identifiability("I was in Tokyo yesterday"))
 
     def test_xhtml_tags_stripped(self):
         self.assertTrue(
-            detect_identity_collapse('<fact trust="0.5">Contact user@example.com</fact>')
+            detect_identifiability('<fact trust="0.5">Contact user@example.com</fact>')
         )
 
 
@@ -211,6 +211,57 @@ class TestStripSpacetimeElements(unittest.TestCase):
         content = "<feeling>Just a feeling</feeling>"
         result = strip_spacetime_elements(content)
         self.assertIn("Just a feeling", result)
+
+
+# =====================================================================
+#  Stage 3 merge filtering (Entanglement Policy enforcement)
+# =====================================================================
+
+
+class TestStage3Filtering(unittest.TestCase):
+    """Test that Entanglement Policy filters are applied correctly."""
+
+    def _make_entries(self):
+        """Build a mixed list of knowledge, news, and identifiable entries."""
+        return [
+            {"id": "k1", "content": '<fact trust="0.5">Water is H2O</fact>'},
+            {"id": "n1", "content": '<fact trust="0.5"><place>Paris</place><time>2026-03-05</time>It rained</fact>'},
+            {"id": "k2", "content": '<fact trust="0.5">Gravity attracts mass</fact>'},
+            {"id": "pii", "content": '<fact trust="0.5">Contact user@example.com for details</fact>'},
+        ]
+
+    def test_store_particulars_false_filters_news(self):
+        """When store_particulars=False, news facts are excluded."""
+        entries = self._make_entries()
+        filtered = filter_knowledge_only(entries)
+        filtered = [e for e in filtered if not detect_identifiability(e.get("content", ""))]
+        ids = [e["id"] for e in filtered]
+        self.assertIn("k1", ids)
+        self.assertIn("k2", ids)
+        self.assertNotIn("n1", ids)
+        self.assertNotIn("pii", ids)
+
+    def test_store_particulars_true_preserves_news(self):
+        """When store_particulars=True, news facts pass through (but PII still filtered)."""
+        entries = self._make_entries()
+        # Skip filter_knowledge_only (store_particulars=True)
+        filtered = [e for e in entries if not detect_identifiability(e.get("content", ""))]
+        ids = [e["id"] for e in filtered]
+        self.assertIn("k1", ids)
+        self.assertIn("k2", ids)
+        self.assertIn("n1", ids)
+        self.assertNotIn("pii", ids)
+
+    def test_identifiability_always_filters(self):
+        """PII entries are filtered even when store_particulars=True."""
+        entries = [
+            {"id": "pii1", "content": '<fact trust="0.5">Call 555-123-4567</fact>'},
+            {"id": "pii2", "content": '<fact trust="0.5">Located at 48.8566, 2.3522</fact>'},
+            {"id": "clean", "content": '<fact trust="0.5">The sky is blue</fact>'},
+        ]
+        filtered = [e for e in entries if not detect_identifiability(e.get("content", ""))]
+        ids = [e["id"] for e in filtered]
+        self.assertEqual(ids, ["clean"])
 
 
 if __name__ == "__main__":

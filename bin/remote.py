@@ -5,11 +5,11 @@ Clones from GitHub, then rsyncs any local modifications on top.
 After training completes, retrieve artifacts with the 'retrieve' subcommand.
 
 Usage:
-    python remote.py launch [--instance-type=p4d.24xlarge] [--region=us-west-2] ...
-    python remote.py retrieve   # Pull artifacts, generate summary, terminate
-    python remote.py ssh
-    python remote.py logs
-    python remote.py status
+    python bin/remote.py launch [--instance-type=p4d.24xlarge] [--region=us-west-2] ...
+    python bin/remote.py retrieve   # Pull artifacts, generate summary, terminate
+    python bin/remote.py ssh
+    python bin/remote.py logs
+    python bin/remote.py status
 """
 
 import argparse
@@ -101,7 +101,7 @@ def read_state(name):
     """Read a value from the state directory."""
     path = STATE_DIR / name
     if not path.exists():
-        print(f"Error: {path} not found. Run 'python remote.py launch' first.")
+        print(f"Error: {path} not found. Run 'python bin/remote.py launch' first.")
         sys.exit(1)
     return path.read_text().strip()
 
@@ -110,7 +110,7 @@ def read_run_meta():
     """Read run metadata from state directory."""
     path = STATE_DIR / "run-meta.json"
     if not path.exists():
-        print(f"Error: {path} not found. Run 'python remote.py launch' first.")
+        print(f"Error: {path} not found. Run 'python bin/remote.py launch' first.")
         sys.exit(1)
     return json.loads(path.read_text())
 

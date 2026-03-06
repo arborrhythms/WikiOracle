@@ -15,5 +15,3 @@ __pycache__/
 /conversations/*.json
 /conversations/*.jsonl
 /bin/__pycache__/
-data/checkpoints/
-data/conversations/

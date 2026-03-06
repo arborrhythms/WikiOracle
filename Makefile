@@ -15,7 +15,7 @@ NANOCHAT_BASE    := $(CURDIR)/$(NANOCHAT_DIR)
 IDENTITY_DATA    := $(NANOCHAT_BASE)/identity_conversations.jsonl
 
 # Checkpoint backup (for rollback before/after online training)
-CHECKPOINT_BAK   := data/checkpoints
+CHECKPOINT_BAK   := output/checkpoints
 WO_NANOCHAT      ?= /opt/bitnami/wordpress/files/wikiOracle.org/nanochat
 WO_CHECKPOINT    := $(WO_NANOCHAT)/chatsft_checkpoints
 IDENTITY_URL     := https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
@@ -153,8 +153,8 @@ help:
 	@echo "  make wo-chat-logs          Tail chat shim logs on WikiOracle"
 	@echo ""
 	@echo "Checkpoint Backup (WikiOracle ↔ local):"
-	@echo "  make checkpoint-pull    Pull SFT weights from WikiOracle → data/checkpoints/"
-	@echo "  make checkpoint-push    Push data/checkpoints/ → WikiOracle SFT weights"
+	@echo "  make checkpoint-pull    Pull SFT weights from WikiOracle → output/checkpoints/"
+	@echo "  make checkpoint-push    Push output/checkpoints/ → WikiOracle SFT weights"
 	@echo ""
 	@echo "OpenClaw (multi-channel front-end):"
 	@echo "  make openclaw-setup        Install OpenClaw dependencies (Slack/Discord/Telegram)"
@@ -200,7 +200,7 @@ endif
 ifndef EC2_TARGET
 	$(error EC2_TARGET is required for remote builds — e.g. make remote EC2_TARGET=all-gpu)
 endif
-	python3 remote.py $(REMOTE_ARGS) launch \
+	python3 bin/remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
 		--disk-size=$(EC2_DISK_SIZE) \
 		--nproc=$(NPROC) \
@@ -210,16 +210,16 @@ endif
 		--alert-email=$(ALERT_EMAIL)
 
 remote-retrieve:
-	python3 remote.py $(REMOTE_ARGS) retrieve
+	python3 bin/remote.py $(REMOTE_ARGS) retrieve
 
 remote-ssh:
-	python3 remote.py $(REMOTE_ARGS) ssh
+	python3 bin/remote.py $(REMOTE_ARGS) ssh
 
 remote-logs:
-	python3 remote.py $(REMOTE_ARGS) logs
+	python3 bin/remote.py $(REMOTE_ARGS) logs
 
 remote-status:
-	python3 remote.py $(REMOTE_ARGS) status
+	python3 bin/remote.py $(REMOTE_ARGS) status
 
 remote-deploy-launch:
 ifndef ALERT_EMAIL
@@ -228,7 +228,7 @@ endif
 ifndef EC2_TARGET
 	$(error EC2_TARGET is required for remote builds — e.g. make remote-deploy-launch EC2_TARGET=all-gpu)
 endif
-	python3 remote.py $(REMOTE_ARGS) launch \
+	python3 bin/remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
 		--disk-size=$(EC2_DISK_SIZE) \
 		--nproc=$(NPROC) \
@@ -239,7 +239,7 @@ endif
 		--deploy $(DEPLOY_ARGS)
 
 remote-deploy:
-	python3 remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
+	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
 
 # --- WikiOracle Server (NanoChat LLM) -----------------------------------------
 

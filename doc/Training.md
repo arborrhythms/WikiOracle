@@ -269,7 +269,7 @@ The server truth table prevents capture by any single user:
 Manual rollback is available via Makefile targets:
 
 - `make checkpoint-pull` — rsync SFT checkpoints from the remote
-  WikiOracle server to `data/checkpoints/` for safekeeping.
+  WikiOracle server to `output/checkpoints/` for safekeeping.
 - `make checkpoint-push` — restore checkpoints from backup, then
   `make wo-restart` to reload weights.
 

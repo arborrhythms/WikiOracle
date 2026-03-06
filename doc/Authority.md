@@ -107,7 +107,7 @@ This means the same remote entry imported through different authorities will hav
 |---|---|
 | `bin/truth.py` | `parse_authority_block()`, `ensure_authority_id()`, `get_authority_entries()`, `resolve_authority_entries()`, `_fetch_authority_jsonl()` |
 | `bin/response.py` | Excludes `<authority>` entries from RAG; resolves authority entries and includes their scaled trust entries as `kind="authority"` sources |
-| `html/util.js` | Trust editor UI: unified XHTML textarea with authority template, authority badge display |
+| `client/util.js` | Trust editor UI: unified XHTML textarea with authority template, authority badge display |
 | `test/hme.xml` | Test data with example authority entry (`auth_test_01`) |
 | `test/hme_authority_fragment.xml` | Test fragment XML with two remote trust entries |
 | `tests/test_authority.py` | Unit tests covering parsing, ID generation, resolution, certainty scaling, and security |

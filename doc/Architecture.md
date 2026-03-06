@@ -23,13 +23,13 @@ Browser  ──HTTP──▸  wikioracle.py  ──HTTP──▸  Upstream LLM
 | Sensation | `bin/sensation.py` | Preprocessing: Korzybski IS detection, XML tagging (`<fact>`/`<feeling>`/`<Q>`/`<R>` with `<place>`/`<time>` child elements), corpus conversion |
 | OpenClaw | `openclaw/` (git submodule) + `bin/openclaw_ext.py` | Multi-channel front-end (Slack/Discord/Telegram) — bridges external platforms to WikiOracle's `/chat` endpoint |
 | NanoChat ext | `bin/nanochat_ext.py` | `POST /train` route mounted onto NanoChat's FastAPI app for online SFT |
-| Client app | `html/wikioracle.js` | State management, API calls, message rendering, drag/context-menu interactions |
-| Client config | `html/config.js` | Config global, sessionStorage persistence, normalization, legacy migration |
-| Client state | `html/state.js` | State global, sessionStorage persistence |
-| Client utils | `html/util.js` | Shared helpers, settings panel, config editor, context/output editors |
-| Client query | `html/query.js` | Server communication layer, conversation tree helpers |
-| Tree renderer | `html/tree.js` | D3.js top-down hierarchy — layout, navigation, drag-to-merge |
-| Shell | `html/index.html` | Single-page app: layout, CSS, settings panel |
+| Client app | `client/wikioracle.js` | State management, API calls, message rendering, drag/context-menu interactions |
+| Client config | `client/config.js` | Config global, sessionStorage persistence, normalization, legacy migration |
+| Client state | `client/state.js` | State global, sessionStorage persistence |
+| Client utils | `client/util.js` | Shared helpers, settings panel, config editor, context/output editors |
+| Client query | `client/query.js` | Server communication layer, conversation tree helpers |
+| Tree renderer | `client/tree.js` | D3.js top-down hierarchy — layout, navigation, drag-to-merge |
+| Shell | `client/index.html` | Single-page app: layout, CSS, settings panel |
 | Data | `data/llm_state.json` | JSON Schema for the state format (legacy) |
 | State schema | `data/state.xsd` | XSD schema for XML state files (WikiOracle State) |
 | Config schema | `data/config.xsd` | XSD schema for `config.xml` validation (WikiOracle Config) |
@@ -123,8 +123,8 @@ In the tree: `Dialogue → Conversation*`, `Conversation → Message* + Conversa
 | POST | `/merge` | Merge an imported state file into current state |
 | GET | `/config` | Normalized config (includes provider metadata and defaults) |
 | POST | `/config` | Accept full config dict; write config.xml to disk |
-| GET | `/` | Serve `html/index.html` |
-| GET | `/<file>` | Serve static assets from `html/` |
+| GET | `/` | Serve `client/index.html` |
+| GET | `/<file>` | Serve static assets from `client/` |
 
 ### Data flow: client ↔ server
 

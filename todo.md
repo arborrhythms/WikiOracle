@@ -23,7 +23,7 @@ For all of the following, after the completion of the task
    - Update `reload_config_yaml()` → `reload_config_xml()`.
    - Update `parse_args()`: `--config` now accepts `.xml` files.
 - [x] 4. **Update `bin/wikioracle.py`**: all YAML references → XML (config endpoint reads/writes XML).
-- [x] 5. **Update `html/config.js` and `html/util.js`**: config editor shows XML instead of YAML.
+- [x] 5. **Update `client/config.js` and `client/util.js`**: config editor shows XML instead of YAML.
 - [x] 6. **Update `Makefile`**: `WO_CHAT_EXTRA` changes from `config.yaml` to `config.xml`.
 - [x] 7. **Update tests**: `test_prompt_bundle.py` and any test reading config.
 - [x] 8. **Update docs**: `Architecture.md`, `Installation.md`, `Training.md` — all YAML references → XML.

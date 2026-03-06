@@ -443,9 +443,9 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 log.exception("POST /config failed")
                 return jsonify({"ok": False, "error": "Configuration update failed"}), 400
 
-    # Static file serving — all UI assets live in html/ subdirectory
+    # Static file serving — all UI assets live in client/ subdirectory
     project_root = Path(__file__).resolve().parent.parent
-    ui_dir = project_root / "html"
+    ui_dir = project_root / "client"
 
     @app.route(url_prefix + "/", methods=["GET"])
     def ui_index():
@@ -459,7 +459,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/<path:filename>", methods=["GET"])
     def static_files(filename):
-        """Serve whitelisted static asset extensions from html/."""
+        """Serve whitelisted static asset extensions from client/."""
         safe_ext = {".html", ".css", ".js", ".svg", ".png", ".ico", ".json", ".jsonl"}
         if Path(filename).suffix.lower() in safe_ext:
             fp = (ui_dir / filename).resolve()

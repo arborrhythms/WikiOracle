@@ -38,7 +38,7 @@ Two-machine deployment model:
 
 Primary orchestration files:
 - `Makefile` for local and remote workflows.
-- `remote.py` for EC2 lifecycle, training orchestration, deployment, and retrieval.
+- `bin/remote.py` for EC2 lifecycle, training orchestration, deployment, and retrieval.
 
 NanoChat model code lives in `nanochat/`.
 
@@ -92,7 +92,7 @@ WikiOracle includes a local Flask server (`bin/wikioracle.py`) that enables chat
 | `bin/response.py` | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4) |
 | `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, spacetime classification, PII detection |
 | `test/test_*.py` | Automated tests for state, stateless contract, prompt bundles, authority, derived truth, DoT, sensation, online training |
-| `html/index.html` | Single-page web UI shell with chat, settings, and merge tools |
+| `client/index.html` | Single-page web UI shell with chat, settings, and merge tools |
 | `state.xml` | Client-owned state file (WikiOracle State XML). See `data/state.xsd` for the XSD schema |
 
 ### Quickstart

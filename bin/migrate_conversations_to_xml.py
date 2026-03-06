@@ -3,13 +3,13 @@
 
 Usage::
 
-    python bin/migrate_conversations_to_xml.py                  # convert data/conversations/*.json → all.xml
+    python bin/migrate_conversations_to_xml.py                  # convert output/conversations/*.json → all.xml
     python bin/migrate_conversations_to_xml.py --dry-run        # preview without writing
     python bin/migrate_conversations_to_xml.py file1.json ...   # convert specific files
     python bin/migrate_conversations_to_xml.py -o out.xml       # custom output path
 
-With no FILE arguments, processes all ``*.json`` in ``data/conversations/``.
-Output is written to ``data/conversations/all.xml`` by default.
+With no FILE arguments, processes all ``*.json`` in ``output/conversations/``.
+Output is written to ``output/conversations/all.xml`` by default.
 Conversations already present (by ID) are skipped for idempotent re-runs.
 
 The output file contains a security canary token that triggers GitHub
@@ -359,7 +359,7 @@ def main() -> None:
     )
     parser.add_argument(
         "files", nargs="*",
-        help="JSON files to convert.  If omitted, all *.json in data/conversations/.",
+        help="JSON files to convert.  If omitted, all *.json in output/conversations/.",
     )
     parser.add_argument(
         "--user", default=None,
@@ -371,12 +371,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--output", "-o", default=None,
-        help="Output XML file path (default: data/conversations/all.xml).",
+        help="Output XML file path (default: output/conversations/all.xml).",
     )
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
-    conversations_dir = project_root / "data" / "conversations"
+    conversations_dir = project_root / "output" / "conversations"
 
     # Determine username.
     user_name = args.user

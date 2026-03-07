@@ -30,6 +30,8 @@ from truth import (
     _coerce_timestamp,
     _is_iso8601_utc,
     _normalize_trust_entry,
+    parse_authority_block,
+    parse_provider_block,
     _stable_sha256,
     _timestamp_sort_key,
     ensure_xhtml,
@@ -42,12 +44,16 @@ from truth import (
 # ---------------------------------------------------------------------------
 # State-level constants
 # ---------------------------------------------------------------------------
-SCHEMA_URL = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/llm_state.json"
-SCHEMA_BASENAME = "llm_state.json"  # Basename accepted when URL host/path vary.
+SCHEMA_URL = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd"
+SCHEMA_BASENAME = "state.xsd"  # Basename accepted when URL host/path vary.
 STATE_VERSION = 2  # Current state grammar version.
-STATE_SCHEMA_ID = "wikioracle.llm_state"  # Stable schema family identifier.
 
 DEFAULT_OUTPUT = ""  # Default output-format instruction when none is configured.
+
+TRUTH_TAGS = ("fact", "feeling", "reference", "and", "or", "not", "non", "provider", "authority")
+_TRUTH_TAG_SET = frozenset(TRUTH_TAGS)
+_TRUTH_METADATA_ATTRS = frozenset({"id", "title", "DoT", "trust", "time", "place", "arg1", "arg2"})
+_PLACEHOLDER_CONVERSATION_TITLES = frozenset({"", "(untitled)", "(continue)", "New branch"})
 
 
 # ---------------------------------------------------------------------------
@@ -62,9 +68,8 @@ def schema_url_matches(value: Any) -> bool:
     basename = value.split("?")[0].split("#")[0].rsplit("/", 1)[-1]
     if basename == SCHEMA_BASENAME:
         return True
-    # Accept versioned variants like llm_state_v2.json
-    stem = SCHEMA_BASENAME.rsplit(".", 1)[0]  # "llm_state"
-    return basename.startswith(stem) and basename.endswith(".json")
+    stem = SCHEMA_BASENAME.rsplit(".", 1)[0]  # "state"
+    return basename.startswith(stem) and basename.endswith(".xsd")
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +112,185 @@ def ensure_conversation_id(conv: dict) -> str:
 # ---------------------------------------------------------------------------
 # Normalization
 # ---------------------------------------------------------------------------
+def _coerce_selected_flag(value: Any) -> bool:
+    """Coerce XML/JSON-ish selected values to a boolean."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"", "0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _normalize_parent_id(value: Any) -> str | list[str] | None:
+    """Normalize parentId to None, one ID string, or a list of IDs."""
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set)):
+        raw_parts = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        raw_parts = text.split(",")
+    parts: list[str] = []
+    seen: set[str] = set()
+    for part in raw_parts:
+        pid = str(part).strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        parts.append(pid)
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return parts
+
+
+def _iter_conversation_paths(conversations: list) -> Iterable[tuple[dict, list[dict]]]:
+    """Yield each conversation with its root-to-node path."""
+    def _walk(nodes: list, path: list[dict]) -> Iterable[tuple[dict, list[dict]]]:
+        for conv in nodes:
+            new_path = path + [conv]
+            yield conv, new_path
+            yield from _walk(conv.get("children", []), new_path)
+
+    yield from _walk(conversations, [])
+
+
+def _collect_selected_flags(conversations: list) -> tuple[list[list[dict]], list[tuple[list[dict], dict]]]:
+    """Collect explicitly selected conversations and messages from the tree."""
+    selected_conversations: list[list[dict]] = []
+    selected_messages: list[tuple[list[dict], dict]] = []
+    for conv, path in _iter_conversation_paths(conversations):
+        if conv.get("selected") is True:
+            selected_conversations.append(path)
+        for msg in conv.get("messages", []):
+            if msg.get("selected") is True:
+                selected_messages.append((path, msg))
+    return selected_conversations, selected_messages
+
+
+def _apply_selection_flags(
+    conversations: list,
+    selected_conversation_id: str | None,
+    selected_message_id: str | None,
+) -> None:
+    """Rewrite selected flags so conversations form one path and messages are singleton."""
+    for conv, path in _iter_conversation_paths(conversations):
+        conv.pop("selected", None)
+        for msg in conv.get("messages", []):
+            msg.pop("selected", None)
+
+    if not selected_conversation_id:
+        return
+
+    selected_chain = get_ancestor_chain(conversations, selected_conversation_id)
+    selected_ids = {conv.get("id") for conv in selected_chain}
+    for conv, path in _iter_conversation_paths(conversations):
+        if conv.get("id") in selected_ids:
+            conv["selected"] = True
+        if conv.get("id") == selected_conversation_id and selected_message_id:
+            for msg in conv.get("messages", []):
+                if msg.get("id") == selected_message_id:
+                    msg["selected"] = True
+                    break
+
+
+def _resolve_selection(
+    conversations: list,
+    selected_hint: Any,
+    selected_message_hint: Any,
+    *,
+    strict: bool,
+) -> tuple[str | None, str | None]:
+    """Resolve conversation/message selection from explicit flags and legacy hints."""
+    selected_hint_id = str(selected_hint).strip() if isinstance(selected_hint, str) and selected_hint.strip() else None
+    selected_message_hint_id = (
+        str(selected_message_hint).strip()
+        if isinstance(selected_message_hint, str) and selected_message_hint.strip()
+        else None
+    )
+
+    conv_paths, msg_refs = _collect_selected_flags(conversations)
+    if strict and len(msg_refs) > 1:
+        raise StateValidationError("Selected messages must be a singleton")
+
+    chosen_msg_path: list[dict] | None = None
+    chosen_msg_id: str | None = None
+    if msg_refs:
+        chosen_msg_path, chosen_msg = msg_refs[0]
+        chosen_msg_id = chosen_msg.get("id")
+        if strict and selected_message_hint_id and selected_message_hint_id != chosen_msg_id:
+            raise StateValidationError("selected_message conflicts with message selected=\"true\"")
+    elif selected_message_hint_id:
+        for conv, _path in _iter_conversation_paths(conversations):
+            for msg in conv.get("messages", []):
+                if msg.get("id") == selected_message_hint_id:
+                    chosen_msg_path = get_ancestor_chain(conversations, conv.get("id"))
+                    chosen_msg_id = selected_message_hint_id
+                    break
+            if chosen_msg_id:
+                break
+        if strict and selected_message_hint_id and not chosen_msg_id:
+            raise StateValidationError(f"Unknown selected_message: {selected_message_hint_id}")
+
+    selected_conversation_id: str | None = None
+
+    if chosen_msg_path:
+        selected_conversation_id = chosen_msg_path[-1].get("id")
+
+    if conv_paths:
+        candidate_path = max(conv_paths, key=len)
+        candidate_ids = [conv.get("id") for conv in candidate_path]
+        for path in conv_paths:
+            path_ids = [conv.get("id") for conv in path]
+            if candidate_ids[:len(path_ids)] != path_ids:
+                if strict:
+                    raise StateValidationError("Selected conversations must form one root-to-node path")
+                candidate_path = path
+                candidate_ids = path_ids
+                break
+        explicit_selected_ids = {path[-1].get("id") for path in conv_paths}
+        candidate_id_set = set(candidate_ids)
+        if strict and explicit_selected_ids != candidate_id_set:
+            raise StateValidationError("Selected conversations must mark every node on the selected path")
+        if selected_conversation_id and selected_conversation_id != candidate_ids[-1]:
+            if strict:
+                raise StateValidationError("Selected message must belong to the terminal selected conversation")
+        else:
+            selected_conversation_id = candidate_ids[-1]
+
+    if selected_hint_id:
+        hint_path = get_ancestor_chain(conversations, selected_hint_id)
+        if strict and not hint_path:
+            raise StateValidationError(f"Unknown selected_conversation: {selected_hint_id}")
+        if hint_path:
+            if selected_conversation_id and selected_conversation_id != selected_hint_id:
+                if strict:
+                    raise StateValidationError("selected_conversation conflicts with selected conversation path")
+            else:
+                selected_conversation_id = selected_hint_id
+
+    if selected_conversation_id:
+        chain = get_ancestor_chain(conversations, selected_conversation_id)
+        if strict and not chain:
+            raise StateValidationError(f"Unknown selected_conversation: {selected_conversation_id}")
+        if chosen_msg_id and chain and chosen_msg_path:
+            chosen_ids = [conv.get("id") for conv in chosen_msg_path]
+            chain_ids = [conv.get("id") for conv in chain]
+            if strict and chosen_ids != chain_ids:
+                raise StateValidationError("Selected message must lie on the selected conversation path")
+    elif chosen_msg_id:
+        selected_conversation_id = chosen_msg_path[-1].get("id") if chosen_msg_path else None
+
+    return selected_conversation_id, chosen_msg_id
+
+
 def _normalize_inner_message(raw: Any) -> dict:
     """Normalize a message inside a conversation (no parent_id, has role)."""
     item = dict(raw) if isinstance(raw, dict) else {}
@@ -123,6 +307,10 @@ def _normalize_inner_message(raw: Any) -> dict:
         else:
             role = "user"
     item["role"] = role
+    if _coerce_selected_flag(item.get("selected", False)):
+        item["selected"] = True
+    else:
+        item.pop("selected", None)
     # Strip legacy fields
     for key in ("parent_id", "type", "title"):
         item.pop(key, None)
@@ -153,6 +341,11 @@ def normalize_conversation(raw: Any, parent_id: str | None = None) -> dict:
     # parentId: use explicit value if already present, otherwise derive from tree
     if "parentId" not in item:
         item["parentId"] = parent_id
+    item["parentId"] = _normalize_parent_id(item.get("parentId"))
+    if _coerce_selected_flag(item.get("selected", False)):
+        item["selected"] = True
+    else:
+        item.pop("selected", None)
     children = item.get("children", [])
     if not isinstance(children, list):
         children = []
@@ -204,8 +397,15 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
     if not isinstance(convs, list):
         convs = []
     state["conversations"] = [normalize_conversation(c) for c in convs]
-
-    state["selected_conversation"] = state.get("selected_conversation", None)
+    selected_conversation, selected_message = _resolve_selection(
+        state["conversations"],
+        state.get("selected_conversation"),
+        state.get("selected_message"),
+        strict=strict,
+    )
+    state["selected_conversation"] = selected_conversation
+    state["selected_message"] = selected_message
+    _apply_selection_flags(state["conversations"], selected_conversation, selected_message)
 
     # Output format instructions (always present; defaults like context)
     output = state.get("output")
@@ -362,6 +562,147 @@ def _get_xhtml_content(el: ET.Element) -> str:
     return "".join(parts).strip() or ""
 
 
+def _find_truth_content_root(content: str) -> ET.Element | None:
+    """Return the first recognized truth element inside *content*."""
+    if not isinstance(content, str) or not content.strip():
+        return None
+    try:
+        wrapper = ET.fromstring(f"<_w>{content}</_w>")
+    except ET.ParseError:
+        return None
+    for child in wrapper:
+        if child.tag in _TRUTH_TAG_SET:
+            return child
+    return None
+
+
+def _clone_element_without_metadata(el: ET.Element) -> ET.Element:
+    """Deep-copy an XML element and strip envelope metadata attributes."""
+    clone = copy.deepcopy(el)
+    for attr in list(clone.attrib):
+        if attr in _TRUTH_METADATA_ATTRS:
+            del clone.attrib[attr]
+    return clone
+
+
+def _element_has_explicit_config(el: ET.Element | None, key: str) -> bool:
+    """Return True when a provider/authority config key is present in XML."""
+    if el is None:
+        return False
+    return key in el.attrib or el.find(key) is not None
+
+
+def _append_text_child(parent: ET.Element, tag: str, value: Any) -> None:
+    """Append a simple text child when *value* is non-empty."""
+    if value is None:
+        return
+    text = str(value).strip()
+    if not text:
+        return
+    child = ET.SubElement(parent, tag)
+    child.text = text
+
+
+def _flatten_text(el: ET.Element | None) -> str:
+    """Return all text content under *el*."""
+    if el is None:
+        return ""
+    return "".join(el.itertext()).strip()
+
+
+def _truth_entry_to_xml_element(entry: dict) -> ET.Element:
+    """Serialize one internal truth entry dict to a typed XML element."""
+    norm = _normalize_trust_entry(entry)
+    content_root = _find_truth_content_root(norm.get("content", ""))
+    tag = content_root.tag if content_root is not None else "fact"
+
+    if tag == "provider":
+        root_el = ET.Element("provider")
+        provider_cfg = parse_provider_block(norm.get("content", "")) or {}
+        source = content_root
+        for key in ("api_url", "api_key", "model", "system"):
+            _append_text_child(root_el, key, provider_cfg.get(key, ""))
+        if provider_cfg.get("authority_url"):
+            authority_el = ET.SubElement(root_el, "authority")
+            _append_text_child(authority_el, "url", provider_cfg.get("authority_url"))
+        if provider_cfg.get("prelim") is False or _element_has_explicit_config(source, "prelim"):
+            _append_text_child(root_el, "prelim", "true" if provider_cfg.get("prelim", True) else "false")
+        if provider_cfg.get("timeout") or _element_has_explicit_config(source, "timeout"):
+            _append_text_child(root_el, "timeout", provider_cfg.get("timeout", 0))
+        if provider_cfg.get("max_tokens") or _element_has_explicit_config(source, "max_tokens"):
+            _append_text_child(root_el, "max_tokens", provider_cfg.get("max_tokens", 0))
+    elif tag == "authority":
+        root_el = ET.Element("authority")
+        authority_cfg = parse_authority_block(norm.get("content", "")) or {}
+        source = content_root
+        _append_text_child(root_el, "url", authority_cfg.get("url", ""))
+        if authority_cfg.get("refresh", 3600) != 3600 or _element_has_explicit_config(source, "refresh"):
+            _append_text_child(root_el, "refresh", authority_cfg.get("refresh", 3600))
+    elif tag == "reference":
+        root_el = ET.Element("reference")
+        href = ""
+        anchor_source = None
+        if content_root is not None:
+            href = content_root.get("href", "")
+            anchor_source = content_root.find("a")
+            if anchor_source is not None and anchor_source.get("href"):
+                href = anchor_source.get("href", "")
+        anchor_el = ET.SubElement(root_el, "a")
+        if href:
+            anchor_el.set("href", href)
+        if anchor_source is not None:
+            anchor_el.text = anchor_source.text
+            for child in anchor_source:
+                anchor_el.append(copy.deepcopy(child))
+        else:
+            anchor_el.text = _flatten_text(content_root) or href
+    else:
+        root_el = _clone_element_without_metadata(content_root) if content_root is not None else ET.Element("fact")
+
+    root_el.set("id", str(norm.get("id", "")))
+    if norm.get("title"):
+        root_el.set("title", str(norm["title"]))
+    if norm.get("time"):
+        root_el.set("time", str(norm["time"]))
+    if norm.get("place"):
+        root_el.set("place", str(norm["place"]))
+    if tag != "feeling":
+        trust_val = norm.get("trust", 0.0)
+        root_el.set("DoT", str(trust_val))
+    if norm.get("arg1"):
+        root_el.set("arg1", str(norm["arg1"]))
+    if norm.get("arg2"):
+        root_el.set("arg2", str(norm["arg2"]))
+    return root_el
+
+
+def _truth_entry_from_xml_element(el: ET.Element) -> dict:
+    """Parse one typed truth XML element into the internal dict shape."""
+    entry: dict = {"id": el.get("id", "")}
+    if el.get("title"):
+        entry["title"] = el.get("title")
+    if el.get("time"):
+        entry["time"] = el.get("time")
+    if el.get("place"):
+        entry["place"] = el.get("place")
+    dot_str = el.get("DoT")
+    if dot_str is None:
+        dot_str = el.get("trust")
+    if dot_str is not None:
+        try:
+            entry["trust"] = float(dot_str)
+        except ValueError:
+            entry["trust"] = None
+    if el.get("arg1"):
+        entry["arg1"] = el.get("arg1")
+    if el.get("arg2"):
+        entry["arg2"] = el.get("arg2")
+
+    content_el = _clone_element_without_metadata(el)
+    entry["content"] = ET.tostring(content_el, encoding="unicode", method="xml").strip()
+    return _normalize_trust_entry(entry)
+
+
 def _conv_to_xml(conv: dict, parent_el: ET.Element) -> None:
     """Recursively serialize a conversation dict to XML elements."""
     conv_el = ET.SubElement(parent_el, "conversation")
@@ -372,24 +713,25 @@ def _conv_to_xml(conv: dict, parent_el: ET.Element) -> None:
             conv_el.set("parentId", ",".join(pid))
         else:
             conv_el.set("parentId", str(pid))
+    if conv.get("selected") is True:
+        conv_el.set("selected", "true")
 
     title_el = ET.SubElement(conv_el, "title")
     title_el.text = conv.get("title", "(untitled)")
 
-    msgs_el = ET.SubElement(conv_el, "messages")
     for msg in conv.get("messages", []):
-        msg_el = ET.SubElement(msgs_el, "message")
+        msg_el = ET.SubElement(conv_el, "message")
         msg_el.set("id", msg.get("id", ""))
         msg_el.set("role", msg.get("role", "user"))
         msg_el.set("username", msg.get("username", "Unknown"))
         msg_el.set("time", msg.get("time", ""))
+        if msg.get("selected") is True:
+            msg_el.set("selected", "true")
         _set_xhtml_content(msg_el, "content", msg.get("content", ""))
 
     children = conv.get("children", [])
-    if children:
-        children_el = ET.SubElement(conv_el, "children")
-        for child_conv in children:
-            _conv_to_xml(child_conv, children_el)
+    for child_conv in children:
+        _conv_to_xml(child_conv, conv_el)
 
 
 def _conv_from_xml(conv_el: ET.Element) -> dict:
@@ -406,14 +748,16 @@ def _conv_from_xml(conv_el: ET.Element) -> dict:
             conv["parentId"] = [p.strip() for p in pid.split(",")]
         else:
             conv["parentId"] = pid
+    if _coerce_selected_flag(conv_el.get("selected", False)):
+        conv["selected"] = True
 
     title_el = conv_el.find("title")
     if title_el is not None and title_el.text:
         conv["title"] = title_el.text
 
-    msgs_el = conv_el.find("messages")
-    if msgs_el is not None:
-        for msg_el in msgs_el.findall("message"):
+    for child in conv_el:
+        if child.tag == "message":
+            msg_el = child
             content_el = msg_el.find("content")
             msg = {
                 "id": msg_el.get("id", ""),
@@ -422,12 +766,11 @@ def _conv_from_xml(conv_el: ET.Element) -> dict:
                 "time": msg_el.get("time", ""),
                 "content": _get_xhtml_content(content_el) if content_el is not None else "",
             }
+            if _coerce_selected_flag(msg_el.get("selected", False)):
+                msg["selected"] = True
             conv["messages"].append(msg)
-
-    children_el = conv_el.find("children")
-    if children_el is not None:
-        for child_el in children_el.findall("conversation"):
-            conv["children"].append(_conv_from_xml(child_el))
+        elif child.tag == "conversation":
+            conv["children"].append(_conv_from_xml(child))
 
     return conv
 
@@ -436,8 +779,10 @@ def state_to_xml(state: dict) -> str:
     """Convert a state dict to XML string (WikiOracle State format).
 
     Conversations nest naturally in XML — no flatten/unflatten needed.
-    Truth entries serialize with their XHTML content preserved.
+    Truth entries serialize as typed XML elements with envelope metadata
+    stored on the truth element itself.
     """
+    state = ensure_minimal_state(state, strict=False)
     root = ET.Element("state")
 
     # -- Header --
@@ -457,11 +802,6 @@ def state_to_xml(state: dict) -> str:
 
     _set_xhtml_content(header_el, "context", state.get("context", "<div/>"))
 
-    sel = state.get("selected_conversation")
-    if sel is not None:
-        sel_el = ET.SubElement(header_el, "selected_conversation")
-        sel_el.text = str(sel)
-
     uguid = state.get("user_guid")
     if uguid:
         guid_el = ET.SubElement(header_el, "user_guid")
@@ -473,27 +813,15 @@ def state_to_xml(state: dict) -> str:
         output_el.text = str(output)
 
     # -- Conversations --
-    convs_el = ET.SubElement(root, "conversations")
     for conv in state.get("conversations", []):
-        _conv_to_xml(conv, convs_el)
+        _conv_to_xml(conv, root)
 
     # -- Truth --
-    truth_el = ET.SubElement(root, "truth")
-    for entry in (state.get("truth") or []):
-        entry_el = ET.SubElement(truth_el, "entry")
-        entry_el.set("id", str(entry.get("id", "")))
-        if entry.get("title"):
-            entry_el.set("title", str(entry["title"]))
-        trust_val = entry.get("trust")
-        if trust_val is not None:
-            entry_el.set("trust", str(trust_val))
-        if entry.get("time"):
-            entry_el.set("time", str(entry["time"]))
-        if entry.get("arg1"):
-            entry_el.set("arg1", str(entry["arg1"]))
-        if entry.get("arg2"):
-            entry_el.set("arg2", str(entry["arg2"]))
-        _set_xhtml_content(entry_el, "content", entry.get("content", ""))
+    truth_entries = state.get("truth") or []
+    if truth_entries:
+        truth_el = ET.SubElement(root, "truth")
+        for entry in truth_entries:
+            truth_el.append(_truth_entry_to_xml_element(entry))
 
     _indent_xml(root)
     xml_str = ET.tostring(root, encoding="unicode", method="xml")
@@ -506,10 +834,12 @@ def xml_to_state(text: str) -> dict:
         "version": STATE_VERSION,
         "schema": SCHEMA_URL,
         "time": utc_now_iso(),
+        "title": "WikiOracle",
         "context": "<div/>",
         "conversations": [],
         "truth": [],
         "selected_conversation": None,
+        "selected_message": None,
     }
 
     try:
@@ -552,40 +882,17 @@ def xml_to_state(text: str) -> dict:
             state["output"] = output_el.text.strip()
 
     # -- Conversations --
-    convs_el = root.find("conversations")
-    if convs_el is not None:
-        for conv_el in convs_el.findall("conversation"):
-            state["conversations"].append(_conv_from_xml(conv_el))
+    for conv_el in root.findall("conversation"):
+        state["conversations"].append(_conv_from_xml(conv_el))
 
     # -- Truth --
     truth_el = root.find("truth")
     if truth_el is not None:
-        for entry_el in truth_el.findall("entry"):
-            entry = {
-                "id": entry_el.get("id", ""),
-            }
-            if entry_el.get("title"):
-                entry["title"] = entry_el.get("title")
-            trust_str = entry_el.get("trust")
-            if trust_str is not None:
-                try:
-                    entry["trust"] = float(trust_str)
-                except ValueError:
-                    entry["trust"] = None
-            if entry_el.get("time"):
-                entry["time"] = entry_el.get("time")
-            if entry_el.get("arg1"):
-                entry["arg1"] = entry_el.get("arg1")
-            if entry_el.get("arg2"):
-                entry["arg2"] = entry_el.get("arg2")
-            content_el = entry_el.find("content")
-            if content_el is not None:
-                entry["content"] = _get_xhtml_content(content_el)
-            else:
-                entry["content"] = ""
-            state["truth"].append(entry)
+        for child in truth_el:
+            if child.tag in _TRUTH_TAG_SET:
+                state["truth"].append(_truth_entry_from_xml_element(child))
 
-    return state
+    return ensure_minimal_state(state, strict=False)
 
 
 def atomic_write_xml(path: Path, state: dict, *, reject_symlinks: bool = False) -> None:
@@ -659,7 +966,16 @@ def add_message_to_conversation(conversations: list, conv_id: str, message: dict
     conv = find_conversation(conversations, conv_id)
     if conv is None:
         return False
-    conv.setdefault("messages", []).append(_normalize_inner_message(message))
+    messages = conv.setdefault("messages", [])
+    was_empty = len(messages) == 0
+    normalized = _normalize_inner_message(message)
+    messages.append(normalized)
+    if (
+        was_empty
+        and normalized.get("role") == "user"
+        and str(conv.get("title", "")).strip() in _PLACEHOLDER_CONVERSATION_TITLES
+    ):
+        conv["title"] = _derive_conversation_title(messages)
     return True
 
 
@@ -877,5 +1193,3 @@ def merge_many_states(
         )
         history.append(meta)
     return current, history
-
-

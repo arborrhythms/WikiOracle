@@ -175,8 +175,8 @@ function in `bin/truth.py` enforces this boundary.
 
 Each user is identified by a pseudonymous GUID derived deterministically
 from `user.name` in the config file (UUID‑5 in the WikiOracle namespace).
-This GUID is stored at the root level of the user's state and used as
-the author field when merging truth entries into the server table.
+This GUID is stored at the root level of the user's state and used
+internally when merging truth entries into the server table.
 
 ### Pipeline
 
@@ -211,8 +211,7 @@ and training happen after the response is delivered.
    - **Match found**: nudge the server entry's trust toward the incoming
      value using a slow‑moving average:
      `server_trust += merge_rate × (client_trust − server_trust)`
-   - **No match**: insert the entry with the stated trust value and
-     the user's GUID as author.
+   - **No match**: insert the entry with the stated trust value.
    - Entries are restricted to facts, operators, authorities, and
      references.  Feelings and provider entries are not stored.
 
@@ -241,13 +240,13 @@ moved back to the inference device afterward.
 ### Server Truth Table
 
 The server truth table is stored as `truth.xml` in the same XML format
-used for state files (WikiOracle State).  Each truth entry is an
-`<entry>` element:
+used for state files (WikiOracle State). Each stored entry is a typed
+truth element:
 
 ```xml
-<entry id="..." title="..." trust="0.8" time="..." author="user-guid">
-  <content><fact trust="0.8">All men are mortal.</fact></content>
-</entry>
+<fact id="..." title="..." DoT="0.8" time="..." place="Athens">
+  All men are mortal.
+</fact>
 ```
 
 **Resolution:** Before entries reach the server truth table, they are

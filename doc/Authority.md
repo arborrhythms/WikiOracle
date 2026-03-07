@@ -16,26 +16,33 @@ Wikipedia links (core):
 
 ## Storage format
 
-Authority entries are trust entries whose `content` field contains an `<authority>` XML block:
+Authority entries are truth records whose internal `content` field contains an `<authority>` XML block, and whose XML state form is a typed `<authority>` element:
 
 ```json
 {
   "type": "truth",
   "id": "a_aristotle_01",
   "title": "Aristotle's Knowledge Base",
-  "certainty": 0.85,
-  "content": "<authority id=\"a_aristotle_01\" certainty=\"0.85\" title=\"Aristotle's Knowledge Base\" did=\"did:web:aristotle.example\" url=\"https://aristotle.example/kb.xml\"/>",
+  "trust": 0.85,
+  "content": "<authority><url>https://aristotle.example/kb.xml</url><refresh>3600</refresh></authority>",
   "time": "2026-02-27T00:00:01Z"
 }
 ```
 
 Fields inside `<authority>`:
-- `did` — Decentralized Identifier (optional; at least one of did/orcid should be present)
-- `orcid` — ORCID identifier (optional)
 - `url` — URL to a remote state file (required). May be `https://` or `file://` (within allowed data dir)
 - `refresh` — seconds between re-fetches (optional, default: 3600)
 
-Both attribute-style (`<authority did="..." url="..." />`) and child-element style (`<authority><did>...</did><url>...</url></authority>`) are supported, following the same pattern as `<provider>`.
+The canonical XML state form is:
+
+```xml
+<authority id="a_aristotle_01" title="Aristotle's Knowledge Base" DoT="0.85" time="2026-02-27T00:00:01Z">
+  <url>https://aristotle.example/kb.xml</url>
+  <refresh>3600</refresh>
+</authority>
+```
+
+`bin/truth.py` still accepts legacy attribute-style authority blocks when they appear inside internal `content` strings.
 
 Authority entries use bare IDs (no prefixes), the same as all other trust entries. IDs are UUIDs or human-readable slugs.
 
@@ -65,12 +72,12 @@ The remote state file is an XML document containing a `<truth>` section. It may 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <truth>
-  <entry id="remote_01" title="Water is wet" trust="1.0" time="2026-02-27T00:00:01Z">
-    <content><fact trust="1.0">Water is wet.</fact></content>
-  </entry>
-  <entry id="remote_02" title="Fire is hot" trust="0.9" time="2026-02-27T00:00:02Z">
-    <content><fact trust="0.9">Fire is hot.</fact></content>
-  </entry>
+  <fact id="remote_01" title="Water is wet" DoT="1.0" time="2026-02-27T00:00:01Z">
+    Water is wet.
+  </fact>
+  <fact id="remote_02" title="Fire is hot" DoT="0.9" time="2026-02-27T00:00:02Z">
+    Fire is hot.
+  </fact>
 </truth>
 ```
 

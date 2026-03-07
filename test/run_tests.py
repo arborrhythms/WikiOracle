@@ -25,6 +25,14 @@ _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project))
 sys.path.insert(0, str(_project / "bin"))
 
+from test.nanochat_server import (
+    DEFAULT_TEST_NANO_PORT,
+    ENV_NANOCHAT_BOOT_ERROR,
+    ENV_NANOCHAT_LOG,
+    ENV_NANOCHAT_URL,
+    NanoChatServer,
+)
+
 # ANSI colour codes (disabled when not a tty)
 _USE_COLOR = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
 _GREEN = "\033[32m" if _USE_COLOR else ""
@@ -55,6 +63,8 @@ _TEST_MODULES = [
     "test.test_online_vote",
     # test_online_training excluded: requires torch + NanoChat checkpoint (use `make test-train`)
 ]
+
+_SHARED_NANOCHAT_MODULES = {"test.test_online_vote"}
 
 
 class _TestRecord:
@@ -173,6 +183,34 @@ def _run_modules(module_names: list[str], stderr_capture: io.StringIO) -> _HTMLR
     stderr_capture.write(tee_err.getvalue())
     stderr_capture.write(tee_out.getvalue())
     return result
+
+
+def _clear_suite_env() -> None:
+    for name in (ENV_NANOCHAT_URL, ENV_NANOCHAT_BOOT_ERROR, ENV_NANOCHAT_LOG):
+        os.environ.pop(name, None)
+
+
+def _start_suite_services(module_names: list[str]) -> NanoChatServer | None:
+    """Start shared services once for modules that require them."""
+    _clear_suite_env()
+    if not _SHARED_NANOCHAT_MODULES.intersection(module_names):
+        return None
+
+    server = NanoChatServer(
+        port=DEFAULT_TEST_NANO_PORT,
+        log_path=_project / "output" / "test_nanochat.log",
+    )
+    print(f"{_CYAN}Starting shared NanoChat on port {server.port}...{_RESET}", file=sys.stderr)
+    try:
+        server.start()
+    except Exception as exc:
+        os.environ[ENV_NANOCHAT_BOOT_ERROR] = str(exc)
+        print(f"{_YELLOW}[WARN] Shared NanoChat bootstrap failed.{_RESET}", file=sys.stderr)
+        return None
+
+    os.environ[ENV_NANOCHAT_URL] = server.url
+    os.environ[ENV_NANOCHAT_LOG] = str(server.log_path)
+    return server
 
 
 def _generate_html(result: _HTMLResult, captured_output: str,
@@ -323,8 +361,14 @@ def main():
     captured = io.StringIO()
 
     print(f"{_BOLD}WikiOracle Test Suite{_RESET}")
-
-    result = _run_modules(_TEST_MODULES, captured)
+    shared_nanochat = _start_suite_services(_TEST_MODULES)
+    try:
+        result = _run_modules(_TEST_MODULES, captured)
+    finally:
+        if shared_nanochat is not None:
+            print(f"{_CYAN}Stopping shared NanoChat...{_RESET}", file=sys.stderr)
+            shared_nanochat.stop()
+        _clear_suite_env()
 
     elapsed = time.monotonic() - t0
 

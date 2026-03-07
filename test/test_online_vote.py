@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Diamond vote integration test using a local NanoChat server.
 
-Starts NanoChat via ``make nano_start`` on a test port, copies alpha/beta
+Usually consumes the shared NanoChat instance started by ``test/run_tests.py``.
+When run standalone, it falls back to starting NanoChat itself via the
+Makefile target, then tears it down afterward. The test copies alpha/beta
 fixtures to output/ with beta providers rewritten to point at the local
 server, runs the vote via Flask test client, and validates the diamond
 conversation structure:
@@ -18,41 +20,27 @@ Run via:
 
 import os
 import shutil
-import subprocess
 import sys
-import time
 import unittest
 from pathlib import Path
-
-import requests as _req
 
 _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project / "bin"))
 
-_PORT = 8198
-_NANO_URL = f"http://127.0.0.1:{_PORT}"
-
-
-def _wait_for_server(url: str, timeout: int = 45) -> bool:
-    """Poll *url*/docs until it responds or *timeout* expires."""
-    for _ in range(timeout):
-        try:
-            r = _req.get(f"{url}/docs", timeout=2)
-            if r.status_code == 200:
-                return True
-        except Exception:
-            pass
-        time.sleep(1)
-    return False
+from test.nanochat_server import (
+    DEFAULT_TEST_NANO_PORT,
+    ENV_NANOCHAT_BOOT_ERROR,
+    ENV_NANOCHAT_URL,
+    NanoChatServer,
+)
 
 
 class TestAlphaOutputDiamond(unittest.TestCase):
     """Integration test: run a diamond vote against a local NanoChat server.
 
-    Starts NanoChat via ``make nano_start NANO_PORT=<port>``, rewrites the
-    alpha.xml beta providers to point at localhost, then exercises the full
-    voting pipeline through the WikiOracle Flask app.  Stops the server via
-    ``make nano_stop`` in tearDownClass.
+    Uses the shared NanoChat started for the suite when present. When run
+    directly, starts NanoChat via ``make nano_start NANO_PORT=<port>`` and
+    stops it in ``tearDownClass``.
     """
 
     _test_dir = Path(__file__).resolve().parent
@@ -64,6 +52,8 @@ class TestAlphaOutputDiamond(unittest.TestCase):
     _orig_stateless = None
     _orig_debug = None
     _orig_wo_url = None
+    _nanochat_server = None
+    _nano_url = None
 
     @classmethod
     def setUpClass(cls):
@@ -72,18 +62,19 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         from response import PROVIDERS
         from wikioracle import create_app
 
-        # ── Start NanoChat server via Makefile target ──
-        result = subprocess.run(
-            ["make", "nano_start", f"NANO_PORT={_PORT}"],
-            cwd=str(_project),
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            cls._setup_error = f"make nano_start failed:\n{result.stdout}\n{result.stderr}"
+        shared_boot_error = os.environ.get(ENV_NANOCHAT_BOOT_ERROR)
+        if shared_boot_error:
+            cls._setup_error = shared_boot_error
             return
-        if not _wait_for_server(_NANO_URL):
-            cls._setup_error = f"NanoChat did not start within 45s"
-            return
+
+        cls._nano_url = os.environ.get(ENV_NANOCHAT_URL)
+        if cls._nano_url is None:
+            cls._nanochat_server = NanoChatServer(port=DEFAULT_TEST_NANO_PORT)
+            try:
+                cls._nano_url = cls._nanochat_server.start()
+            except Exception as exc:
+                cls._setup_error = str(exc)
+                return
 
         # ── Preserve global state ──
         cls._orig_env = os.environ.get("WIKIORACLE_STATE_FILE")
@@ -92,7 +83,7 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         cls._orig_wo_url = PROVIDERS.get("wikioracle", {}).get("url")
 
         # Point the wikioracle provider at the test server
-        PROVIDERS.setdefault("wikioracle", {})["url"] = f"{_NANO_URL}/chat/completions"
+        PROVIDERS.setdefault("wikioracle", {})["url"] = f"{cls._nano_url}/chat/completions"
 
         # ── Set up fixtures ──
         cls._output_dir.mkdir(exist_ok=True)
@@ -106,7 +97,7 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         text = text.replace("file://test/", "file://output/")
         text = text.replace(
             'api_url="https://generativelanguage.googleapis.com/v1beta/models" model="gemini-2.5-flash"',
-            f'api_url="{_NANO_URL}/chat/completions" model="nanochat"',
+            f'api_url="{cls._nano_url}/chat/completions" model="nanochat"',
         )
         cls._output_file.write_text(text, encoding="utf-8")
 
@@ -148,12 +139,9 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         import config as config_mod
         from response import PROVIDERS
 
-        # Stop NanoChat via Makefile target
-        subprocess.run(
-            ["make", "nano_stop"],
-            cwd=str(_project),
-            capture_output=True,
-        )
+        if cls._nanochat_server is not None:
+            cls._nanochat_server.stop()
+            cls._nanochat_server = None
 
         # Restore global state
         if cls._orig_env is not None:
@@ -166,6 +154,8 @@ class TestAlphaOutputDiamond(unittest.TestCase):
             config_mod.DEBUG_MODE = cls._orig_debug
         if cls._orig_wo_url is not None:
             PROVIDERS.setdefault("wikioracle", {})["url"] = cls._orig_wo_url
+        else:
+            PROVIDERS.get("wikioracle", {}).pop("url", None)
 
     def test_diamond_in_output_alpha(self):
         if self._setup_error:

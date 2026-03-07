@@ -7,7 +7,7 @@ Foundational module for trust-table interpretation:
   - Subtypes (all self-describing XHTML with id/trust/title attrs):
       <fact>       — plain text assertion (penalizable if incorrect)
       <feeling>    — subjective claim (not penalizable if incorrect)
-      <reference>  — external link (href attr)
+      <reference>  — external link, canonically wrapping <a href="...">
       <and>/<or>/<not>/<non> — operators with <child id="..."/> refs
       <provider>   — LLM provider config (name, api_url, model attrs)
       <authority>  — remote trust table import (did, url attrs)
@@ -250,7 +250,10 @@ def _parse_root_attrs(content: str) -> dict | None:
             result = {"tag": tag, "root_el": child}
             result["id"] = child.get("id", "")
             try:
-                result["trust"] = float(child.get("trust", ""))
+                trust_raw = child.get("DoT")
+                if trust_raw is None:
+                    trust_raw = child.get("trust", "")
+                result["trust"] = float(trust_raw)
             except (TypeError, ValueError):
                 result["trust"] = None
             result["title"] = child.get("title", "")
@@ -268,7 +271,7 @@ def _migrate_legacy_content(item: dict) -> str:
 
     Handles:
       - Plain <p> text → <fact>text</fact> (id/trust/title on JSON envelope)
-      - Bare <a href>  → <reference href="...">text</reference> (attributes on JSON)
+      - Bare <a href>  → <reference href="...">text</reference>
       - Old <and>/<or>/<not>/<non> with <ref>text</ref> → same tag with <child id="..."/>
         Also extract child IDs to arg1/arg2 on the JSON entry for new format
       - <provider> → remove name and state_url attrs; convert state_url to nested <authority url="..."/>
@@ -815,11 +818,16 @@ def parse_provider_block(content: str) -> dict | None:
         # Fall back to attribute on the <provider> element itself
         return prov.get(tag, default)
 
-    # Extract authority_url from nested <authority url="..."/> child
+    # Extract authority_url from nested <authority><url>...</url></authority>
+    # or legacy <authority url="..."/> child.
     authority_url = ""
     auth_el = prov.find("authority")
     if auth_el is not None:
-        authority_url = auth_el.get("url", "")
+        url_el = auth_el.find("url")
+        if url_el is not None and (url_el.text or "").strip():
+            authority_url = (url_el.text or "").strip()
+        else:
+            authority_url = auth_el.get("url", "")
 
     prelim_raw = _val("prelim", "true").lower()
     result = {
@@ -1313,6 +1321,10 @@ def resolve_reference(entry: dict) -> dict:
         return entry
 
     href = ref_el.get("href", "")
+    if not href:
+        link_el = ref_el.find(".//a")
+        if link_el is not None:
+            href = link_el.get("href", "")
     domain = ""
     if href:
         parsed = _urlparse.urlparse(href)
@@ -1528,7 +1540,7 @@ def load_server_truth(path: str | Path) -> list:
     If the file does not exist, returns an empty list.
     """
     import xml.etree.ElementTree as ET
-    from state import _get_xhtml_content
+    from state import _truth_entry_from_xml_element
 
     path = Path(path) if not isinstance(path, Path) else path
     if not path.exists():
@@ -1554,59 +1566,23 @@ def load_server_truth(path: str | Path) -> list:
     if truth_el is None:
         return []
 
-    for entry_el in truth_el.findall("entry"):
-        entry: dict = {"id": entry_el.get("id", "")}
-        if entry_el.get("title"):
-            entry["title"] = entry_el.get("title")
-        trust_str = entry_el.get("trust")
-        if trust_str is not None:
-            try:
-                entry["trust"] = float(trust_str)
-            except ValueError:
-                entry["trust"] = None
-        if entry_el.get("time"):
-            entry["time"] = entry_el.get("time")
-        if entry_el.get("arg1"):
-            entry["arg1"] = entry_el.get("arg1")
-        if entry_el.get("arg2"):
-            entry["arg2"] = entry_el.get("arg2")
-        if entry_el.get("author"):
-            entry["author"] = entry_el.get("author")
-        content_el = entry_el.find("content")
-        if content_el is not None:
-            entry["content"] = _get_xhtml_content(content_el)
-        else:
-            entry["content"] = ""
-        entries.append(_normalize_trust_entry(entry))
+    for child in truth_el:
+        if child.tag in _RECOGNIZED_TAGS:
+            entries.append(_truth_entry_from_xml_element(child))
     return entries
 
 
 def save_server_truth(path: str | Path, entries: list) -> None:
     """Atomically write the server truth table to an XML file."""
     import xml.etree.ElementTree as ET
-    from state import _set_xhtml_content, _indent_xml
+    from state import _indent_xml, _truth_entry_to_xml_element
 
     path = Path(path) if not isinstance(path, Path) else path
     path.parent.mkdir(parents=True, exist_ok=True)
 
     root = ET.Element("truth")
     for entry in entries:
-        entry_el = ET.SubElement(root, "entry")
-        entry_el.set("id", str(entry.get("id", "")))
-        if entry.get("title"):
-            entry_el.set("title", str(entry["title"]))
-        trust_val = entry.get("trust")
-        if trust_val is not None:
-            entry_el.set("trust", str(trust_val))
-        if entry.get("time"):
-            entry_el.set("time", str(entry["time"]))
-        if entry.get("arg1"):
-            entry_el.set("arg1", str(entry["arg1"]))
-        if entry.get("arg2"):
-            entry_el.set("arg2", str(entry["arg2"]))
-        if entry.get("author"):
-            entry_el.set("author", str(entry["author"]))
-        _set_xhtml_content(entry_el, "content", entry.get("content", ""))
+        root.append(_truth_entry_to_xml_element(entry))
 
     _indent_xml(root)
     tree = ET.ElementTree(root)

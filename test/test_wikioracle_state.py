@@ -89,6 +89,7 @@ class TestEnsureMinimalState(unittest.TestCase):
         self.assertEqual(state["conversations"], [])
         self.assertIn("truth", state)
         self.assertIsNone(state["selected_conversation"])
+        self.assertIsNone(state["selected_message"])
 
     def test_strict_rejects_bad_schema(self):
         with self.assertRaises(StateValidationError):
@@ -126,6 +127,26 @@ class TestEnsureMinimalState(unittest.TestCase):
         }, strict=False)
         self.assertNotIn("messages", state)
         self.assertNotIn("active_path", state)
+
+    def test_strict_rejects_non_path_conversation_selection(self):
+        root = _make_conv("c_root", "root", [_make_msg("m_1", "user", "Alec", "<p>Q</p>")], children=[
+            _make_conv("c_a", "A", [_make_msg("m_2", "assistant", "Bot", "<p>A</p>")]),
+            _make_conv("c_b", "B", [_make_msg("m_3", "assistant", "Bot", "<p>B</p>")]),
+        ])
+        root["children"][0]["selected"] = True
+        root["children"][1]["selected"] = True
+        with self.assertRaises(StateValidationError):
+            ensure_minimal_state(_make_state(conversations=[root]), strict=True)
+
+    def test_strict_rejects_multiple_selected_messages(self):
+        root = _make_conv("c_root", "root", [
+            _make_msg("m_1", "user", "Alec", "<p>Q</p>"),
+            _make_msg("m_2", "assistant", "Bot", "<p>A</p>"),
+        ])
+        root["messages"][0]["selected"] = True
+        root["messages"][1]["selected"] = True
+        with self.assertRaises(StateValidationError):
+            ensure_minimal_state(_make_state(conversations=[root]), strict=True)
 
 
 class TestXMLRoundTrip(unittest.TestCase):
@@ -593,6 +614,25 @@ class TestSelectedConversationRoundtrip(unittest.TestCase):
         restored = xml_to_state(xml_text)
         restored = ensure_minimal_state(restored, strict=True)
         self.assertEqual(restored["selected_conversation"], "c_1")
+        self.assertTrue(restored["conversations"][0].get("selected"))
+
+    def test_selected_message_persists(self):
+        state = ensure_minimal_state(_make_state(
+            selected_conversation="c_1",
+            selected_message="m_2",
+            conversations=[
+                _make_conv("c_1", "test", [
+                    _make_msg("m_1", "user", "U", "<p>A</p>"),
+                    _make_msg("m_2", "assistant", "Bot", "<p>B</p>"),
+                ]),
+            ],
+        ), strict=True)
+        xml_text = state_to_xml(state)
+        restored = xml_to_state(xml_text)
+        restored = ensure_minimal_state(restored, strict=True)
+        self.assertEqual(restored["selected_conversation"], "c_1")
+        self.assertEqual(restored["selected_message"], "m_2")
+        self.assertTrue(restored["conversations"][0]["messages"][1].get("selected"))
 
 
 class TestOutputField(unittest.TestCase):

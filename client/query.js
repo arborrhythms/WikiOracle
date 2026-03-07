@@ -62,12 +62,46 @@ function _buildAncestorPath(conversations, convId) {
       var c = convs[i];
       if (c.id === target) {
         // Found target — return it with its children intact (includes optimistic conv)
-        return [{ id: c.id, title: c.title, messages: c.messages || [], children: c.children || [], parentId: c.parentId }];
+        return [{
+          id: c.id,
+          title: c.title,
+          messages: (c.messages || []).map(function(m) {
+            return {
+              id: m.id,
+              role: m.role,
+              username: m.username,
+              time: m.time,
+              content: m.content,
+              selected: !!m.selected,
+              _pending: !!m._pending,
+            };
+          }),
+          children: c.children || [],
+          parentId: c.parentId,
+          selected: !!c.selected,
+        }];
       }
       var deeper = _search(c.children || [], target);
       if (deeper) {
         // This node is on the path — keep only the child that leads to target
-        return [{ id: c.id, title: c.title, messages: c.messages || [], children: deeper, parentId: c.parentId }];
+        return [{
+          id: c.id,
+          title: c.title,
+          messages: (c.messages || []).map(function(m) {
+            return {
+              id: m.id,
+              role: m.role,
+              username: m.username,
+              time: m.time,
+              content: m.content,
+              selected: !!m.selected,
+              _pending: !!m._pending,
+            };
+          }),
+          children: deeper,
+          parentId: c.parentId,
+          selected: !!c.selected,
+        }];
       }
     }
     return null;
@@ -116,11 +150,27 @@ function _mergeResponseConversation(localConvs, responseBundle) {
         return null;
       })(responseBundle.conversations || [], selId);
     }
-    if (pid) {
+    if (Array.isArray(pid)) {
+      var attached = false;
+      for (var p = 0; p < pid.length; p++) {
+        var localParentMulti = findInTree(localConvs, pid[p]);
+        if (!localParentMulti) continue;
+        if (!localParentMulti.children) localParentMulti.children = [];
+        if (!findInTree(localParentMulti.children, respConv.id)) {
+          localParentMulti.children.push(respConv);
+        }
+        attached = true;
+      }
+      if (!attached) {
+        localConvs.push(respConv);
+      }
+    } else if (pid) {
       var localParent = findInTree(localConvs, pid);
       if (localParent) {
         if (!localParent.children) localParent.children = [];
-        localParent.children.push(respConv);
+        if (!findInTree(localParent.children, respConv.id)) {
+          localParent.children.push(respConv);
+        }
       } else {
         localConvs.push(respConv);
       }

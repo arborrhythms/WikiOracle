@@ -135,7 +135,12 @@ def _make_state_with_operators():
                 "id": "provider_claude",
                 "title": "Claude (Anthropic)",
                 "trust": 0.8,
-                "content": '<provider api_url="https://api.anthropic.com/v1/messages" model="claude-sonnet-4-6"/>',
+                "content": (
+                    "<provider>"
+                    "<api_url>https://api.anthropic.com/v1/messages</api_url>"
+                    "<model>claude-sonnet-4-6</model>"
+                    "</provider>"
+                ),
                 "time": "2026-03-05T00:00:04Z",
             },
         ],
@@ -175,7 +180,7 @@ class TestStateToXml(unittest.TestCase):
     def test_contains_truth_entries(self):
         state = _make_state_with_conversations()
         xml_str = state_to_xml(state)
-        self.assertIn('id="t1"', xml_str)
+        self.assertIn('<fact id="t1"', xml_str)
         self.assertIn("Roses are red.", xml_str)
 
     def test_contains_messages(self):
@@ -190,6 +195,88 @@ class TestStateToXml(unittest.TestCase):
         xml_str = state_to_xml(state)
         self.assertIn('arg1="axiom_01"', xml_str)
         self.assertIn('arg2="axiom_02"', xml_str)
+
+    def test_reference_serializes_as_anchor(self):
+        state = ensure_minimal_state({
+            "conversations": [],
+            "truth": [{
+                "id": "ref_1",
+                "title": "Example",
+                "trust": 0.8,
+                "content": '<reference href="https://example.com">Example</reference>',
+                "time": "2026-03-05T00:00:00Z",
+            }],
+        }, strict=False)
+        xml_str = state_to_xml(state)
+        self.assertIn('<reference id="ref_1"', xml_str)
+        self.assertIn('<a href="https://example.com">Example</a>', xml_str)
+
+    def test_selected_conversation_serializes_as_selected_path(self):
+        state = ensure_minimal_state({
+            "version": STATE_VERSION,
+            "schema": SCHEMA_URL,
+            "time": "2026-03-05T12:00:00Z",
+            "title": "Selection Test",
+            "context": "<div/>",
+            "selected_conversation": "c_child",
+            "conversations": [
+                {
+                    "id": "c_root",
+                    "title": "Root",
+                    "messages": [],
+                    "children": [
+                        {
+                            "id": "c_child",
+                            "title": "Child",
+                            "messages": [],
+                            "children": [],
+                        },
+                    ],
+                },
+            ],
+            "truth": [],
+        }, strict=False)
+        xml_str = state_to_xml(state)
+        self.assertNotIn("<selected_conversation>", xml_str)
+        self.assertIn('<conversation id="c_root" selected="true">', xml_str)
+        self.assertIn('<conversation id="c_child" parentId="c_root" selected="true">', xml_str)
+
+    def test_selected_message_serializes_as_attribute(self):
+        state = ensure_minimal_state({
+            "version": STATE_VERSION,
+            "schema": SCHEMA_URL,
+            "time": "2026-03-05T12:00:00Z",
+            "title": "Selection Test",
+            "context": "<div/>",
+            "selected_conversation": "c_root",
+            "selected_message": "m2",
+            "conversations": [
+                {
+                    "id": "c_root",
+                    "title": "Root",
+                    "messages": [
+                        {
+                            "id": "m1",
+                            "role": "user",
+                            "username": "Alice",
+                            "time": "2026-03-05T12:00:01Z",
+                            "content": "<p>Hello</p>",
+                        },
+                        {
+                            "id": "m2",
+                            "role": "assistant",
+                            "username": "WikiOracle",
+                            "time": "2026-03-05T12:00:02Z",
+                            "content": "<p>Hi</p>",
+                        },
+                    ],
+                    "children": [],
+                },
+            ],
+            "truth": [],
+        }, strict=False)
+        xml_str = state_to_xml(state)
+        self.assertIn('message id="m2" role="assistant" username="WikiOracle" time="2026-03-05T12:00:02Z" selected="true"', xml_str)
 
 
 class TestXmlToState(unittest.TestCase):
@@ -255,8 +342,54 @@ class TestXmlToState(unittest.TestCase):
         xml_str = state_to_xml(original)
         restored = xml_to_state(xml_str)
         prov = [e for e in restored["truth"] if e["id"] == "provider_claude"][0]
-        self.assertIn("api_url=", prov["content"])
+        self.assertIn("<api_url>", prov["content"])
         self.assertIn("claude-sonnet-4-6", prov["content"])
+
+    def test_roundtrip_preserves_reference_link(self):
+        state = ensure_minimal_state({
+            "conversations": [],
+            "truth": [{
+                "id": "ref_1",
+                "title": "Example",
+                "trust": 0.8,
+                "content": '<reference href="https://example.com">Example</reference>',
+                "time": "2026-03-05T00:00:00Z",
+            }],
+        }, strict=False)
+        restored = xml_to_state(state_to_xml(state))
+        ref = restored["truth"][0]
+        self.assertIn("<reference", ref["content"])
+        self.assertIn('<a href="https://example.com">', ref["content"])
+
+    def test_roundtrip_derives_selection_from_attributes(self):
+        xml_text = """<?xml version="1.0" encoding="UTF-8"?>
+<state>
+  <header>
+    <version>2</version>
+    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
+    <time>2026-03-05T12:00:00Z</time>
+    <title>Selected Attrs</title>
+    <context><div /></context>
+  </header>
+  <conversation id="c_root" selected="true">
+    <title>Root</title>
+    <conversation id="c_child" parentId="c_root" selected="true">
+      <title>Child</title>
+      <message id="m_1" role="user" username="Alice" time="2026-03-05T12:00:01Z" selected="true">
+        <content><p>Hello</p></content>
+      </message>
+    </conversation>
+  </conversation>
+</state>
+"""
+        restored = xml_to_state(xml_text)
+        self.assertEqual(restored["selected_conversation"], "c_child")
+        self.assertEqual(restored["selected_message"], "m_1")
+        root = restored["conversations"][0]
+        child = root["children"][0]
+        self.assertTrue(root.get("selected"))
+        self.assertTrue(child.get("selected"))
+        self.assertTrue(child["messages"][0].get("selected"))
 
     def test_invalid_xml_returns_empty_state(self):
         restored = xml_to_state("not valid xml")
@@ -384,13 +517,17 @@ class TestXhtmlContentPreservation(unittest.TestCase):
                 "id": "test_fact",
                 "title": "Test",
                 "trust": 0.9,
+                "place": "Paris",
                 "content": '<fact trust="0.9">The sky is blue.</fact>',
                 "time": "2026-03-05T00:00:00Z",
             }],
         }, strict=False)
         xml_str = state_to_xml(state)
+        self.assertIn('place="Paris"', xml_str)
+        self.assertNotIn('author="', xml_str)
         restored = xml_to_state(xml_str)
         entry = restored["truth"][0]
+        self.assertEqual(entry["place"], "Paris")
         self.assertIn("The sky is blue.", entry["content"])
         self.assertIn("fact", entry["content"])
 
@@ -401,14 +538,19 @@ class TestXhtmlContentPreservation(unittest.TestCase):
                 "id": "prov_test",
                 "title": "Test Provider",
                 "trust": 0.8,
-                "content": '<provider api_url="https://api.example.com" model="test-model"/>',
+                "content": (
+                    "<provider>"
+                    "<api_url>https://api.example.com</api_url>"
+                    "<model>test-model</model>"
+                    "</provider>"
+                ),
                 "time": "2026-03-05T00:00:00Z",
             }],
         }, strict=False)
         xml_str = state_to_xml(state)
         restored = xml_to_state(xml_str)
         entry = restored["truth"][0]
-        self.assertIn("api_url=", entry["content"])
+        self.assertIn("<api_url>", entry["content"])
         self.assertIn("test-model", entry["content"])
 
 

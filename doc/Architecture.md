@@ -30,7 +30,6 @@ Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
 | Client query | `client/query.js` | Server communication layer, conversation tree helpers |
 | Tree renderer | `client/tree.js` | D3.js top-down hierarchy — layout, navigation, drag-to-merge |
 | Shell | `client/index.html` | Single-page app: layout, CSS, settings panel |
-| Data | `data/llm_state.json` | JSON Schema for the state format (legacy) |
 | State schema | `data/state.xsd` | XSD schema for XML state files (WikiOracle State) |
 | Config schema | `data/config.xsd` | XSD schema for `config.xml` validation (WikiOracle Config) |
 | Tests | `test/test_*.py` | Tests covering state, stateless contract, prompt bundles, authority, derived truth, DoT, sensation, online training, XML state roundtrip |
@@ -39,39 +38,34 @@ Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
 
 ### On disk — XML
 
-State is persisted as XML (WikiOracle State format, validated by `data/state.xsd`). Conversations nest naturally in the XML tree — no flatten/unflatten needed:
+State is persisted as XML (WikiOracle State format, validated by `data/state.xsd`). The XML surface is:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <state>
   <header>
     <version>2</version>
-    <schema>https://wikioracle.org/schemas/state/v2</schema>
+    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
     <time>2026-03-05T12:00:00Z</time>
     <title>My Project</title>
     <context><div><p>Project context</p></div></context>
   </header>
-  <conversations>
-    <conversation id="c_abc">
-      <title>Animals</title>
-      <messages>
-        <message id="m1" role="user" username="Alice" time="...">
-          <content><Q><fact trust="0.5">Dogs are mammals.</fact></Q></content>
-        </message>
-      </messages>
-      <children>
-        <conversation id="c_def" parentId="c_abc">
-          <title>Dogs</title>
-          <messages>...</messages>
-          <children/>
-        </conversation>
-      </children>
+  <conversation id="c_abc">
+    <title>Animals</title>
+    <message id="m1" role="user" username="Alice" time="...">
+      <content><Q><fact trust="0.5">Dogs are mammals.</fact></Q></content>
+    </message>
+    <conversation id="c_def" parentId="c_abc">
+      <title>Dogs</title>
+      <message id="m2" role="assistant" username="claude" time="...">
+        <content><R><fact trust="0.9">Dogs are mammals.</fact></R></content>
+      </message>
     </conversation>
-  </conversations>
+  </conversation>
   <truth>
-    <entry id="t_001" title="Mammals" trust="0.9" time="...">
-      <content><fact trust="0.9">All dogs are mammals.</fact></content>
-    </entry>
+    <fact id="t_001" title="Mammals" DoT="0.9" time="...">
+      All dogs are mammals.
+    </fact>
   </truth>
 </state>
 ```
@@ -98,13 +92,13 @@ Each **message** has: `id`, `role` (user | assistant | system), `username`, `tim
 ### Grammar
 
 ```
-State       → Header Conversation* Trust*
-Conversation → { id, title, messages: Message*, parent? }
-Message     → { id, role, username, timestamp, content }
-Trust       → { id, content, certainty, source?, timestamp? }
+State        → Header + Conversation* + Truth?
+Conversation → title + (Message | Conversation)*
+Message      → { id, role, username, timestamp, content }
+Truth        → Fact | Feeling | Reference | Operator | Provider | Authority
 ```
 
-In the tree: `Dialogue → Conversation*`, `Conversation → Message* + Conversation*` (children).
+In memory, `bin/state.py` still normalizes conversations into `messages[]` and `children[]`.
 
 ## Server endpoints
 

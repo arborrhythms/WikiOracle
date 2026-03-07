@@ -27,6 +27,15 @@ let _treeSvgH = 0;
  */
 var _diamondLinks = [];          // [{sourceId, targetId}] — extra DAG edges
 
+function _deepestSelectedNode(root) {
+  var best = null;
+  root.descendants().forEach(function(d) {
+    if (!d.data.selected || d.data.id === "root") return;
+    if (!best || d.depth >= best.depth) best = d;
+  });
+  return best || root;
+}
+
 function conversationsToHierarchy(conversations, selectedId) {
   var seen = {};                 // id → mapped node
   _diamondLinks = [];
@@ -52,7 +61,7 @@ function conversationsToHierarchy(conversations, selectedId) {
       messageCount: msgs.length,
       questionCount: qCount,
       messages: msgs,
-      selected: conv.id === selectedId,
+      selected: conv.selected === true || conv.id === selectedId,
       children: childNodes.length > 0 ? childNodes : undefined,
     };
     seen[conv.id] = node;
@@ -69,7 +78,7 @@ function conversationsToHierarchy(conversations, selectedId) {
     messageCount: 0,
     questionCount: 0,
     messages: [],
-    selected: selectedId === null,
+    selected: true,
     children: rootChildren.length > 0 ? rootChildren : undefined,
   };
 }
@@ -168,7 +177,7 @@ function renderTree(hierarchyData, callbacks) {
   const readableScale = 0.5;
   let initialTransform = fitTransform;
   if (fitScale < 0.3) {
-    const focal = root.descendants().find(d => d.data.selected) || root;
+    const focal = _deepestSelectedNode(root);
     const fx = margin.left + focal.x;
     const fy = margin.top + focal.y;
     const tx = svgW / 2 - fx * readableScale;
@@ -202,7 +211,7 @@ function renderTree(hierarchyData, callbacks) {
 
   // Restore zoom or pan to selected node (keyboard navigation)
   if (_focusOnSelected) {
-    const selNode = root.descendants().find(d => d.data.selected);
+    const selNode = _deepestSelectedNode(root);
     const k = _savedTransform ? _savedTransform.k : readableScale;
     if (selNode) {
       const tx = svgW / 2 - (margin.left + selNode.x) * k;
@@ -434,7 +443,7 @@ function _dblclickZoomToggle(svg, zoomObj, curT) {
 
   if (atFit || curT.k <= fitK) {
     // Zoom IN to the selected node at legible scale
-    var selNode = _treeRoot.descendants().find(function(d) { return d.data.selected; });
+    var selNode = _deepestSelectedNode(_treeRoot);
     if (!selNode) {
       // Fallback: just zoom to fit
       svg.transition().duration(300).call(zoomObj.transform, _fitTransform);

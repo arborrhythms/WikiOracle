@@ -4,33 +4,43 @@
 
   <xs:annotation>
     <xs:documentation>
-      WikiOracle State — XML state schema.
-      Defines the structure for WikiOracle state files that store
-      conversations, truth entries, and session metadata.  Replaces
-      the legacy JSONL (line-delimited JSON) format.
-
-      Conversations nest naturally in XML — no flatten/unflatten needed.
-      Truth entries carry self-describing XHTML content in their body.
+      WikiOracle State XML schema.
+      The root state contains a required header, zero or more top-level
+      conversations, and an optional truth table. Conversations recurse
+      directly through nested conversation/message children. Truth entries
+      are typed XML elements under &lt;truth&gt; and use DoT on [-1, +1]
+      for all truth-bearing kinds except feeling.
     </xs:documentation>
   </xs:annotation>
+
+  <!-- ======================================================================
+       Shared scalar types
+       ====================================================================== -->
+
+  <xs:simpleType name="DoTType">
+    <xs:restriction base="xs:decimal">
+      <xs:minInclusive value="-1"/>
+      <xs:maxInclusive value="1"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="IdListType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[^,]+(\s*,\s*[^,]+)*"/>
+    </xs:restriction>
+  </xs:simpleType>
 
   <!-- ======================================================================
        Root element
        ====================================================================== -->
 
   <xs:element name="state">
-    <xs:annotation>
-      <xs:documentation>
-        Root state element for WikiOracle.  Contains a header with session
-        metadata, a conversations tree, and a truth table.
-      </xs:documentation>
-    </xs:annotation>
     <xs:complexType>
-      <xs:all>
+      <xs:sequence>
         <xs:element name="header" type="HeaderType"/>
-        <xs:element name="conversations" type="ConversationsType"/>
-        <xs:element name="truth" type="TruthTableType"/>
-      </xs:all>
+        <xs:element ref="conversation" minOccurs="0" maxOccurs="unbounded"/>
+        <xs:element name="truth" type="TruthTableType" minOccurs="0"/>
+      </xs:sequence>
     </xs:complexType>
   </xs:element>
 
@@ -39,70 +49,39 @@
        ====================================================================== -->
 
   <xs:complexType name="HeaderType">
-    <xs:annotation>
-      <xs:documentation>
-        Session metadata: schema version, timestamps, context window,
-        document title, selected conversation, and user GUID.
-      </xs:documentation>
-    </xs:annotation>
     <xs:all>
       <xs:element name="version" type="xs:positiveInteger"/>
       <xs:element name="schema" type="xs:string"/>
       <xs:element name="time" type="xs:string"/>
       <xs:element name="title" type="xs:string"/>
       <xs:element name="context" type="XHTMLContentType"/>
-      <xs:element name="selected_conversation" type="xs:string" minOccurs="0"/>
       <xs:element name="user_guid" type="xs:string" minOccurs="0"/>
       <xs:element name="output" type="xs:string" minOccurs="0"/>
     </xs:all>
   </xs:complexType>
 
   <!-- ======================================================================
-       Conversations (recursive tree)
+       Conversations
        ====================================================================== -->
 
-  <xs:complexType name="ConversationsType">
-    <xs:annotation>
-      <xs:documentation>
-        Container for the conversation tree.  Each conversation may
-        contain child conversations, forming a hierarchy.
-      </xs:documentation>
-    </xs:annotation>
-    <xs:sequence>
-      <xs:element name="conversation" type="ConversationType"
-                  minOccurs="0" maxOccurs="unbounded"/>
-    </xs:sequence>
-  </xs:complexType>
+  <xs:element name="conversation" type="ConversationType"/>
 
   <xs:complexType name="ConversationType">
-    <xs:annotation>
-      <xs:documentation>
-        A single conversation node containing messages and optional
-        child conversations.  The id attribute is the unique identifier.
-      </xs:documentation>
-    </xs:annotation>
     <xs:sequence>
       <xs:element name="title" type="xs:string"/>
-      <xs:element name="messages" type="MessagesType"/>
-      <xs:element name="children" type="ConversationsType" minOccurs="0"/>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element ref="message"/>
+        <xs:element ref="conversation"/>
+      </xs:choice>
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required"/>
-    <xs:attribute name="parentId" type="xs:string" use="optional"/>
+    <xs:attribute name="parentId" type="IdListType" use="optional"/>
+    <xs:attribute name="selected" type="xs:boolean" use="optional"/>
   </xs:complexType>
 
-  <xs:complexType name="MessagesType">
-    <xs:sequence>
-      <xs:element name="message" type="MessageType"
-                  minOccurs="0" maxOccurs="unbounded"/>
-    </xs:sequence>
-  </xs:complexType>
+  <xs:element name="message" type="MessageType"/>
 
   <xs:complexType name="MessageType">
-    <xs:annotation>
-      <xs:documentation>
-        A single message within a conversation.  Content is XHTML.
-      </xs:documentation>
-    </xs:annotation>
     <xs:sequence>
       <xs:element name="content" type="XHTMLContentType"/>
     </xs:sequence>
@@ -118,57 +97,134 @@
     </xs:attribute>
     <xs:attribute name="username" type="xs:string" use="required"/>
     <xs:attribute name="time" type="xs:string" use="required"/>
+    <xs:attribute name="selected" type="xs:boolean" use="optional"/>
   </xs:complexType>
 
   <!-- ======================================================================
        Truth table
        ====================================================================== -->
 
-  <xs:complexType name="TruthTableType">
-    <xs:annotation>
-      <xs:documentation>
-        Flat array of truth entries.  Each entry carries self-describing
-        XHTML content (fact, feeling, reference, operator, provider,
-        authority).
-      </xs:documentation>
-    </xs:annotation>
-    <xs:sequence>
-      <xs:element name="entry" type="TruthEntryType"
-                  minOccurs="0" maxOccurs="unbounded"/>
-    </xs:sequence>
-  </xs:complexType>
-
-  <xs:complexType name="TruthEntryType">
-    <xs:annotation>
-      <xs:documentation>
-        A single truth entry.  The body contains self-describing XHTML
-        (fact, feeling, reference, and/or/not/non, provider, authority).
-        Trust is on the Strong Kleene scale [-1, +1].
-      </xs:documentation>
-    </xs:annotation>
-    <xs:sequence>
-      <xs:element name="content" type="XHTMLContentType"/>
-    </xs:sequence>
+  <xs:attributeGroup name="TruthCommonAttributes">
     <xs:attribute name="id" type="xs:string" use="required"/>
     <xs:attribute name="title" type="xs:string" use="optional"/>
-    <xs:attribute name="trust" type="xs:decimal" use="optional"/>
     <xs:attribute name="time" type="xs:string" use="optional"/>
+    <xs:attribute name="place" type="xs:string" use="optional"/>
+  </xs:attributeGroup>
+
+  <xs:complexType name="FactTruthType" mixed="true">
+    <xs:sequence>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="TruthCommonAttributes"/>
+    <xs:attribute name="DoT" type="DoTType" use="required"/>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="FeelingTruthType" mixed="true">
+    <xs:sequence>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="TruthCommonAttributes"/>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="ReferenceAnchorType" mixed="true">
+    <xs:sequence>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
+    </xs:sequence>
+    <xs:attribute name="href" type="xs:string" use="required"/>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="ReferenceTruthType">
+    <xs:sequence>
+      <xs:element name="a" type="ReferenceAnchorType" minOccurs="1" maxOccurs="1"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="TruthCommonAttributes"/>
+    <xs:attribute name="DoT" type="DoTType" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="BinaryOperatorTruthType" mixed="true">
+    <xs:sequence>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="TruthCommonAttributes"/>
+    <xs:attribute name="DoT" type="DoTType" use="required"/>
     <xs:attribute name="arg1" type="xs:string" use="optional"/>
     <xs:attribute name="arg2" type="xs:string" use="optional"/>
   </xs:complexType>
 
+  <xs:complexType name="UnaryOperatorTruthType" mixed="true">
+    <xs:sequence>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="TruthCommonAttributes"/>
+    <xs:attribute name="DoT" type="DoTType" use="required"/>
+    <xs:attribute name="arg1" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="AuthorityLinkType">
+    <xs:sequence>
+      <xs:element name="url" type="xs:string"/>
+      <xs:element name="refresh" type="xs:nonNegativeInteger" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ProviderTruthType">
+    <xs:sequence>
+      <xs:element name="api_url" type="xs:string" minOccurs="0"/>
+      <xs:element name="api_key" type="xs:string" minOccurs="0"/>
+      <xs:element name="model" type="xs:string" minOccurs="0"/>
+      <xs:element name="system" type="XHTMLContentType" minOccurs="0"/>
+      <xs:element name="authority" type="AuthorityLinkType" minOccurs="0"/>
+      <xs:element name="prelim" type="xs:boolean" minOccurs="0"/>
+      <xs:element name="timeout" type="xs:nonNegativeInteger" minOccurs="0"/>
+      <xs:element name="max_tokens" type="xs:nonNegativeInteger" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="TruthCommonAttributes"/>
+    <xs:attribute name="DoT" type="DoTType" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="AuthorityTruthType">
+    <xs:sequence>
+      <xs:element name="url" type="xs:string"/>
+      <xs:element name="refresh" type="xs:nonNegativeInteger" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="TruthCommonAttributes"/>
+    <xs:attribute name="DoT" type="DoTType" use="required"/>
+  </xs:complexType>
+
+  <xs:element name="fact" type="FactTruthType"/>
+  <xs:element name="feeling" type="FeelingTruthType"/>
+  <xs:element name="reference" type="ReferenceTruthType"/>
+  <xs:element name="and" type="BinaryOperatorTruthType"/>
+  <xs:element name="or" type="BinaryOperatorTruthType"/>
+  <xs:element name="not" type="UnaryOperatorTruthType"/>
+  <xs:element name="non" type="UnaryOperatorTruthType"/>
+  <xs:element name="provider" type="ProviderTruthType"/>
+  <xs:element name="authority" type="AuthorityTruthType"/>
+
+  <xs:complexType name="TruthTableType">
+    <xs:sequence>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element ref="fact"/>
+        <xs:element ref="feeling"/>
+        <xs:element ref="reference"/>
+        <xs:element ref="and"/>
+        <xs:element ref="or"/>
+        <xs:element ref="not"/>
+        <xs:element ref="non"/>
+        <xs:element ref="provider"/>
+        <xs:element ref="authority"/>
+      </xs:choice>
+    </xs:sequence>
+  </xs:complexType>
+
   <!-- ======================================================================
-       XHTML content (mixed, allows any child elements)
+       XHTML content
        ====================================================================== -->
 
   <xs:complexType name="XHTMLContentType" mixed="true">
-    <xs:annotation>
-      <xs:documentation>
-        Mixed content type that allows XHTML fragments.  The content
-        may contain text, fact/feeling/reference tags, and any other
-        well-formed XML elements.
-      </xs:documentation>
-    </xs:annotation>
     <xs:sequence>
       <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
     </xs:sequence>

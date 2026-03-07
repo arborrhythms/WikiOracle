@@ -93,6 +93,7 @@ function _persistConfig() {
 // Persist state: sessionStorage is authoritative in stateless mode;
 // disk-backed POST /state is used in stateful mode.
 function _persistState() {
+  if (typeof _syncClientSelectionState === "function") _syncClientSelectionState();
   if (config.server.stateless) {
     _saveLocalState();
   } else {
@@ -135,6 +136,34 @@ var _treePath = [];
 // Pending branch: when set, the next send creates a child of this conversation
 let _pendingBranchParent = null;
 
+function _syncClientSelectionState() {
+  if (!state) return [];
+  if (!Array.isArray(state.conversations)) state.conversations = [];
+
+  var selectedId = state.selected_conversation;
+  if (selectedId !== null && !findConversation(state.conversations, selectedId)) {
+    selectedId = null;
+  }
+  if (selectedId === null) {
+    var flagged = _selectedConversationIdFromFlags(state.conversations);
+    if (flagged) selectedId = flagged;
+  }
+
+  state.selected_conversation = selectedId;
+  var path = _syncConversationSelection(state.conversations, selectedId) || [];
+  if (selectedId === null) {
+    _treePath = [];
+  } else {
+    var pathIds = path.map(function(conv) { return conv.id; });
+    if (pathIds.length > 0) {
+      _treePath = pathIds;
+    } else if (!_findNodeByPath(state.conversations, _treePath) || _treePath[_treePath.length - 1] !== selectedId) {
+      _treePath = _buildTreePath(state.conversations || [], selectedId);
+    }
+  }
+  return path;
+}
+
 // ─── Confirmation helper (skips dialog when confirm_actions is off) ───
 function confirmAction(msg) {
   if (config.chat && config.chat.confirm_actions) return confirm(msg);
@@ -161,6 +190,7 @@ function navigateToNode(nodeId, path) {
   } else {
     _treePath = _buildTreePath(state.conversations || [], nodeId);
   }
+  _syncConversationSelection(state.conversations || [], nodeId);
   renderMessages();
   // Persist selected_conversation to server
   _persistState();
@@ -184,15 +214,41 @@ function _buildTreePath(convs, targetId) {
   return _search(convs, []) || [];
 }
 
+function _createEmptyChildConversation(parentId) {
+  if (!state || !parentId) return null;
+  const parent = findConversation(state.conversations || [], parentId);
+  if (!parent) return null;
+
+  const newConv = {
+    id: generateUUID(),
+    title: "New branch",
+    messages: [],
+    children: [],
+    parentId: parentId,
+  };
+
+  if (!Array.isArray(parent.children)) parent.children = [];
+  parent.children.push(newConv);
+
+  const parentPath = _buildTreePath(state.conversations || [], parentId);
+  const childPath = parentPath.concat([newConv.id]);
+  state.selected_conversation = newConv.id;
+  _treePath = childPath;
+  _syncConversationSelection(state.conversations || [], newConv.id);
+  return newConv;
+}
+
 function branchFromNode(convId) {
-  // Double-click a node → show empty chat, highlight the branch-from node
+  // Tree Branch creates and selects an empty child conversation immediately.
   if (!state || !convId) return;
-  _pendingBranchParent = convId;
-  state.selected_conversation = convId; // keep branch-from node highlighted in tree
+  _pendingBranchParent = null;
+  const newConv = _createEmptyChildConversation(convId);
+  if (!newConv) return;
   renderMessages();
   const conv = findConversation(state.conversations || [], convId);
   const label = conv ? conv.title.slice(0, 40) : convId.slice(0, 12);
-  setStatus(`Branching from "${label}". Type your first message.`);
+  _persistState();
+  setStatus(`Created branch from "${label}".`);
   document.getElementById("msgInput").focus();
 }
 
@@ -413,19 +469,21 @@ function _showMsgContextMenu(event, msgIdx, totalMsgs) {
   sep.className = "ctx-sep";
   menu.appendChild(sep);
 
-  // Branch: split after this message, or branch from current conversation if last message
-  var branchItem = document.createElement("div");
-  branchItem.className = "ctx-item";
-  branchItem.textContent = "Branch\u2026";
-  branchItem.addEventListener("click", function(e) {
-    e.stopPropagation(); _hideMsgContextMenu();
-    if (msgIdx < totalMsgs - 1) {
+  // Split is only meaningful when there are later messages to move.
+  var splitItem = document.createElement("div");
+  splitItem.className = "ctx-item";
+  splitItem.textContent = "Split\u2026";
+  if (msgIdx < totalMsgs - 1) {
+    splitItem.addEventListener("click", function(e) {
+      e.stopPropagation(); _hideMsgContextMenu();
       _splitAfterMessage(msgIdx);
-    } else if (state.selected_conversation) {
-      branchFromNode(state.selected_conversation);
-    }
-  });
-  menu.appendChild(branchItem);
+    });
+  } else {
+    splitItem.style.opacity = "0.5";
+    splitItem.style.cursor = "default";
+    splitItem.title = "Split is only available before the last message.";
+  }
+  menu.appendChild(splitItem);
 
   document.body.appendChild(menu);
   _msgCtxMenu = menu;
@@ -579,6 +637,7 @@ function renderMessages() {
 
   if (!state) state = {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
+  _syncClientSelectionState();
 
   const treeCallbacks = {
     onNavigate: navigateToNode, onBranch: branchFromNode, onDelete: deleteConversation,
@@ -587,11 +646,6 @@ function renderMessages() {
     clipboardLabel: function() { return _clipboard ? _clipboard.title || "" : ""; },
     onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations
   };
-
-  // Validate state.selected_conversation: if it points to a missing conversation, reset to root
-  if (state.selected_conversation !== null && !findConversation(state.conversations, state.selected_conversation)) {
-    state.selected_conversation = null;
-  }
 
   // Determine which messages to show
   // When _pendingBranchParent is set, show empty chat (ready for new branch)
@@ -970,8 +1024,13 @@ async function sendMessage() {
   if (conversationId) {
     // Append to existing conversation
     const conv = findConversation(state.conversations, conversationId);
-    if (conv && userEntry) conv.messages.push(userEntry);
-  } else if (branchFrom || isNewRoot) {
+    if (conv && userEntry) {
+      if (!conv.messages || conv.messages.length === 0) {
+        conv.title = text.slice(0, 50);
+      }
+      conv.messages.push(userEntry);
+    }
+  } else if ((branchFrom || isNewRoot) && config.server.stateless) {
     // Create temporary optimistic conversation
     const optConvId = generateUUID();
     const optConv = {
@@ -994,6 +1053,7 @@ async function sendMessage() {
     }
     state.selected_conversation = optConvId;
   }
+  _syncClientSelectionState();
   renderMessages();
 
   try {
@@ -1063,7 +1123,12 @@ async function sendMessage() {
         state.output = saved.output;
       }
     } catch {}
-    if (isNewRoot || branchFrom) state.selected_conversation = null;
+    if (isNewRoot) {
+      state.selected_conversation = null;
+    } else if (branchFrom) {
+      state.selected_conversation = branchFrom;
+    }
+    _syncClientSelectionState();
     renderMessages();
     setStatus("Error: " + e.message);
     showErrorDialog("Send Failed", e.message);
@@ -1657,15 +1722,9 @@ async function init() {
       }
     }
 
-    // Restore selected conversation from state
-    if (!state.selected_conversation || !findConversation(state.conversations, state.selected_conversation)) {
-      state.selected_conversation = null; // root
-    }
-
     const convCount = state.conversations.length;
     console.log("[WikiOracle] init: loaded", convCount, "root conversations");
-    // Initialize treePath from selected conversation
-    _treePath = _buildTreePath(state.conversations || [], state.selected_conversation);
+    _syncClientSelectionState();
     _navScrollHint = "top"; // scroll messages pane to top on initial load
     renderMessages();
     _hideProgress();

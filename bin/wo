@@ -8,6 +8,8 @@ Usage:
     bin/wo "What is the capital of France?"
     bin/wo -f my_log.jsonl "Tell me about Strong Kleene logic."
     bin/wo --stateful "Summarize your truth table."
+    bin/wo -k -f output/root_child.xml "Create a root node"
+    bin/wo -k -f output/root_child.xml --branch-from <root-id> "Create a child node"
 
 Stateless mode (default):
     Load state from --file, send it with the query, write the
@@ -83,6 +85,16 @@ def _parse_args() -> argparse.Namespace:
         help="Model name override",
     )
     p.add_argument(
+        "--conversation-id",
+        default=None,
+        help="Append to an existing conversation ID",
+    )
+    p.add_argument(
+        "--branch-from",
+        default=None,
+        help="Create a child conversation under the given parent conversation ID",
+    )
+    p.add_argument(
         "--url-prefix",
         default="",
         help="URL path prefix (e.g. /chat) if server is behind a reverse proxy",
@@ -138,6 +150,10 @@ def _get_config(args: argparse.Namespace) -> dict:
 def _run_stateful(args: argparse.Namespace) -> int:
     """Stateful mode: send query, append conversation to JSONL file."""
     body: dict = {"message": args.message}
+    if args.conversation_id:
+        body["conversation_id"] = args.conversation_id
+    if args.branch_from:
+        body["branch_from"] = args.branch_from
 
     # Optional overrides
     cfg: dict = {}
@@ -243,6 +259,10 @@ def _run_stateless(args: argparse.Namespace) -> int:
         "state": state,
         "runtime_config": runtime_cfg,
     }
+    if args.conversation_id:
+        body["conversation_id"] = args.conversation_id
+    if args.branch_from:
+        body["branch_from"] = args.branch_from
 
     # Optional config overrides in the query bundle
     cfg: dict = {}

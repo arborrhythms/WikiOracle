@@ -52,16 +52,19 @@ State is persisted as XML (WikiOracle State format, validated by `data/state.xsd
 
 ```xml
 <state>
-  <header version="2" schema="..." time="..." selected_conversation="c_abc">
+  <header>
+    <version>2</version>
+    <schema>...</schema>
+    <time>...</time>
+    <title>...</title>
     <context>...</context>
   </header>
-  <conversations>
-    <conversation id="c_abc" title="Animals">
-      <messages><message role="user">...</message></messages>
-    </conversation>
-  </conversations>
+  <conversation id="c_abc" selected="true">
+    <title>Animals</title>
+    <message id="m1" role="user" username="User" time="...">...</message>
+  </conversation>
   <truth>
-    <entry id="t_001" trust="0.9">...</entry>
+    <fact id="t_001" DoT="0.9">...</fact>
   </truth>
 </state>
 ```

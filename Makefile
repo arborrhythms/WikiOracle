@@ -70,8 +70,20 @@ WIKIORACLE_APP ?= bin/wikioracle.py
 # --- Local/Remote switching ---------------------------------------------------
 HOST      ?= local
 NANO_PORT ?= 8000
+NANO_HOST ?= 0.0.0.0
+NANO_SOURCE ?= sft
+NANO_MODEL_TAG ?=
+NANO_STEP ?=
+NANO_DTYPE ?= float32
+NANO_DEVICE_TYPE ?= cpu
+NANO_READY_TIMEOUT ?= 45
 NANO_PID  := .nano.pid
 WO_PID    := .wo.pid
+NANO_LOG  ?= output/nanochat.log
+WO_LOG    ?= output/wikioracle.log
+WO_BIND_HOST ?= 127.0.0.1
+WO_PORT ?= 8888
+WO_READY_TIMEOUT ?= 45
 
 DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
                --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)
@@ -80,7 +92,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
 
 # --- Phony targets ------------------------------------------------------------
 
-.PHONY: all some deploy help \
+.PHONY: all some up down deploy help \
         build_venv build_setup \
         build_data build_tokenizer build_preprocess \
         train_pretrain train_finetune train \
@@ -128,7 +140,8 @@ help:
 	@echo "  make all ARCH=gpu       Full pipeline (GPU)"
 	@echo "  make some               Lightweight smoke test (10 iters, ARCH=cpu)"
 	@echo "  make some ARCH=gpu      Lightweight smoke test (GPU)"
-	@echo "  make deploy             Deploy + restart nano and wo services"
+	@echo "  make up                 Deploy + restart nano and wo services"
+	@echo "  make down               Stop nano and wo services"
 	@echo "  make remote             Launch EC2, copy code, train, auto-terminate"
 	@echo ""
 	@echo "Build / Setup (build_*):"
@@ -213,11 +226,15 @@ help:
 	@echo "  EC2_DISK_SIZE           Root EBS volume in GB (default: 200)"
 	@echo "  ALERT_EMAIL             Email for idle-instance alerts (required for remote builds)"
 
-# ---- All / Deploy -------------------------------------------------------------
+# ---- All / Service Control ----------------------------------------------------
 
 all: build_setup train test_eval doc_report
 
-deploy: nano_deploy wo_deploy nano_restart wo_restart
+up: nano_deploy wo_deploy nano_restart wo_restart
+
+down: nano_stop wo_stop
+
+deploy: up
 
 some:
 ifeq ($(ARCH),gpu)
@@ -301,11 +318,30 @@ ifeq ($(HOST),local)
 	@if [ -f $(NANO_PID) ] && kill -0 $$(cat $(NANO_PID)) 2>/dev/null; then \
 		echo "NanoChat already running (PID $$(cat $(NANO_PID)), port $(NANO_PORT))"; \
 	else \
-		cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-			NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
-			python -m scripts.chat_web -p $(NANO_PORT) -d float32 --device-type cpu & \
-		echo $$! > $(NANO_PID); \
-		echo "NanoChat starting on port $(NANO_PORT) (PID $$(cat $(NANO_PID)))"; \
+		rm -f $(NANO_PID); \
+		if "$(CURDIR)/$(VENV_DIR)/bin/python" "$(CURDIR)/bin/launch_background.py" \
+			--cwd "$(CURDIR)/$(NANOCHAT_DIR)" \
+			--pid-file "$(NANO_PID)" \
+			--log-file "$(NANO_LOG)" \
+			--wait 1.0 \
+			--ready-url "http://127.0.0.1:$(NANO_PORT)/health" \
+			--ready-timeout $(NANO_READY_TIMEOUT) \
+			--env NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
+			-- "$(CURDIR)/$(VENV_DIR)/bin/python" -m scripts.chat_web \
+				-p $(NANO_PORT) \
+				-d $(NANO_DTYPE) \
+				--device-type $(NANO_DEVICE_TYPE) \
+				--host $(NANO_HOST) \
+				-i $(NANO_SOURCE) \
+				$(if $(strip $(NANO_MODEL_TAG)),--model-tag $(NANO_MODEL_TAG),) \
+				$(if $(strip $(NANO_STEP)),--step $(NANO_STEP),) \
+			> /dev/null; then \
+			echo "NanoChat starting on port $(NANO_PORT) (PID $$(cat $(NANO_PID)))"; \
+		else \
+			echo "NanoChat failed to start. See $(NANO_LOG)"; \
+			rm -f $(NANO_PID); \
+			exit 1; \
+		fi; \
 	fi
 else
 	$(WO_SSH) "sudo systemctl start nanochat"
@@ -328,7 +364,17 @@ endif
 nano_restart:
 ifeq ($(HOST),local)
 	$(MAKE) nano_stop
-	$(MAKE) nano_start NANO_PORT=$(NANO_PORT)
+	$(MAKE) nano_start \
+		NANO_PORT=$(NANO_PORT) \
+		NANO_HOST=$(NANO_HOST) \
+		NANO_SOURCE=$(NANO_SOURCE) \
+		NANO_MODEL_TAG=$(NANO_MODEL_TAG) \
+		NANO_STEP=$(NANO_STEP) \
+		NANO_DTYPE=$(NANO_DTYPE) \
+		NANO_DEVICE_TYPE=$(NANO_DEVICE_TYPE) \
+		NANO_READY_TIMEOUT=$(NANO_READY_TIMEOUT) \
+		NANO_PID=$(NANO_PID) \
+		NANO_LOG=$(NANO_LOG)
 else
 	$(WO_SSH) "sudo systemctl restart nanochat"
 	@echo "NanoChat server restarted on $(WO_HOST)"
@@ -377,9 +423,25 @@ ifeq ($(HOST),local)
 	@if [ -f $(WO_PID) ] && kill -0 $$(cat $(WO_PID)) 2>/dev/null; then \
 		echo "WikiOracle already running (PID $$(cat $(WO_PID)))"; \
 	else \
-		$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) & \
-		echo $$! > $(WO_PID); \
-		echo "WikiOracle starting (PID $$(cat $(WO_PID)))"; \
+		rm -f $(WO_PID); \
+		if "$(CURDIR)/$(SHIM_VENV)/bin/python3" "$(CURDIR)/bin/launch_background.py" \
+			--cwd "$(CURDIR)" \
+			--pid-file "$(WO_PID)" \
+			--log-file "$(WO_LOG)" \
+			--wait 1.0 \
+			--ready-url "https://$(WO_BIND_HOST):$(WO_PORT)/health" \
+			--ready-timeout $(WO_READY_TIMEOUT) \
+			--ready-insecure \
+			--env WIKIORACLE_BIND_HOST="$(WO_BIND_HOST)" \
+			--env WIKIORACLE_PORT="$(WO_PORT)" \
+			-- "$(CURDIR)/$(SHIM_VENV)/bin/python3" "$(CURDIR)/$(WIKIORACLE_APP)" \
+			> /dev/null; then \
+			echo "WikiOracle starting (PID $$(cat $(WO_PID)))"; \
+		else \
+			echo "WikiOracle failed to start. See $(WO_LOG)"; \
+			rm -f $(WO_PID); \
+			exit 1; \
+		fi; \
 	fi
 else
 	$(WO_SSH) "sudo systemctl start wikioracle"
@@ -402,7 +464,12 @@ endif
 wo_restart:
 ifeq ($(HOST),local)
 	$(MAKE) wo_stop
-	$(MAKE) wo_start
+	$(MAKE) wo_start \
+		WO_BIND_HOST=$(WO_BIND_HOST) \
+		WO_PORT=$(WO_PORT) \
+		WO_READY_TIMEOUT=$(WO_READY_TIMEOUT) \
+		WO_PID=$(WO_PID) \
+		WO_LOG=$(WO_LOG)
 else
 	$(WO_SSH) "sudo systemctl restart wikioracle"
 	@echo "WikiOracle restarted on $(WO_HOST)"

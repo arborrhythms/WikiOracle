@@ -957,7 +957,7 @@ function _truthRenderList() {
   thead.innerHTML = '<tr style="border-bottom:2px solid var(--border); font-size:0.72rem; color:var(--fg-muted); text-align:left;">'
     + '<th style="padding:0.25rem 0.3rem; width:1.5em;"></th>'
     + '<th style="padding:0.25rem 0.3rem;">ID</th>'
-    + '<th style="padding:0.25rem 0.3rem; text-align:right;">Cert</th>'
+    + '<th style="padding:0.25rem 0.3rem; text-align:right;">Trust</th>'
     + '<th style="padding:0.25rem 0.3rem;">Title</th>'
     + '<th style="padding:0.25rem 0.3rem; width:5em;"></th>'
     + '</tr>';
@@ -1098,6 +1098,47 @@ function _getAncestorPath(conversations, convId) {
     return null;
   }
   return _search(conversations, convId);
+}
+
+function _getSelectedConversationPath(conversations) {
+  var best = null;
+  function _walk(convs, path) {
+    for (var i = 0; i < convs.length; i++) {
+      var conv = convs[i];
+      var next = path.concat([conv]);
+      if (conv.selected) {
+        best = next;
+        _walk(conv.children || [], next);
+      } else {
+        _walk(conv.children || [], path);
+      }
+    }
+  }
+  _walk(conversations || [], []);
+  return best || [];
+}
+
+function _selectedConversationIdFromFlags(conversations) {
+  var path = _getSelectedConversationPath(conversations);
+  return path.length ? path[path.length - 1].id : null;
+}
+
+function _syncConversationSelection(conversations, selectedId) {
+  function _clear(convs) {
+    for (var i = 0; i < convs.length; i++) {
+      delete convs[i].selected;
+      _clear(convs[i].children || []);
+    }
+  }
+
+  _clear(conversations || []);
+  if (!selectedId) return [];
+
+  var path = _getAncestorPath(conversations || [], selectedId) || [];
+  for (var i = 0; i < path.length; i++) {
+    path[i].selected = true;
+  }
+  return path;
 }
 
 // Serialize the ancestor path as nested conversation divs with correct hierarchical numbers.

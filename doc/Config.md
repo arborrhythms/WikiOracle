@@ -4,8 +4,6 @@ WikiOracle configuration lives in `config.xml` at the project root. The file is 
 
 The configuration has five top-level sections: [User](#1-user), [Providers](#2-providers), [Chat](#3-chat), [UI](#4-ui), and [Server](#5-server). Each section is described below with its fields, defaults, and design rationale.
 
----
-
 ## 1. User
 
 Identity metadata attached to outgoing messages.
@@ -21,8 +19,6 @@ Identity metadata attached to outgoing messages.
   <uid></uid>
 </user>
 ```
-
----
 
 ## 2. Providers
 
@@ -58,8 +54,6 @@ Custom providers can be added by appending `<provider name="my_key">` blocks. An
 
 The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) — never the key itself. See [Security.md](./Security.md) §2 for details.
 
----
-
 ## 3. Chat
 
 Chat behaviour settings controlling how the LLM produces responses.
@@ -84,8 +78,6 @@ Chat behaviour settings controlling how the LLM produces responses.
 
 The `rag` flag is a binary gate. When `rag` is true, the full truth table — facts, feelings, references, operators, authorities, and providers — is assembled into the provider bundle and sent to the UI-selected provider. When `rag` is false, none of it is sent. There is no partial mode; the HME pipeline is all-or-nothing. See [Architecture.md](./Architecture.md) §Chat pipeline (HME provider resolution) for the full data flow.
 
----
-
 ## 4. UI
 
 Client-side defaults for the browser interface. These are persisted in `sessionStorage` and can be changed at runtime via the Settings panel.
@@ -109,8 +101,6 @@ Client-side defaults for the browser interface. These are persisted in `sessionS
   <swipe_nav_vertical>false</swipe_nav_vertical>
 </ui>
 ```
-
----
 
 ## 5. Server
 
@@ -161,10 +151,10 @@ Controls the continuous learning pipeline (Stages 2–4). See [Training.md](./Tr
 
 When `enabled` is `false` (the default), the engine effectively treats all incoming facts as feelings. The Sensation preprocessor (`bin/sensation.py`) still classifies sentences into `<fact>` and `<feeling>` tags at the message level, but the entire post-response pipeline is skipped:
 
-- **No DegreeOfTruth** is computed.
-- **No truth merge** occurs — facts from conversation are never promoted into the truth table.
-- **No PII filtering** or **symmetry checking** runs (there is nothing to filter).
-- **No NanoChat training step** is dispatched.
+* **No DegreeOfTruth** is computed.
+* **No truth merge** occurs — facts from conversation are never promoted into the truth table.
+* **No PII filtering** or **symmetry checking** runs (there is nothing to filter).
+* **No NanoChat training step** is dispatched.
 
 In this mode, facts carry no more lasting weight than feelings. They are tagged in the XML for display purposes, but they are ephemeral — they do not accumulate, persist, or influence future responses via RAG. This is the safe default: the system functions as a stateless chat proxy until the operator explicitly enables truth acquisition.
 
@@ -187,8 +177,6 @@ URL prefixes permitted for outbound HTTP(S) requests made by the server during a
 ```
 
 See [Security.md](./Security.md) §6 and [Authority.md](./Authority.md) for the security rationale.
-
----
 
 ## Environment variables
 
@@ -219,8 +207,6 @@ Runtime configuration can also be set via environment variables. These override 
 | `GEMINI_API_KEY` | — | Google Gemini API key. |
 | `XAI_API_KEY` | — | xAI (Grok) API key. |
 
----
-
 ## CLI flags
 
 ```
@@ -237,8 +223,6 @@ python bin/wikioracle.py [--config PATH] [--debug] [--stateless] [--no-ssl] [--u
 | `serve` | Run the Flask shim server (default). |
 | `merge FILE...` | Merge incoming state files into the current state. |
 
----
-
 ## Schema
 
 The XML schema is defined in `data/config.xsd`. Use it for IDE validation and autocompletion:
@@ -249,15 +233,3 @@ The XML schema is defined in `data/config.xsd`. Use it for IDE validation and au
   ...
 </config>
 ```
-
----
-
-## See also
-
-- [Architecture.md](./Architecture.md) — system components and data flow.
-- [Installation.md](./Installation.md) — build, deploy, and runtime instructions.
-- [Security.md](./Security.md) — API key handling, CSP, CORS, filesystem safety.
-- [Training.md](./Training.md) — online training pipeline (Stages 2–4).
-- [Entanglement.md](./Entanglement.md) — data sovereignty and persistence policy.
-- [Ethics.md](./Ethics.md) — truth symmetry constraints.
-- [State.md](./State.md) — state file format and semantics.

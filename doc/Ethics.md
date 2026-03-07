@@ -369,17 +369,3 @@ This mirrors both:
 The system does not force ethical behavior, but unethical reasoning
 becomes unstable within the truth architecture.
 
----
-
-## See also
-
-- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — Freedom, Empathy, and Truth safety framework.
-- [Constitution.md](./Constitution.md) — non-negotiable invariants implementing ethical commitments.
-- [Entanglement.md](./Entanglement.md) — entanglement avoidance and worldline privacy.
-- [Config.md](./Config.md) — `store_particulars`, `truth_symmetry`, and online training configuration.
-- [Logic.md](./Logic.md) — explicit truth values and inspectable reasoning chains.
-- [Non.md](./Non.md) — epistemic humility and non-affirming negation.
-- [Training.md](./Training.md) — DegreeOfTruth and anti-capture mechanisms.
-- [Architecture.md](./Architecture.md) — local-first architecture implementing LFGC.
-- [ProposedLicense.md](./ProposedLicense.md) — distributed governance through licensing.
-- [BuddhistLogic.md](./BuddhistLogic.md) — non-self philosophy and identity fixation.

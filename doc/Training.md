@@ -20,12 +20,12 @@ where:
 
 The bipolar range encodes both true and false statements:
 
-- **DoT = +1**: the user's claims fully agree with the server — the
+* **DoT = +1**: the user's claims fully agree with the server — the
   exchange is true.  Train at full learning rate.
-- **DoT = −1**: the user's claims fully contradict the server — the
+* **DoT = −1**: the user's claims fully contradict the server — the
   exchange is false.  Train at full learning rate (learning what is
   *not* true is as valuable as learning what *is* true).
-- **DoT $\approx$ 0**: no shared entries, or perfect cancellation — nothing
+* **DoT $\approx$ 0**: no shared entries, or perfect cancellation — nothing
   to learn.  Skip training.
 
 Both poles (+1 and −1) train at full strength via |DoT|; only the zero
@@ -47,11 +47,11 @@ This structure resembles a **Hopfield network**, where the energy
 landscape has stable attractors (memorised patterns) and unstable
 saddle points.  In our system:
 
-- The **truth table** plays the role of the weight matrix, encoding
+* The **truth table** plays the role of the weight matrix, encoding
   the collective memory of what is true and what is false.
-- Each **training step** is a state transition that pushes the model
+* Each **training step** is a state transition that pushes the model
   toward one of the attractors (truth or refutation).
-- The **zero crossing** (DoT $\approx$ 0) is the energy barrier between
+* The **zero crossing** (DoT $\approx$ 0) is the energy barrier between
   attractors — the point of maximum uncertainty where the system has
   insufficient signal to commit to either direction.
 
@@ -100,9 +100,9 @@ independently classified as `<fact>` or `<feeling>`:
 Alfred Korzybski (*Science and Sanity*, 1933) observed that the English
 copula "is" conflates several distinct relations:
 
-- **IS of identity**: "Socrates is a man"
-- **IS of predication**: "The sky is blue"
-- **IS of existence**: "There are eight planets"
+* **IS of identity**: "Socrates is a man"
+* **IS of predication**: "The sky is blue"
+* **IS of existence**: "There are eight planets"
 
 Each asserts something verifiable about the world — a *fact* bound to
 a specific spacetime context.  "The cup is on the table" is only true
@@ -197,22 +197,22 @@ and training happen after the response is delivered.
 **Stage 3 — Update server truth table**
 
 5. Filter client truth per the Entanglement Policy (doc/Entanglement.md):
-   - When `store_particulars` is false (default), only universal
+   * When `store_particulars` is false (default), only universal
      facts pass through (`filter_knowledge_only()`).
-   - Entries with identifiable content are always filtered regardless
+   * Entries with identifiable content are always filtered regardless
      of `store_particulars` (`detect_identifiability()`).
-   - Feelings never reach the merge (`_is_server_storable()` rejects them).
-   - Operators whose leaf operands include feelings are rejected
+   * Feelings never reach the merge (`_is_server_storable()` rejects them).
+   * Operators whose leaf operands include feelings are rejected
      (`validate_operator_operands()`).
-   - Feelings are also stripped from training messages
+   * Feelings are also stripped from training messages
      (`strip_feelings_from_training()` in `bin/sensation.py`).
 6. Merge the surviving truth entries into the server truth table
    (`truth.xml`):
-   - **Match found**: nudge the server entry's trust toward the incoming
+   * **Match found**: nudge the server entry's trust toward the incoming
      value using a slow‑moving average:
      `server_trust += merge_rate × (client_trust − server_trust)`
-   - **No match**: insert the entry with the stated trust value.
-   - Entries are restricted to facts, operators, authorities, and
+   * **No match**: insert the entry with the stated trust value.
+   * Entries are restricted to facts, operators, authorities, and
      references.  Feelings and provider entries are not stored.
 
 **Stage 4 — Tag and Train**
@@ -230,9 +230,9 @@ and training happen after the response is delivered.
 Online training runs on the device specified by
 `server.online_training.device` in the config file (`config.xml`).  Valid values:
 
-- `cpu` (default) — safe for the WikiOracle production server
-- `cuda` — use NVIDIA GPU if available
-- `auto` — probe CUDA → MPS → CPU and use the best available
+* `cpu` (default) — safe for the WikiOracle production server
+* `cuda` — use NVIDIA GPU if available
+* `auto` — probe CUDA → MPS → CPU and use the best available
 
 The model is moved to the training device for the gradient step, then
 moved back to the inference device afterward.
@@ -252,10 +252,10 @@ truth element:
 **Resolution:** Before entries reach the server truth table, they are
 resolved by `resolve_entries()` in `bin/truth.py`:
 
-- `<reference>` → `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
-- `<authority>` → list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
-- `<provider>` → `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
-- `<fact>`, `<feeling>`, operators → pass through unchanged
+* `<reference>` → `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
+* `<authority>` → list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
+* `<provider>` → `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
+* `<fact>`, `<feeling>`, operators → pass through unchanged
 
 Entry types stored after resolution: `<fact>` (knowledge — no `<place>`/`<time>` children)
 and operators (`<and>`, `<or>`, `<not>`, `<non>`) whose leaf operands are all allowable facts.
@@ -281,18 +281,18 @@ server can track per‑user trust alongside factual claims.
 
 The server truth table prevents capture by any single user:
 
-- Entries are merged with a slow‑moving average, so no single user
+* Entries are merged with a slow‑moving average, so no single user
   can instantly override collective truth.
-- Disproven entries naturally drift toward −1 as contradicting evidence
+* Disproven entries naturally drift toward −1 as contradicting evidence
   accumulates from other users.
-- DegreeOfTruth gates the learning rate, so claims that diverge from
+* DegreeOfTruth gates the learning rate, so claims that diverge from
   consensus have minimal training impact.
 
 Manual rollback is available via Makefile targets:
 
-- `make checkpoint-pull` — rsync SFT checkpoints from the remote
+* `make checkpoint-pull` — rsync SFT checkpoints from the remote
   WikiOracle server to `output/checkpoints/` for safekeeping.
-- `make checkpoint-push` — restore checkpoints from backup, then
+* `make checkpoint-push` — restore checkpoints from backup, then
   `make wo-restart` to reload weights.
 
 The intended workflow: pull a checkpoint before enabling online training,
@@ -327,12 +327,12 @@ when the truth table produces conflicting signals.
 
 ## See also
 
-- [Entanglement.md](./Entanglement.md) — the entanglement policy governing what persists.
-- [Logic.md](./Logic.md) — operators stored alongside facts in the truth table.
-- [Architecture.md](./Architecture.md) — the response pipeline integrating training stages.
-- [Constitution.md](./Constitution.md) — anti-capture as a constitutional commitment.
-- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — DegreeOfTruth operates over the HME truth table.
-- [Config.md](./Config.md) — online training configuration settings and behavior when disabled.
-- [Ethics.md](./Ethics.md) — entanglement-resistant training as an ethical design choice.
-- [BuddhistLogic.md](./BuddhistLogic.md) — the Sensation pipeline follows Buddhist epistemology.
-- [FutureWork.md](./FutureWork.md) — dissonance detection and pluralistic truth.
+* [Entanglement.md](./Entanglement.md) — the entanglement policy governing what persists.
+* [Logic.md](./Logic.md) — operators stored alongside facts in the truth table.
+* [Architecture.md](./Architecture.md) — the response pipeline integrating training stages.
+* [Constitution.md](./Constitution.md) — anti-capture as a constitutional commitment.
+* [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — DegreeOfTruth operates over the HME truth table.
+* [Config.md](./Config.md) — online training configuration settings and behavior when disabled.
+* [Ethics.md](./Ethics.md) — entanglement-resistant training as an ethical design choice.
+* [BuddhistLogic.md](./BuddhistLogic.md) — the Sensation pipeline follows Buddhist epistemology.
+* [FutureWork.md](./FutureWork.md) — dissonance detection and pluralistic truth.

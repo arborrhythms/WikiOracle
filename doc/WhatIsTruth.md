@@ -1,44 +1,43 @@
 # WhatIsTruth.md  
+
+Revision: 2026.02.27
+
 ## Plural Truth and Shared Empathy in the Design of WikiOracle
 
 Truth is not the same thing as consensus.
 
-Different communities trust different sources.  
-Different disciplines apply different standards of proof.  
-Different cultures interpret the same facts through different lenses.
+* Different communities trust different sources.  
+* Different disciplines apply different standards of proof.  
+* Different cultures interpret the same facts through different lenses.
 
-A healthy knowledge system does not erase these differences.  
-It preserves them, makes them visible, and shows where they overlap. WikiOracle should not aim to speak with a single authoritative voice. It should aim to:
+A healthy knowledge system does not erase these differences. It preserves them, makes them visible, and shows where they overlap. 
+WikiOracle should not aim to speak with a single authoritative voice. It aims to:
 
-- Show what holds across many points of view.  
-- Show where serious disagreement remains.  
-- Explain why disagreement exists.  
-- Make uncertainty explicit.  
+* Show what holds across many points of view.
+* Show where serious disagreements remain.
+* Explain why disagreement exists.
+* Make uncertainty explicit.
 
-Truth is strongest when it is transparent, not when it is uniform.
-
----
+Truth is strongest when its mechainsm of trust is transparent, not when it is uniform.
 
 ## The Problem With Current Model Development
 
 Most large AI systems today are built around:
 
-- A single global objective function.  
-- Centralized data aggregation.  
-- Implicit averaging over moral and cultural differences.  
-- Hidden alignment rules.  
-- Proprietary control of core knowledge.  
+* A single objective function that optimizes over a shared global set of truth.
+* Centralized data aggregation.  
+* Implicit averaging over moral and cultural differences.  
+* Hidden alignment rules.  
+* Proprietary control of core knowledge.  
 
 This produces predictable risks:
 
-1. **Collapse into Consensus** – Minority viewpoints are quietly averaged away.  
-2. **Preference Capture** – The loudest or most powerful groups shape the model at scale.  
-3. **Epistemic Centralization** – A single model becomes an authority node, increasing dependence.  
-4. **Conversion of Knowledge into Leverage** – Predictive advantage becomes economic or political dominance.  
+**Collapse into Consensus** – Minority viewpoints are quietly averaged away.  
+**Preference Capture** – The loudest or most powerful groups shape the model at scale.  
+**Epistemic Centralization** – A single model becomes an authority node, increasing dependence.  
+**Conversion of Knowledge into Leverage** – Predictive advantage becomes economic or political dominance.  
 
-When this happens, wisdom stops being a shared good and becomes a strategic asset.
-
----
+When these risks manifest, wisdom stops being a shared good and becomes a strategic asset.
 
 ## A Plural Model of Truth
 
@@ -46,196 +45,69 @@ WikiOracle should maintain multiple Points of View (POVs), each with its own tru
 
 Each POV may:
 
-- Trust different sources.  
-- Weigh evidence differently.  
-- Interpret claims differently.  
+* Trust different sources.  
+* Weigh evidence differently.  
+* Interpret claims differently.  
 
 Instead of collapsing these into one answer, the system should:
 
-- Present POV-conditioned conclusions.  
-- Identify robust overlaps across perspectives.  
-- Preserve live disputes.  
-- Keep minority views visible and searchable.  
+* Present POV-conditioned conclusions.  
+* Identify robust overlaps across perspectives.  
+* Preserve live disputes.  
+* Keep minority views visible and searchable.  
 
 Distrust between communities is not a defect. It creates epistemic distance, preventing forced consensus. A plural system can remain coherent without being uniform. This model of truth is simultaneously multicultural (respecting diverse cultural frameworks), multivalent (allowing claims to carry different weights under different perspectives), and pluralistic (treating the coexistence of competing truths as a structural feature rather than a flaw).
 
----
-
 ## Empathy as Shared Constraint
 
-Plural truth alone is not sufficient. Without shared constraints, disagreement can become manipulation or harm.
+Plural truth alone is not sufficient. Empathy ineeds to be architectural. It means enforcing how disagreement is handled:
 
-Empathy in architecture does not mean enforcing agreement. It means enforcing how disagreement is handled. The system must:
+* When Truth conflicts, meaning that the same Truth is held to be both True and False, each truth should be contextualized in its own reference frame.
+* Feelings cannot conflict, becuase they are authoritative from different points of view.  
 
-- Refuse to enable coercion or exploitation.  
-- Surface potential harms and uncertainty.  
-- Preserve dignity in tone and framing.  
-- Keep outputs contestable and auditable.  
-
-Beliefs may differ. Treatment must not.
-
-Empathy lives in procedural safeguards — not in enforced sameness.
-
----
+As a first take at encoding emapthy, a Golden Rule is encoded in by allowing the choice of symmetric truths.  
+An unempathetic body of truth can be prevented by refusing selfish truths (truth must be universally true).
 
 ## Relation to the Wikipedia Model
 
 Wikipedia provides an important precedent:
 
-- Open participation.  
-- Transparent citation.  
-- Community moderation.  
-- Distributed subject-matter authority.  
+* Open participation (achieved thorugh low barrier to entry or free use without advertising).  
+* Transparent citation (achieved through a corpus of truth within which you can decide what you trust and distrust). 
+* Community moderation (achieved by reaching agreement within a single reference frame or creating seperate reference frames).  
+* Distributed subject-matter authority (achived by creating seperate reference frames or trusted authorities)
 
-However, it still trends toward a single neutral narrative. Minority positions can be compressed into “fringe” categories, and editorial influence can cluster informally.
+WikiOracle extends the strengths of Wikipedia while going further:
 
-WikiOracle should extend the strengths of Wikipedia while going further:
+* Support structured parallel POVs instead of a single narrative by allowing separate domains of trust.  
+* These multiple trust domains are visible rather than implicit.  
+* Model disagreement explicitly rather than smoothing it away.  
 
-- Support structured parallel POVs instead of a single neutral tone.  
-- Make trust networks visible rather than implicit.  
-- Model disagreement explicitly rather than smoothing it away.  
-
-Instead of one neutral point of view, the system can offer visible points of view.
-
----
-
-## Why This Is Stable
+## Stability
 
 Growth in wisdom is not destabilizing when:
 
-- Knowledge remains open and auditable.  
-- No single actor can monopolize epistemic advantage.  
-- Minority perspectives are preserved.  
-- Shared constraints prevent harm and coercion.  
+* Knowledge remains open and auditable.  
+* No single actor can monopolize epistemic advantage.  
+* Minority perspectives are preserved.  
 
 Such a system may disrupt business models that depend on opacity or information asymmetry. That disruption is corrective, not destructive.
 
-Truth does not need to be centralized to be shared.
-Empathy does not require uniform belief.
+## Distributed Truth vs Consensus
 
-A stable knowledge commons decentralizes truth while universalizing care in how truth is expressed and applied.
-That is the foundation for WikiOracle.
+WikiOracle attempts to achieve a distributed truth, and shares much of the design philosophy of Wikipedia:
 
----
+* **Radical Accessibility** — Wikipedia is freely accessible worldwide and allows anyone to both read and contribute without institutional gatekeeping.
 
-## HME: Hierarchical Mixture of Experts for Truth
+* **Citation Norms** — Content presented as true must be verifiable with the trust-set supplied by the user.
 
-WikiOracle implements a Hierarchical Mixture of Experts (HME) architecture for evaluating claims. The system operates on two file types:
+* **Decentralized Governance** — Dispute resolution is handled by a distributed volunteer community arguing about what is true.
 
-- **State files** (`.xml`): contain conversations, trust entries, and context (WikiOracle State format, validated by `data/state.xsd`).
-- **Config files** (`.xml`): contain provider credentials, chat settings, and retrieval parameters (WikiOracle Config format, validated by `data/config.xsd`).
+* **Anti-Monetization Bias** — As a nonprofit project it should operate without advertising-driven content incentives.
 
-### Certainty: Kleene Ternary Logic
+* **Self-Correcting Dynamics** — Errors and vandalism can be rapidly identified and corrected, whihc causes their sources to be distrusted. This requires that all data for training the weights remains visible for later error correction and modification.
 
-Each trust entry carries a **certainty** value on the interval [-1, +1], encoding a Kleene ternary logic:
+* **Cultural Legitimacy** — WikiOracle is intended to function as a widely accepted public reference layer and shared knowledge commons which prevents surveiallance and advertizing.
 
-| Certainty | Meaning |
-|-----------|---------|
-| **+1** | Certainly true. An axiom that supports deductive reasoning. |
-| **0 < c < +1** | Soft belief. Grounds fuzzy deductions with propagated certainty. |
-| **0** | Ignorance. Equivalent to not making the statement at all; the entry is inert. |
-| **-1 < c < 0** | Soft disbelief. Evidence against the claim. |
-| **-1** | Certainly false. Active disbelief. |
+* **Open Knowledge Model** — It demonstrates that large-scale, decentralized, norm-governed collaboration can produce a coherent and durable knowledge commons.
 
-Certainty propagates through deductive chains: a conclusion derived from two premises with certainties c1 and c2 inherits certainty min(c1, c2). Entries with certainty 0 contribute nothing to reasoning.
-
-### Trust Entry Content Types
-
-The `content` field of each trust entry is XHTML and may contain any combination of:
-
-- `<p>` — Bare facts (e.g. "All men are mortal").
-- `<a href="...">` — External source references (Wikipedia, Snopes, etc.) that the LLM may consult.
-- `<provider>` — An LLM provider block that triggers HME fan-out.
-
-### HME Pipeline
-
-The truth table is gated by the `rag` config flag: when `rag` is true, **all** `state.truth` is sent to the final provider; when `rag` is false, **no** truth of any kind is sent. When enabled, the truth table is processed in two phases — static and dynamic:
-
-```
-st = static_truth(state.truth)      # facts & references (evaluable subset)
-t  = st + dynamic_truth(st)         # operators, authorities, and providers
-                                    # evaluated against st
-```
-
-`static_truth` selects the entries that the dynamic steps use as input. All `state.truth` entries (including structural ones) are still sent to the final provider — `static_truth` controls evaluation, not delivery.
-
-When a user sends a query:
-
-1. **Static truth**: `static_truth()` extracts the evaluable subset of `state.truth` — every `<fact>` and `<reference>` entry. Structural entries (`<provider>`, `<operator>`, `<authority>`) are excluded from this subset.
-
-2. **Dynamic truth** — structural entries are evaluated against the static set:
-   - **Operators**: `compute_derived_truth()` evaluates `<and>`, `<or>`, `<not>` over the truth table (Strong Kleene semantics). Derived certainty values propagate back into the entries they govern.
-   - **Authorities**: Each `<authority>` entry references a remote truth table. It is fetched and its entries are appended with scaled certainty.
-   - **Providers**: All `<provider>` entries are sorted by (-|certainty|, -timestamp, id). The highest-ranked becomes the **primary** provider; the rest are **secondaries**. Each secondary receives a RAG-free bundle (system context, conversation history, user query, output instructions) — but no truth entries, keeping secondary opinions independent. Their responses become sources with the provider's certainty.
-
-3. **Primary synthesis**: The primary provider receives **all** `state.truth` entries (with operator-derived certainty where applicable), plus authority remote entries and provider evaluation responses, along with conversation history, system context, and the user message.
-
-4. **Fallback**: If the primary provider fails, secondaries are tried in order.
-
-### Syllogistic Examples
-
-The file `test/hme.xml` contains demonstration data that tests the reasoning engine:
-
-- **Axioms** (certainty=1.0): "All men are mortal", "Socrates is a man", etc.
-- **Valid deductions** (certainty=1.0): "Socrates is mortal" follows from the axioms.
-- **Soft claims** (certainty=0.8): "Most birds can fly" — grounds fuzzy deductions.
-- **Disbelief** (certainty=-0.9): "Penguins can fly" — known false despite soft premises.
-- **External sources**: Wikipedia and Snopes links as verifiable references.
-- **Provider entry**: A Claude `<provider>` block demonstrating HME fan-out.
-
----
-
-## Spatiotemporal Binding and Worldline Privacy
-
-Facts in WikiOracle are classified into two kinds based on their relationship
-to spacetime:
-
-| Kind | Description | Persistence |
-|---|---|---|
-| **Knowledge** | Universal claims with no spatiotemporal anchor | Server truth table |
-| **News** | Observations bound to a specific place and/or time | Session-only |
-
-This distinction is rooted in Buddhist epistemology: knowledge facts correspond
-to *anumāna* (inference — universally valid reasoning), while news facts
-correspond to *pratyakṣa* (direct perception — bound to the observer's
-spatiotemporal position).
-
-### Why news facts are session-only
-
-Persisting spatiotemporally bound observations creates a **worldline** — a
-traceable path through spacetime that could identify a user. If a server
-accumulates entries like "User was in Paris at 9am" and "User was in London
-at 3pm", an adversary could reconstruct the user's physical movements.
-
-WikiOracle prevents this by:
-
-1. **Classifying** facts as knowledge or news via `is_knowledge_fact()` and
-   `is_news_fact()` in `bin/truth.py`.  News facts are identified by the
-   presence of `<place>` or `<time>` child elements with real values inside
-   the XHTML content.
-2. **Filtering** server persistence through `filter_knowledge_only()` — only
-   knowledge facts reach the server truth table.
-3. **Detecting** identifiability via `detect_identifiability()` —
-   scanning content for PII patterns (emails, phone numbers, GPS coordinates,
-   street addresses, named persons with temporal prepositions).
-4. **Stripping** spacetime child elements via `strip_spacetime_elements()` when
-   content needs to be anonymised (removes `<place>` and `<time>` elements).
-
-### PII patterns detected
-
-The identity-collapse detector covers: email addresses, phone numbers,
-@handles, usernames, IP addresses, GPS/DMS coordinates, street addresses,
-specific clock times and ISO timestamps, and named individuals combined
-with temporal or spatial prepositions.
-
----
-
-## See also
-
-- [Constitution.md](./Constitution.md) — non-negotiable invariants for truth and governance.
-- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — HME logic, distributed truth, conceptual spaces.
-- [Logic.md](./Logic.md) — logical operators (and/or/not/non) under Strong Kleene semantics.
-- [BuddhistLogic.md](./BuddhistLogic.md) — pramana theory, tetralemma, Kleene logic mapping (anumāna/pratyakṣa).
-- [Entanglement.md](./Entanglement.md) — worldline entanglement policy and spatiotemporal persistence.
-- [Authority.md](./Authority.md) — transitive trust and authority import format.
-- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — Freedom, Empathy, and Truth safety principles.

@@ -17,9 +17,9 @@ Add/verify four test scenarios in `test/test_tree_branch.py` covering the voting
 2. **Test the server-side diamond structure more thoroughly** — extend the existing `test_vote_creates_diamond_structure` to also verify that the shared final node (same object under multiple beta children) would produce diamond links by checking that `final` appears in multiple `beta.children` lists and that its `parentId` is a list.
 
 **Decision:** Option 2 — the existing test already verifies the diamond data structure including `parentId` being a list. We'll add a focused assertion that the final node is literally the *same Python object* under each beta's children (since `conversationsToHierarchy` relies on `conv.id` deduplication, not object identity). We'll also add a new test class `TestDiamondInTreeHierarchy` that constructs a diamond conversation tree directly (matching what the JS `conversationsToHierarchy` would receive) and verifies the structural properties that the JS function relies on:
-- The final node appears as a child of multiple beta nodes
-- All instances share the same `id`
-- `parentId` is a list of beta IDs
+* The final node appears as a child of multiple beta nodes
+* All instances share the same `id`
+* `parentId` is a list of beta IDs
 
 This validates that the server output is correctly shaped for the D3 diamond rendering.
 
@@ -73,10 +73,10 @@ This validates that the server output is correctly shaped for the D3 diamond ren
 **Approach:** Since `_splitAfterMessage` is purely client-side JavaScript (it modifies `state.conversations` in-place and calls `renderMessages`), we can test the equivalent logic in Python:
 1. Build a conversation with 4 messages: [user1, assistant1, user2, assistant2]
 2. Simulate splitting after message index 1 (after assistant1):
-   - Original conversation keeps messages [user1, assistant1]
-   - New child conversation gets messages [user2, assistant2]
-   - New child inherits the original's children
-   - Original's children becomes [new_child]
+   * Original conversation keeps messages [user1, assistant1]
+   * New child conversation gets messages [user2, assistant2]
+   * New child inherits the original's children
+   * Original's children becomes [new_child]
 3. Assert the split is correct: original has 2 messages, child has 2 messages, parentId is set correctly
 
 This tests the split algorithm. Since the JS `_splitAfterMessage` uses `conv.messages.splice()` and creates a new child, we replicate this in Python using list slicing and verify the structural result.
@@ -87,7 +87,7 @@ This tests the split algorithm. Since the JS `_splitAfterMessage` uses `conv.mes
 
 ## Files Modified
 
-- `test/test_tree_branch.py` — add 4 new test classes:
+* `test/test_tree_branch.py` — add 4 new test classes:
   1. `TestDiamondInTreeHierarchy` — voting diamond produces correct structure for D3
   2. `TestParallelRootCreation` — two root nodes created in parallel
   3. `TestBranchCreatesChildAndGrandchild` — branch popup creates child + grandchild chain

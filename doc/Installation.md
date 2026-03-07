@@ -1,13 +1,13 @@
 # Installation
 
-## Prerequisites
+## Requirements
 
-- Python 3 and `make`.
-- `uv` for NanoChat environment setup (`make setup-cpu` / `make setup-gpu` will bootstrap it if missing).
-- AWS CLI configured for EC2 launch workflows (`make remote*` targets).
-- SSH keys:
-  - EC2 training key (`~/.ssh/nanochat-key.pem`, auto-created by remote tooling as needed).
-  - Lightsail key (`./wikiOracle.pem` by default, configurable via `WO_KEY_FILE`).
+* Python 3 and `make`.
+* `uv` for NanoChat environment setup (`make setup-cpu` / `make setup-gpu` will bootstrap it if missing).
+* AWS CLI configured for EC2 launch workflows (`make remote*` targets).
+* SSH keys:
+  * EC2 training key (`~/.ssh/nanochat-key.pem`, auto-created by remote tooling as needed).
+  * Lightsail key (`./wikiOracle.pem` by default, configurable via `WO_KEY_FILE`).
 
 ## Building
 
@@ -33,12 +33,12 @@ make tokenizer
 ## Deployment
 
 Two-machine deployment model:
-- EC2 GPU instance (ephemeral) for training.
-- Lightsail instance (`wikiOracle.org`, persistent) for hosting.
+* EC2 GPU instance (ephemeral) for training.
+* Lightsail instance (`wikiOracle.org`, persistent) for hosting.
 
 Primary orchestration files:
-- `Makefile` for local and remote workflows.
-- `bin/remote.py` for EC2 lifecycle, training orchestration, deployment, and retrieval.
+* `Makefile` for local and remote workflows.
+* `bin/remote.py` for EC2 lifecycle, training orchestration, deployment, and retrieval.
 
 NanoChat model code lives in `nanochat/`.
 
@@ -52,13 +52,13 @@ NanoChat model code lives in `nanochat/`.
 
 ### Useful remote operations
 
-- `make remote-status`, `make remote-logs`, `make remote-ssh`
-- `make remote-retrieve`, `make remote-deploy`
+* `make remote-status`, `make remote-logs`, `make remote-ssh`
+* `make remote-retrieve`, `make remote-deploy`
 
 ### Security notes
 
-- WikiOracle credentials are not copied onto EC2.
-- Deployment excludes local/dev artifacts from rsync (`.venv`, caches, local data, `.env`, etc.).
+* WikiOracle credentials are not copied onto EC2.
+* Deployment excludes local/dev artifacts from rsync (`.venv`, caches, local data, `.env`, etc.).
 
 ## Running
 
@@ -86,7 +86,7 @@ WikiOracle includes a local Flask server (`bin/wikioracle.py`) that enables chat
 
 | File | Role |
 |---|---|
-| `bin/wikioracle.py` | Local shim server (binds to `0.0.0.0:8888` with TLS). Proxies chat requests upstream and persists state to `state.xml`. Also supports CLI merge: `python bin/wikioracle.py merge llm_*.xml` |
+| `bin/wikioracle.py` | Local shim server (binds to `127.0.0.1:8888` with TLS). Proxies chat requests upstream and persists state to `state.xml`. Also supports CLI merge: `python bin/wikioracle.py merge llm_*.xml` |
 | `bin/config.py` | Config dataclass, XML loader, provider registry, schema-driven XML writer, normalization |
 | `bin/state.py` | State validation, XML I/O, collision-safe merge with deterministic ID suffixing, and optional context-delta extraction |
 | `bin/response.py` | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4) |
@@ -111,9 +111,9 @@ Export conversations from phone/browser as `llm_YYYY.MM.DD.HHMM.xml`, then merge
 
 ## See also
 
-- [Architecture.md](./Architecture.md) — system components and data flow.
-- [Config.md](./Config.md) — configuration format, settings, and environment variables.
-- [State.md](./State.md) — state file format and session portability.
-- [Security.md](./Security.md) — security considerations for deployment.
-- [Training.md](./Training.md) — remote training flow and device configuration.
-- [Constitution.md](./Constitution.md) — project purpose and invariants.
+* [Architecture.md](./Architecture.md) — system components and data flow.
+* [Config.md](./Config.md) — configuration format, settings, and environment variables.
+* [State.md](./State.md) — state file format and session portability.
+* [Security.md](./Security.md) — security considerations for deployment.
+* [Training.md](./Training.md) — remote training flow and device configuration.
+* [Constitution.md](./Constitution.md) — project purpose and invariants.

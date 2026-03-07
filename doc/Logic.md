@@ -1,102 +1,19 @@
 # Logic
 
-## Logical operators in WikiOracle's truth system
 
-WikiOracle's truth layer supports four logical connectives — **and**, **or**, **not**, **non** — evaluated under Strong Kleene semantics on a continuous certainty scale [-1, +1]. These operators let you compose existing trust entries into derived propositions whose certainty is computed automatically.
-
-Wikipedia links (core):
-- [Three-valued logic (Kleene)](https://en.wikipedia.org/wiki/Three-valued_logic)
-- [Material conditional](https://en.wikipedia.org/wiki/Material_conditional)
-- [Logical connective](https://en.wikipedia.org/wiki/Logical_connective)
-- [Relevance logic](https://en.wikipedia.org/wiki/Relevance_logic)
-
----
-
-## Strong Kleene evaluation
-
-WikiOracle extends Strong Kleene logic from discrete {T, U, F} to a continuous scale [-1, +1], where +1 is full belief, -1 is full disbelief, and 0 is maximally uncertain.
-
-The four operators:
-
-- **and(a, b, …)** = min(certainty_a, certainty_b, …) — conjunction is only as strong as the weakest operand.
-- **or(a, b, …)** = max(certainty_a, certainty_b, …) — disjunction takes the strongest operand.
-- **not(a)** = −certainty_a — negation flips the sign (affirming negation).
-- **non(a)** = 1 − 2|a| — non-affirming negation. Measures epistemic openness: how much certainty room remains. Full certainty in either direction (±1) yields −1 (fully closed); ignorance (0) yields +1 (fully open). See `doc/Non.md` for the Buddhist philosophical motivation.
-
-These operators compose freely — for instance, material implication (A → B) falls out as `or(not(A), B)`.
-
-The key insight behind `non`: Kleene logic cannot detect uncertainty; it can only transmit it. `non` introduces uncertainty as a first-class observable. If WikiOracle needs to reason about openness rather than merely propagate it, then `non` is not ornamental — it is structurally necessary. See [`doc/Non.md`](Non.md) for the proof and the Buddhist philosophical motivation.
-
----
-
-## Storage format (unified XHTML)
-
-All trust entries use a unified XHTML format where the root element carries `id`, `certainty`, and `title` attributes. Operator entries use `<and>`, `<or>`, `<not>`, or `<non>` root tags with `<child id="..."/>` self-closing children:
-
-```json
-{
-  "type": "truth",
-  "id": "op_socrates_mortal",
-  "title": "Socrates is mortal (AND of axioms)",
-  "certainty": 0.0,
-  "content": "<and id=\"op_socrates_mortal\" certainty=\"0.0\" title=\"Socrates is mortal (AND of axioms)\"><child id=\"axiom_01\"/><child id=\"axiom_02\"/></and>",
-  "time": "2026-02-25T00:00:01Z"
-}
-```
-
-```json
-{
-  "type": "truth",
-  "id": "op_not_penguin_fly",
-  "title": "Penguins cannot fly (NOT)",
-  "certainty": 0.0,
-  "content": "<not id=\"op_not_penguin_fly\" certainty=\"0.0\" title=\"Penguins cannot fly (NOT)\"><child id=\"false_01\"/></not>",
-  "time": "2026-02-25T00:00:04Z"
-}
-```
-
-Rules:
-- `<and>` and `<or>` require 2 or more `<child>` children.
-- `<not>` and `<non>` require exactly 1 `<child>` child.
-- Each `<child id="..."/>` must name an existing trust entry ID.
-- IDs are bare (no prefixes). UUIDs or human-readable slugs are both acceptable.
-- The `id` and `certainty` on the root element are canonical; envelope fields are synced from them during normalization.
-
----
-
-## Derived truth engine
-
-`compute_derived_truth()` in `bin/truth.py` evaluates all operator entries using fixed-point iteration:
-
-1. Build a certainty lookup `{ id: certainty }` from all trust entries.
-2. Extract operators via `parse_operator_block()`.
-3. Iterate (max 100 rounds):
-   - For each operator entry, compute its certainty from its operands (and/or/not/non).
-   - If no values changed (within $\epsilon$ = 1e-9), stop (fixed point reached).
-4. Return the complete derived certainty table.
-
-Operators derive their **own** entry's certainty from their operands. They do not modify other entries. This is a side-effect-free model: an operator's certainty is always a deterministic function of its referenced operands.
-
-### Chaining and cycles
-
-Operators can reference other operator entries, forming chains (e.g., an OR whose operands include an AND). Fixed-point iteration handles this naturally. Cycles terminate because min/max/negate are monotone or contracting on [-1, +1] — the iteration converges or hits the 100-round cap.
-
----
 
 ## Feelings — outside the truth lattice
 
 Feelings (`<feeling>` entries) are **not** part of the truth lattice.  They occupy the *neither* position in the Buddhist tetralemma — they are pre-conceptual experiential signals that are neither true nor false.
 
-- Feelings carry **no trust attribute**.  They are orthogonal to the certainty scale.
-- Feelings are **excluded from operator evaluation** — they cannot appear as operands of `<and>`, `<or>`, `<not>`, or `<non>`.
-- Feelings are **excluded from model training** — they do not contribute to DegreeOfTruth or update NanoChat weights.
-- Feelings are **excluded from server persistence** — only knowledge facts, operators, authorities, and references are stored.
+* Feelings carry **no trust attribute**.  They are orthogonal to the certainty scale.
+* Feelings are **excluded from operator evaluation** — they cannot appear as operands of `<and>`, `<or>`, `<not>`, or `<non>`.
+* Feelings are **excluded from model training** — they do not contribute to DegreeOfTruth or update NanoChat weights.
+* Feelings are **excluded from server persistence** — only knowledge facts, operators, authorities, and references are stored.
 
 Examples of feelings: greetings ("Hello!"), encouragement ("That's a great question!"), poetry, and subjective expressions without an IS-predicate.
 
----
-
-## Fact kinds — knowledge vs news
+## Fact kinds — knowledge (universale) vs news (particulars)
 
 Facts are classified into two kinds based on spatiotemporal binding:
 
@@ -116,34 +33,370 @@ Knowledge facts are persisted to the server truth table (`truth.xml`) because th
 
 The `detect_identifiability()` function in `bin/truth.py` provides an additional safety layer by scanning content for PII patterns (email addresses, phone numbers, GPS coordinates, street addresses, etc.) that could identify a user through spatiotemporal observation.
 
+## Logical operators in WikiOracle's truth system
+
+WikiOracle's truth layer supports four logical connectives — **and**, **or**, **not**, **non** — evaluated under Strong Kleene semantics on a continuous certainty scale [-1, +1]. These operators let you compose existing trust entries into derived propositions whose certainty is computed automatically.
+
+Wikipedia links (core):
+* [Three-valued logic (Kleene)](https://en.wikipedia.org/wiki/Three-valued_logic)
+* [Material conditional](https://en.wikipedia.org/wiki/Material_conditional)
+* [Logical connective](https://en.wikipedia.org/wiki/Logical_connective)
+* [Relevance logic](https://en.wikipedia.org/wiki/Relevance_logic)
+
+
+### Fuzzy Kleene Logic with Feeling
+
+Each trust entry carries a **trust** value on the interval [-1..0..+1], encoding a Fuzzy Kleene (continuous ternary) logic:
+
+| Certainty | Meaning |
+|-----------|---------|
+| **+1** | Certainly true. An axiom that supports deductive reasoning. |
+| **0 < c < +1** | Soft belief. Grounds fuzzy deductions with propagated certainty. |
+| **0** | Ignorance. Equivalent to not making the statement at all; the entry is inert. |
+| **-1 < c < 0** | Soft disbelief. Evidence against the claim. |
+| **-1** | Certainly false. Active disbelief. |
+
+Certainty propagates through deductive chains: a conclusion derived from two premises with certainties c1 and c2 inherits certainty min(c1, c2). Entries with certainty 0 contribute nothing to reasoning.
+
+
+## Strong Kleene evaluation
+
+WikiOracle extends Strong Kleene logic from discrete {T, U, F} to a continuous scale [-1, +1], where +1 is full belief, -1 is full disbelief, and 0 is maximally uncertain.
+
+The four operators:
+
+* **and(a, b, …)** = min(certainty_a, certainty_b, …) — conjunction is only as strong as the weakest operand.
+* **or(a, b, …)** = max(certainty_a, certainty_b, …) — disjunction takes the strongest operand.
+* **not(a)** = −certainty_a — negation flips the sign (affirming negation).
+* **non(a)** = 1 − 2|a| — non-affirming negation. Measures epistemic openness: how much certainty room remains. Full certainty in either direction (±1) yields −1 (fully closed); ignorance (0) yields +1 (fully open). See `doc/Non.md` for the Buddhist philosophical motivation.
+
+These operators compose freely — for instance, material implication (A → B) falls out as `or(not(A), B)`.
+
+The key insight behind `non`: Kleene logic cannot detect uncertainty; it can only transmit it. `non` introduces uncertainty as a first-class observable. If WikiOracle needs to reason about openness rather than merely propagate it, then `non` is not ornamental — it is structurally necessary. See [`doc/Non.md`](Non.md) for the proof and the Buddhist philosophical motivation.
+
+## Non: non-affirming negation
+
+WikiOracle has two negation operators with distinct epistemic roles:
+
+| Operator | Formula | Effect |
+|----------|---------|--------|
+| `not(a)` | −a | Flips belief to disbelief (and vice versa). Affirming negation. |
+| `non(a)` | 1 − 2\|a\| | Measures epistemic openness on [-1, +1]. Non-affirming negation. |
+
+`not` is straightforward: if you believe a claim at +0.9, `not` yields −0.9 — you now disbelieve it with equal strength. This is *affirming* negation: it asserts the contrary.
+
+`non` does something fundamentally different. It erases the sign — the direction of commitment — and returns a value on the same [-1, +1] scale that measures how open or closed the epistemic state is:
+
+| Input a | \|a\| | non(a) = 1 − 2\|a\| | Reading |
+|---------|-------|----------------------|---------|
+| ±1.0 | 1.0 | −1.0 | Full certainty → fully closed |
+| ±0.9 | 0.9 | −0.8 | Strong certainty → strongly closed |
+| ±0.7 | 0.7 | −0.4 | |
+| ±0.5 | 0.5 | 0.0 | Moderate certainty → neither open nor closed |
+| ±0.3 | 0.3 | 0.4 | |
+| ±0.1 | 0.1 | 0.8 | Weak certainty → strongly open |
+| 0.0 | 0.0 | 1.0 | Ignorance → fully open |
+
+Three properties stand out:
+
+1. **Symmetry**: non(+a) = non(−a). Belief and disbelief of equal strength produce the same openness.
+2. **non(0) = +1**: Ignorance is maximum openness.
+3. **non(±1) = −1**: Full certainty is fully closed.
+
+The ±0.5 boundary is where `non` crosses zero: certainty below half-strength reads as open, above half-strength reads as closed.
+
+The formula is the standard affine rescaling of the fuzzy complement: `1 − |a|` maps certainty strength to openness on [0, 1]; the rescaling `2x − 1` maps that onto [-1, +1], making `non` composable with the other operators.
+
 ---
 
-## Future directions
+## Precedent in Buddhist logic
 
-The current operator set covers propositional logic under Strong Kleene semantics. Planned extensions:
+Indian and Tibetan Buddhist philosophers identified two forms of negation:
 
-- **Nested composition** — allowing operator tags within operator tags in a single content string, reducing multi-entry boilerplate for compound expressions.
-- **Implication encodings** — the current operators already express material implication via `or(not(A), B)`. Richer conditionals (strict implication, relevance-gated implication) may follow if use cases warrant them.
+* **Paryudasa-pratisedha** (affirming negation) — negates a predicate while implying a positive alternative. "The pot is not blue" implies it is some other color. This maps to `not`.
+
+* **Prasajya-pratisedha** (non-affirming negation) — simply removes an attribution without positing anything in its place. "Phenomena lack inherent existence" does not assert they have some other kind of existence. This maps to `non`.
+
+The distinction is central to Madhyamaka philosophy. When Nagarjuna argues that phenomena are "empty" (shunya), he intends prasajya — the removal of a false attribution, not the assertion of a new property called "emptiness." Emptiness itself is empty. The negation is supposed to leave nothing behind for the mind to grasp.
+
+Chandrakirti and later commentators insisted that this kind of negation resists formalization: any definition of "a negation that posits nothing" risks becoming a positive assertion in its own right. Tsongkhapa's attempt — "a negation whose negandum is removed without anything posited in its place" — drew criticism from Gorampa precisely on these grounds: the definition itself seems to affirm something about what remains. The act of saying "nothing is posited" posits something. Buddhist logicians spent centuries circling this recursion without landing on a formulation that satisfied all parties.
 
 ---
 
-## Integration points
+## Why 1 − 2|a| is the right formula
 
-| File | Function |
-|---|---|
-| `bin/truth.py` | `parse_operator_block()`, `ensure_operator_id()`, `compute_derived_truth()`, `_eval_operator()` |
-| `bin/response.py` | Excludes operator entries from RAG via `_has_operator_tag()`; uses `_derived_certainty` for ranking |
-| `client/util.js` | Trust editor UI: unified XHTML textarea with template dropdown (AND/OR/NOT/NON), IDs visible for `<child id>` references |
-| `test/hme.xml` | Test data with AND, OR, NOT, NON operator entries |
-| `test/test_derived_truth.py` | Unit tests covering parsing, ID generation, and/or/not/non evaluation, chaining, cycles, and hme.xml integration |
+**1. Symmetry of extremes.** non(+0.9) = non(−0.9) = −0.8. Strong belief and strong disbelief are treated identically. This maps precisely to the Madhyamaka rejection of both eternalism (strong positive assertion) and nihilism (strong negative assertion) as extreme views. Both are certainties; prasajya treats them the same.
+
+**2. Ignorance yields maximum openness.** non(0) = +1. The non-affirming negation of "I don't know" is maximum openness. This resonates with the Madhyamaka teaching that not-knowing, when held correctly, is not a deficit but a clearing. The old formula mapped 0 → 0, treating ignorance as inert.
+
+---
+
+## Fuzzy logic interpretation
+
+In standard fuzzy logic on [0, 1], the complement of a membership value a is 1 − a. WikiOracle's certainty scale [-1, +1] encodes both direction (sign) and strength (magnitude). The operation `1 − 2|a|` applies the standard fuzzy complement to the *strength* of certainty (via `1 − |a|`), then rescales back to [-1, +1] (via `2x − 1`). This is the natural fuzzy-logical reading of "negate the commitment without asserting the opposite":
+
+* Fuzzy affirming negation (`not`): negate the *value* — flip the sign, preserve the magnitude. You get the complementary claim.
+* Fuzzy non-affirming negation (`non`): negate the *strength* — take the fuzzy complement of |a|, rescaled to the certainty range. You get a measure of openness, not a complementary claim.
+
+---
+
+## Relation to the Madhyamaka problem
+
+WikiOracle's `non` does not solve Chandrakirti's problem. It translates it.
+
+Prasajya-pratisedha is supposed to be a negation that posits nothing — not even a measurement, not even a degree. `non(a) = 1 − 2|a|` models *degree of epistemic openness*. That is a formal quantity, not a metaphysical void. The formula avoids the recursion that plagued Buddhist logicians because it is extensional — defined by what it computes, not by what it means to negate without affirming. But this is a change of domain, not a resolution. The philosophical question of whether a truly positionless negation can be formalized remains open. What WikiOracle provides is a metric translation that preserves the key structural features (sign erasure, symmetry of extremes, openness of ignorance) while operating in a domain where those features can be computed and composed.
+
+---
+
+## Expressive necessity: why {and, or, not} is incomplete without non
+
+This section shows that `non` is not merely a philosophical ornament. It is *necessary* for the logic to express certain functions, and *sufficient* (together with {and, or, not}) to express a large and natural class.
+
+### The regularity barrier
+
+In Strong Kleene logic, the operators {and, or, not} have a structural constraint: they are all **regular** (also called **normal**). A function f is regular if, when every input is set to the middle value U (certainty = 0), the output is also U.
+
+Check:
+* and(0, 0) = min(0, 0) = 0 (OK)
+* or(0, 0) = max(0, 0) = 0 (OK)
+* not(0) = -0 = 0 (OK)
+
+Composition preserves regularity: if f and g are regular, so is $f \circ g$. Therefore *every* function expressible from {and, or, not} is regular.
+
+But non(0) = $+1 \neq 0$. So `non` is **not** regular.
+
+**Theorem.** `non` cannot be expressed using {and, or, not} alone.
+
+*Proof.* Every function in the clone generated by {and, or, not} is regular. `non` is not regular. QED.
+
+This is the formal analogue of a structural distinction that Buddhist logicians identified but could not formalize in their own terms.
+
+### What non adds: the detection functions
+
+In discrete ternary logic ({T, U, F} = {+1, 0, −1}), `non` acts as a **detector for uncertainty**:
+
+* non(T) = non(+1) = −1 = F
+* non(U) = non(0) = +1 = T
+* non(F) = non(−1) = −1 = F
+
+That is: non(x) = T if and only if x = U. This is the detection function **J_U**.
+
+From J_U and the existing operators, we can construct the other two detectors:
+
+* **J_T(x)** = and(x, not(non(x))): detects whether x = T.
+  * x=T: and(T, not(F)) = and(T, T) = T (OK)
+  * x=U: and(U, not(T)) = and(U, F) = F (OK)
+  * x=F: and(F, not(F)) = and(F, T) = F (OK)
+
+* **J_F(x)** = and(not(x), not(non(x))): detects whether x = F.
+  * x=T: and(F, not(F)) = and(F, T) = F (OK)
+  * x=U: and(U, not(T)) = and(U, F) = F (OK)
+  * x=F: and(T, not(F)) = and(T, T) = T (OK)
+
+With J_T, J_U, and J_F available, we can build **case expressions**: "if x = T then A, if x = U then B, if x = F then C" for any constants $A, C \in \{T, F\}$:
+
+    or(and(J_T(x), A), or(and(J_U(x), B), and(J_F(x), C)))
+
+### The completeness result
+
+**Theorem.** {and, or, not, non} can express every function f: {T, U, F}^n → {T, F}.
+
+*Proof sketch.* Given any f whose output is always definite (T or F), express it as a disjunction over all input tuples where f returns T. Each such tuple can be detected using J_T, J_U, J_F on individual variables, combined with `and`. The disjunction of these detections yields f. QED.
+
+The one thing {and, or, not, non} *cannot* produce is U as output from definite inputs — because all four operators, given inputs in {T, F}, produce outputs in {T, F}. This is arguably correct: U represents genuine uncertainty, and should not be manufactured from certain data.
+
+---
+
+## What this actually is
+
+The four operators constitute a two-axis epistemic algebra:
+
+* **Axis 1: belief polarity** — handled by `not`. Flips the sign; preserves magnitude. Operates on the direction of commitment.
+* **Axis 2: commitment strength** — handled by `non`. Erases the sign; inverts magnitude. Operates on how strongly anything is held, regardless of direction.
+
+`and` and `or` combine values along both axes simultaneously (min and max over signed certainty). `not` and `non` decompose the axes: one rotates direction, the other measures grip.
+
+The formal results above establish three things:
+
+1. `non` is not derivable from the classical ternary operators {and, or, not}. It breaks the regularity barrier.
+2. Adding `non` yields bivalent functional completeness: {and, or, not, non} can express every function f: {T, U, F}^n → {T, F}.
+3. `non` enables *detection* of uncertainty rather than mere propagation. Without it, Kleene logic can pass uncertainty through but can never see it.
+
+This is a genuine structural enrichment of Strong Kleene logic.
 
 ---
 
 ## See also
 
-- [Non.md](./Non.md) — full treatment of non-affirming negation: Buddhist motivation, fuzzy interpretation, completeness proof.
-- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — operators as part of the HME pipeline.
-- [WhatIsTruth.md](./WhatIsTruth.md) — Kleene certainty semantics and plural truth model.
-- [BuddhistLogic.md](./BuddhistLogic.md) — tetralemma, fact kinds (anumāna/pratyakṣa), feelings as "neither" position.
-- [Entanglement.md](./Entanglement.md) — knowledge vs news classification corresponds to universal/particular channels.
-- [Training.md](./Training.md) — feelings excluded from training; fact classification affects persistence.
+* [Logic.md](./Logic.md) — `non` as one of four operators under Strong Kleene semantics.
+* [BuddhistLogic.md](./BuddhistLogic.md) — pramana theory, tetralemma, and the Buddhist motivation for non-affirming negation.
+* [WhatIsTruth.md](./WhatIsTruth.md) — the [-1, +1] certainty scale on which `non` operates.
+* [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — the HME architecture in which operators participate.
+* [FutureWork.md](./FutureWork.md) — mereological operations extending the operator algebra.
+
+
+## Appendix: Buddhist Logic
+
+### Purpose
+
+WikiOracle’s truth ontology closely parallels the epistemological framework
+of Buddhist **pramāṇa theory**, particularly as developed by Dignāga and Dharmakīrti.
+
+Pramāṇa theory asks a simple question:
+
+> How does a *valid cognizer* obtain reliable knowledge?
+
+WikiOracle formalizes the same process computationally through a set of
+structured truth objects.
+
+This document maps WikiOracle’s ontology to the **sources of valid cognition**
+recognized in Buddhist logic and explains how the **tetralemma** can be
+interpreted using **Kleene logic** and **non-affirming negation**.
+
+### Valid Cognition in Dharmakīrti
+
+In Dharmakīrti’s system there are **two primary pramāṇas**:
+
+| Source of Cognition | Sanskrit | Meaning |
+|---|---|---|
+| Direct perception | pratyakṣa | immediate, non-conceptual awareness |
+| Inference | anumāna | conceptual reasoning from signs |
+
+Other knowledge sources (including testimony) are considered **derivative**
+because they ultimately depend on perception and inference.
+
+A valid cognition produces **true conceptual knowledge** (*pramā*).
+
+### Mapping to WikiOracle Truth Objects
+
+WikiOracle expresses the same epistemic structure through five truth types.
+
+| WikiOracle Type | Epistemic Role | Buddhist Equivalent |
+|---|---|---|
+| **Feeling** | immediate experiential signal; orthogonal to truth (neither position in tetralemma) | perception (*pratyakṣa*) — pre-conceptual |
+| **Fact (knowledge)** | universal/inferential cognition | inference (*anumāna*) — conceptual judgment |
+| **Fact (news)** | spatiotemporally bound observation | direct perception (*pratyakṣa*) — session-only |
+| **Operator** | logical transformation between concepts | inference (*anumāna*) |
+| **Authority** | trusted testimony from another knower | testimony (*āgama / śabda*) |
+| **Provider** | the cognizer supplying the claim | cognizer (*pramātṛ*) |
+
+These correspond to the full epistemic pipeline:
+
+provider → feeling → fact → operator → new fact
+
+Authorities influence **which providers are trusted**, but logical validity
+is determined only by operators and evidence.
+
+### Frame-Relative Truth
+
+WikiOracle evaluates facts relative to **epistemic frames** defined by
+authorities and priors.
+
+A fact therefore has the structure:
+
+fact = (proposition, frame, truth_value)
+
+Different frames may legitimately assign different truth values.
+
+Example:
+
+| Frame | Earth age |
+|---|---|
+| Biblical literalist | ~6000 years |
+| Geological science | ~4.5 billion years |
+
+Both may be recorded simultaneously without contradiction because
+truth is **frame-indexed**.
+
+### Tetralemma Interpretation
+
+Buddhist logic frequently uses the **catuṣkoṭi (tetralemma)**:
+
+| Classical Form | WikiOracle Interpretation | Truth Type |
+|---|---|---|
+| True | affirmed in a frame | `<fact trust="+1">` |
+| False | negated in a frame | `<fact trust="-1">` |
+| Both | true in some frames and false in others | frame disagreement |
+| Neither | outside the truth lattice entirely | `<feeling>` |
+
+The “both” case represents **frame disagreement**, not logical contradiction.
+
+### Kleene Logic and Epistemic States
+
+Within a single frame WikiOracle uses a three-valued epistemic logic
+similar to **Kleene logic**.
+
+| Value | Meaning |
+|---|---|
+| True | supported conceptual cognition |
+| False | rejected conceptual cognition |
+| Unknown | insufficient knowledge |
+
+When multiple frames are considered simultaneously,
+the fourth tetralemma state (“both”) emerges naturally.
+
+### Non-Affirming Negation
+
+Buddhist logic distinguishes two types of negation:
+
+| Type | Sanskrit | Meaning |
+|---|---|---|
+| Affirming negation | paryudāsa | negation implying an alternative predicate |
+| Non-affirming negation | prasajyapratiṣedha | pure removal of a predicate |
+
+WikiOracle’s **non() operator** models non-affirming negation.
+
+It removes commitment to a proposition without asserting its opposite.
+
+Example:
+
+non(a)
+
+interprets as:
+
+> the conceptual commitment to *a* is removed.
+
+This produces **epistemic openness** rather than contradiction. Dharmakīrti holds that valid cognition stabilizes reliable conceptual constructions while invalid cognition is removed through non-affirming negation. In WikiOracle this dynamic can be interpreted computationally: true cognitions deepen stable conceptual attractors, while false cognitions weaken them, producing a truth-weighted energy landscape similar to a Hopfield memory system.
+
+### Truth Lattice
+
+Combining frames and epistemic states yields the following structure:
+
+| State | Interpretation | Examples |
+|---|---|---|
+| True | affirmed in frame | `<fact trust="+1">` |
+| False | rejected in frame | `<fact trust="-1">` |
+| Neither | outside the truth lattice; not truth-evaluable | `<feeling>` — excluded from training |
+| Both | disagreement across frames | frame-indexed contradiction |
+
+### Feelings and the "Neither" Position
+
+Feelings occupy the *neither* position in the tetralemma. They are not
+truth-evaluable propositions — they are pre-conceptual experiential signals
+(e.g., "That's a great question!", "I hope that helps."). In WikiOracle:
+
+* Feelings carry **no trust attribute** — they are orthogonal to the truth lattice.
+* Feelings are **excluded from model training** — they do not update NanoChat weights.
+* Feelings are **excluded from server persistence** — only knowledge facts are stored.
+* Poetry, greetings, and subjective expressions are canonical examples.
+
+This preserves the tetralemma without logical explosion.
+
+### Summary
+
+WikiOracle’s ontology forms a computational analogue of Buddhist epistemology.
+
+| WikiOracle | Buddhist Epistemology |
+|---|---|
+| Feeling | perception (pre-conceptual; neither in tetralemma) |
+| Fact (knowledge) | inferential cognition (*anumāna*) |
+| Fact (news) | direct perception (*pratyakṣa*) — spatiotemporally bound |
+| Operator | inference |
+| Authority | testimony |
+| Provider | cognizer |
+
+The system therefore models **conventional truth dynamics** in a way
+consistent with the logical structure described by Dharmakīrti.
+
+Plural frames coexist, inference operates within frames,
+and non-affirming negation preserves epistemic openness.

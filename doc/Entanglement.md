@@ -197,13 +197,5 @@ architecture's most important safety boundary.
 
 ## See also
 
-- [Training.md](./Training.md) — the online training pipeline governed by entanglement policy.
-- [Logic.md](./Logic.md) — knowledge/news fact classification and feelings as "neither" position.
-- [Constitution.md](./Constitution.md) — Section VII (local-first data) and Section VIII (safety).
-- [Security.md](./Security.md) — worldline capture as a security concern; PII detection.
 - [Ethics.md](./Ethics.md) — entanglement-resistant design as an ethical mechanism.
-- [BuddhistLogic.md](./BuddhistLogic.md) — universal/particular maps to anumāna/pratyakṣa.
-- [Config.md](./Config.md) — `store_particulars` and online training configuration.
-- [State.md](./State.md) — state file format and client-owned data model.
-- [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — data sovereignty and privacy as freedom.
-- [FutureWork.md](./FutureWork.md) — point-free spacetime extending the extent model.
+

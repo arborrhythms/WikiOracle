@@ -758,18 +758,30 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str
         return f"[Error from upstream: HTTP {resp.status_code}] {resp.text[:500]}"
 
     full_text = []
-    for line in resp.iter_lines(decode_unicode=True):
-        if not line or not line.startswith("data: "):
-            continue
-        try:
-            data = json.loads(line[6:])
-            if data.get("done"):
-                break
-            if "token" in data:
-                full_text.append(data["token"])
-        except json.JSONDecodeError:
-            continue
-    return "".join(full_text) if full_text else "[No response from upstream]"
+    done = False
+    try:
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            try:
+                data = json.loads(line[6:])
+                if data.get("error"):
+                    return f"[NanoChat error: {data['error']}]"
+                if data.get("done"):
+                    done = True
+                    break
+                if "token" in data:
+                    full_text.append(data["token"])
+            except json.JSONDecodeError:
+                continue
+    except (requests.exceptions.ChunkedEncodingError,
+            requests.exceptions.ConnectionError) as exc:
+        return f"[Connection lost to NanoChat ({url}): {exc}]"
+    if full_text:
+        return "".join(full_text)
+    if not done:
+        return f"[NanoChat stream ended abnormally ({url}). Check server logs.]"
+    return f"[No response from NanoChat ({url}). Check server logs.]"
 
 
 def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -> str:

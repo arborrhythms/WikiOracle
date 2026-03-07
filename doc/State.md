@@ -2,7 +2,6 @@
 
 WikiOracle conversation state is persisted as XML, validated by `data/state.xsd`, and managed by `bin/state.py`. The canonical file is `state.xml` at the project root.
 
----
 
 ## Structure
 
@@ -24,9 +23,38 @@ State → Header + Conversation* + Truth?
 
 `header` is required. Top-level `conversation` elements may repeat. `truth` is optional.
 
----
 
-## 1. Header
+## Default state format
+
+The state file is an XML document containing a `<truth>` section. It may be a full WikiOracle State file (with `<state>` root) or an abbreviated file with just a `<truth>` root:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<truth>
+  <fact id="remote_01" title="Water is wet" DoT="1.0" time="2026-02-27T00:00:01Z">
+    Water is wet.
+  </fact>
+  <fact id="remote_02" title="Fire is hot" DoT="0.9" time="2026-02-27T00:00:02Z">
+    Fire is hot.
+  </fact>
+</truth>
+```
+
+## Server State
+* The server persists only the Truth section of the State, not any conversations.
+* The server is stateless with respect to conversations, which means that state is always passed from (and owned by) the client.
+* State files are read from `file://` within the data directory.
+
+
+## Security considerations
+
+* **URL scheme restriction**: Only `https://` and `file://` (within `ALLOWED_DATA_DIR`) are permitted
+* **Max response size**: Fetched data is capped at 1 MB
+* **Max entries per authority**: At most 1000 trust entries are imported per authority
+* **No recursive authorities**: If a remote state file contains `<authority>` entries, they are skipped. There is no transitive fetch chain — only one level of authority delegation is supported.
+* **Rate limiting**: The in-memory cache prevents excessive re-fetching within the refresh interval
+
+## Header
 
 Session metadata. All fields except `user_guid` and `output` are required.
 
@@ -56,7 +84,7 @@ Context, truth, and output are client-owned. The server persists them in statefu
 
 ---
 
-## 2. Conversations
+## Conversations
 
 Conversations form a recursive tree. In XML, each `<conversation>` contains a required `<title>` followed by direct child `<message>` and `<conversation>` elements. In memory, `bin/state.py` still normalizes these into `messages[]` and `children[]`.
 
@@ -64,7 +92,7 @@ Conversations form a recursive tree. In XML, each `<conversation>` contains a re
 
 ```
 Conversation → title + (Message | Conversation)*
-Message      → { id, role, username, time, content }
+Message      → <message id="" role="" username="" time=""><content>...</content></message>
 ```
 
 ### Conversation attributes
@@ -111,18 +139,16 @@ The XML file persists selection through `selected="true"` attributes on conversa
 
 `bin/state.py` exposes:
 
-- `find_conversation(convs, id)`
-- `get_ancestor_chain(convs, id)`
-- `get_context_messages(convs, id)`
-- `add_message_to_conversation(convs, id, msg)`
-- `add_child_conversation(convs, parent_id, child)`
-- `remove_conversation(convs, id)`
+* `find_conversation(convs, id)`
+* `get_ancestor_chain(convs, id)`
+* `get_context_messages(convs, id)`
+* `add_message_to_conversation(convs, id, msg)`
+* `add_child_conversation(convs, parent_id, child)`
+* `remove_conversation(convs, id)`
 
 When a message is sent, `get_context_messages()` walks the ancestor chain from the active conversation to the root and concatenates each conversation's `messages[]` list in order.
 
----
-
-## 3. Truth
+## Truth
 
 `truth` is an optional container whose children are typed truth elements. The element name is the truth kind, and metadata lives on the element itself.
 
@@ -174,16 +200,13 @@ Operator elements may also carry `arg1` and `arg2`.
 </truth>
 ```
 
-Internally, `xml_to_state()` still maps each truth element back to a dict shaped like:
+Internally, `xml_to_state()` still normalizes each typed truth element into the
+runtime representation, but on disk it remains XML:
 
-```python
-{
-    "id": "t_001",
-    "title": "Mammals",
-    "trust": 0.9,
-    "time": "2026-03-06T10:00:00Z",
-    "content": "<fact>All dogs are mammals.</fact>",
-}
+```xml
+<fact id="t_001" title="Mammals" DoT="0.9" time="2026-03-06T10:00:00Z">
+  All dogs are mammals.
+</fact>
 ```
 
 That keeps the rest of the pipeline stable while the XML surface stays typed.
@@ -197,8 +220,6 @@ When RAG is enabled, the truth table is processed in two phases:
 
 All truth entries are still available to the final provider bundle.
 
----
-
 ## Serialization
 
 `state_to_xml(state)` serializes the internal nested tree to the XML grammar above. `xml_to_state(text)` parses it back. `atomic_write_xml(path, state)` uses a temp file, `fsync`, and `rename` for atomic writes.
@@ -207,60 +228,124 @@ All truth entries are still available to the final provider bundle.
 
 `merge_llm_states(base, incoming)` merges an imported state into the current state with collision-safe deterministic ID suffixing. `merge_many_states(base, *incoming)` chains multiple merges.
 
----
 
 ## In-memory representation
 
-The internal Python representation remains conversation-centric. It keeps the per-node `selected` flags and also derives helper fields such as `selected_conversation` and `selected_message` for the rest of the runtime:
+The internal runtime representation remains conversation-centric. It keeps the
+per-node `selected` flags and also derives helper fields such as
+`selected_conversation` and `selected_message` from persisted XML like this:
 
-```python
-state = {
-    "version": 2,
-    "schema": "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd",
-    "time": "2026-03-07T12:00:00Z",
-    "title": "My Project",
-    "context": "<div><p>...</p></div>",
-    "conversations": [
-        {
-            "id": "c_root",
-            "title": "Animals",
-            "selected": True,
-            "messages": [
-                {"id": "m1", "role": "user", "username": "Alice",
-                 "time": "...", "content": "<Q>...</Q>", "selected": True}
-            ],
-            "children": [
-                {"id": "c_dogs", "title": "Dog breeds",
-                 "messages": [...], "children": []}
-            ]
-        }
-    ],
-    "truth": [
-        {"id": "t_001", "title": "Mammals", "trust": 0.9,
-         "content": "<fact>All dogs are mammals.</fact>"}
-    ],
-    "selected_conversation": "c_root",
-    "selected_message": "m1",
-    "user_guid": "a1b2c3d4-...",
-    "output": ""
-}
+```xml
+<state>
+  <header>
+    <version>2</version>
+    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
+    <time>2026-03-07T12:00:00Z</time>
+    <title>My Project</title>
+    <context><div><p>...</p></div></context>
+    <user_guid>a1b2c3d4-...</user_guid>
+    <output></output>
+  </header>
+  <conversation id="c_root" selected="true">
+    <title>Animals</title>
+    <message id="m1" role="user" username="Alice" time="..." selected="true">
+      <content><Q>...</Q></content>
+    </message>
+    <conversation id="c_dogs" parentId="c_root">
+      <title>Dog breeds</title>
+    </conversation>
+  </conversation>
+  <truth>
+    <fact id="t_001" title="Mammals" DoT="0.9">
+      All dogs are mammals.
+    </fact>
+  </truth>
+</state>
 ```
 
----
+At runtime, `bin/state.py` normalizes that XML into conversation nodes with
+`messages[]` and `children[]`, and derives helpers such as
+`selected_conversation="c_root"` and `selected_message="m1"`.
+
 
 ## Schema
 
-The state schema is `data/state.xsd`.
+The state schema is (`data/state.xsd`)[state.xsd].
 
----
+## Data model
 
-## See also
+### On disk — XML
 
-- [Architecture.md](./Architecture.md) — data model overview and rendering pipeline.
-- [Config.md](./Config.md) — configuration format and settings.
-- [Training.md](./Training.md) — how truth entries feed into online training.
-- [Entanglement.md](./Entanglement.md) — data sovereignty and persistence policy.
-- [WhatIsTruth.md](./WhatIsTruth.md) — certainty semantics and Kleene scale.
-- [Logic.md](./Logic.md) — operator evaluation over the truth table.
-- [Authority.md](./Authority.md) — authority entries and transitive trust.
-- [Security.md](./Security.md) — state file security, symlink rejection, and size limits.
+State is persisted as XML (WikiOracle State format, validated by `data/state.xsd`). The XML surface is:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<state>
+  <header>
+    <version>2</version>
+    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
+    <time>2026-03-05T12:00:00Z</time>
+    <title>My Project</title>
+    <context><div><p>Project context</p></div></context>
+  </header>
+  <conversation id="c_abc">
+    <title>Animals</title>
+    <message id="m1" role="user" username="Alice" time="...">
+      <content><Q><fact trust="0.5">Dogs are mammals.</fact></Q></content>
+    </message>
+    <conversation id="c_def" parentId="c_abc">
+      <title>Dogs</title>
+      <message id="m2" role="assistant" username="claude" time="...">
+        <content><R><fact trust="0.9">Dogs are mammals.</fact></R></content>
+      </message>
+    </conversation>
+  </conversation>
+  <truth>
+    <fact id="t_001" title="Mammals" DoT="0.9" time="...">
+      All dogs are mammals.
+    </fact>
+  </truth>
+</state>
+```
+
+### In memory — nested tree
+
+On load, conversations are normalized into a nested tree in memory. The same
+shape in XML is:
+
+```xml
+<conversations>
+  <conversation id="c_abc">
+    <title>Animals</title>
+    <messages />
+    <conversations>
+      <conversation id="c_def">
+        <title>Dogs</title>
+        <messages />
+        <conversations />
+      </conversation>
+      <conversation id="c_ghi">
+        <title>Cats</title>
+        <messages />
+        <conversations />
+      </conversation>
+    </conversations>
+  </conversation>
+</conversations>
+```
+
+Each **conversation** has: `id`, `title`, zero or more messages, and zero or
+more child conversations.
+
+Each **message** has: `id`, `role` (user | assistant | system), `username`, `timestamp`, `content` (XHTML).
+
+### Grammar
+
+```
+State        → Header + Conversation* + Truth?
+Conversation → title + (Message | Conversation)*
+Message      → <message id="" role="" username="" time=""><content>...</content></message>
+Truth        → Fact | Feeling | Reference | Operator | Provider | Authority
+```
+
+In memory, `bin/state.py` still normalizes conversations into `messages[]` and `children[]`.

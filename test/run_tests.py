@@ -58,6 +58,7 @@ _TEST_MODULES = [
     "test.test_spacetime",
     "test.test_config_xml",
     "test.test_state_xml",
+    "test.test_ui_strings",
     "test.test_tree_branch",
     "test.test_online_llm",
     "test.test_online_vote",

@@ -693,16 +693,16 @@ function _openTruthEditor() {
         <div id="truthListView">
           <div id="truthEntries" class="trust-entries-scroll"></div>
           <div class="settings-actions settings-actions-xs">
-            <select id="truthAddType" class="trust-input" style="max-width:9rem; font-size:0.78rem;">
-              <option value="feeling">Feeling</option>
-              <option value="fact">Fact</option>
-              <option value="reference">Reference</option>
-              <option value="authority">Authority</option>
-              <option value="provider">Provider</option>
-              <option value="not">NOT</option>
-              <option value="non">NON</option>
-              <option value="or">OR</option>
-              <option value="and">AND</option>
+            <select id="truthAddType" class="trust-input" style="font-size:0.78rem;">
+              <option value="feeling">Feeling: subjective, non-verifiable claim</option>
+              <option value="fact">Fact: disprovable assertion about the world</option>
+              <option value="reference">Reference: citation with external link</option>
+              <option value="authority">Authority: pointer to remote truth table</option>
+              <option value="provider">Provider: external LLM endpoint</option>
+              <option value="not">NOT: negation of a truth entry</option>
+              <option value="non">NON: non-affirming weakening toward zero</option>
+              <option value="or">OR: true when any child is true (max)</option>
+              <option value="and">AND: true when all children are true (min)</option>
             </select>
             <button class="btn" id="truthAdd">Add</button>
             <button class="btn" id="truthClose">Close</button>
@@ -725,21 +725,21 @@ function _openTruthEditor() {
     // ─── XHTML template for each subtype ───
     var _truthTemplates = {
       feeling: '<feeling>Subjective statement here.</feeling>',
-      fact: '<fact>Assertion text here.</fact>',
-      reference: '<reference href="https://example.com">Link text</reference>',
-      and: '<and/>',
-      or: '<or/>',
-      not: '<not/>',
-      non: '<non/>',
-      provider: '<provider api_url="https://api.example.com" model="model_name"/>',
-      authority: '<authority url="https://example.com/kb.xml"/>'
+      fact: '<fact DoT="0.0">Assertion text here.</fact>',
+      reference: '<reference DoT="0.0"><a href="https://example.com">Link text</a></reference>',
+      and: '<and DoT="0.0" arg1="" arg2=""/>',
+      or: '<or DoT="0.0" arg1="" arg2=""/>',
+      not: '<not DoT="0.0" arg1=""/>',
+      non: '<non DoT="0.0" arg1=""/>',
+      provider: '<provider DoT="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>',
+      authority: '<authority DoT="0.0"><url>https://example.com/kb.xml</url></authority>'
     };
 
     // Brief description shown above the editor for each truth type
     var _truthDescriptions = {
       feeling:   "Feeling \u2014 a subjective, non-verifiable claim (not penalizable).",
-      fact:      "Fact \u2014 a direct assertion with a trust value.",
-      reference: "Reference \u2014 a link to an external source.",
+      fact:      "Fact \u2014 a disprovable assertion with a degree of truth.",
+      reference: "Reference \u2014 a citation linking to an external source.",
       and:       "AND \u2014 true when all children are true (min trust).",
       or:        "OR \u2014 true when any child is true (max trust).",
       not:       "NOT \u2014 negation of a child entry.",
@@ -945,7 +945,7 @@ function _truthRenderList() {
   const entries = Array.isArray(state.truth) ? state.truth : [];
 
   if (entries.length === 0) {
-    container.innerHTML = '<div class="trust-empty">No truth entries. Use <b>Add</b> or <b>Open</b> a state file.</div>';
+    container.innerHTML = '<div class="trust-empty">No truth entries. Add truth here or Open a new state file.</div>';
     return;
   }
 

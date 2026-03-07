@@ -4,8 +4,6 @@
 
 WikiOracle is a truthful, explainable LLM system designed as a public good — the Wikipedia model applied to artificial intelligence.
 
----
-
 ## The Problem
 
 For-profit corporations are using our data — sourced from billions of people — to train models that are teaching our children. Those models hallucinate. They can't explain themselves. They are vulnerable to ideological capture and data-driven manipulation, especially under online learning. And the knowledge they encode is locked behind proprietary walls.
@@ -15,8 +13,6 @@ Most large AI systems today are built around a single global objective function,
 When this happens, wisdom stops being a shared good and becomes a strategic asset.
 
 WikiOracle asks: **can we do better?**
-
----
 
 ## What Makes WikiOracle Different
 
@@ -40,50 +36,42 @@ Instead of one model that claims to know everything, WikiOracle builds a network
 
 A distributed truth network prevents appropriation. Anyone who tries to capture the network's knowledge must do so in a distributed way — which preserves the multicultural component — because monolithic capture would collapse consensus. Scraping a living network of trust yields only a static snapshot of a dynamic, evolving system. Open truth disrupts business models that depend on information asymmetry, extractive IP capture, and strategic opacity. That disruption is corrective, not destructive.
 
----
-
 ## How It Works
 
 WikiOracle implements a **Hierarchical Mixture of Experts (HME)** architecture for evaluating claims:
 
-- **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
-- **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the truth table.
-- **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
-- **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
-- **Feelings** are subjective statements (opinions, poetry, hedged claims) occupying the "neither" position in the tetralemma. They influence evaluation but are excluded from training and truth tables.
-- **References** are external source citations (Wikipedia, Snopes, etc.) that ground claims in verifiable sources, participating in the truth table alongside facts.
+* **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
+* **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the truth table.
+* **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
+* **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
+* **Feelings** are subjective statements (opinions, poetry, hedged claims) occupying the "neither" position in the tetralemma. They influence evaluation but are excluded from training and truth tables.
+* **References** are external source citations (Wikipedia, Snopes, etc.) that ground claims in verifiable sources, participating in the truth table alongside facts.
 
 The UI-selected provider acts as the "mastermind," synthesizing all evidence — facts, references, operator-derived certainty, authority imports, and provider consultations — into a final response.
 
 See the [documentation](doc/README.md) for the full design.
 
----
-
 ## Current Prototype
 
 The initial prototype is intentionally modest and low-cost:
 
-- Hierarchical, multi-LLM architecture for runtime-configurable Hierarchical Mixture of Experts.
-- User-specified truth sets (facts, feelings, references, collections, LLMs, authorities, ...)
-- Online learning constrained by trust and epistemic grounding
-- Extends [NanoChat](https://github.com/karpathy/nanochat) with Retrieval-Augmented Generation (RAG)
-- Allows feasible experiments in LLM architectures on rented compute (~$100 scale)
+* Hierarchical, multi-LLM architecture for runtime-configurable Hierarchical Mixture of Experts.
+* User-specified truth sets (facts, feelings, references, collections, LLMs, authorities, ...)
+* Online learning constrained by trust and epistemic grounding
+* Extends [NanoChat](https://github.com/karpathy/nanochat) with Retrieval-Augmented Generation (RAG)
+* Allows feasible experiments in LLM architectures on rented compute (~$100 scale)
 
 ## Longer-Term Direction
 
 If WikiOracle proves viable at small scale, the architecture can be evaluated and extended to larger open models. The broader aim is to explore whether architectural commitments to truth can enable honest self-explanation, reduce the need for ad-hoc guardrails, and support AI systems that function as durable public goods.
 
----
-
 ## How to Contribute
 
 Contributions of many kinds are welcome:
-- ML research and implementation
-- xAI, interpretability, and safety analysis
-- Epistemology, philosophy of science, and governance critique
-- Documentation, evaluation, and testing
-
----
+* ML research and implementation
+* xAI, interpretability, and safety analysis
+* Epistemology, philosophy of science, and governance critique
+* Documentation, evaluation, and testing
 
 ## Getting Started
 
@@ -102,23 +90,20 @@ The full design and governance documentation lives in [`doc/`](doc/README.md):
 
 | Document | Topic |
 |---|---|
+| [WikiOracle](doc/WikiOracle.md) | Consistency-first design note |
 | [Constitution](doc/Constitution.md) | Non-negotiable invariants for truth and governance |
+| [Installation](doc/Installation.md) | Build, deploy, and runtime instructions |
 | [WhatIsTruth](doc/WhatIsTruth.md) | Plural truth, POVs, empathy, certainty semantics |
-| [HierarchicalMixtureOfExperts](doc/HierarchicalMixtureOfExperts.md) | HME logic, distributed truth, conceptual spaces |
-| [Authority](doc/Authority.md) | Transitive trust and authority import format |
-| [Logic](doc/Logic.md) | Logical operators (and/or/not/non) under Strong Kleene semantics |
-| [Non](doc/Non.md) | Non-affirming negation: Buddhist motivation, fuzzy interpretation, expressive necessity |
-| [Voting](doc/Voting.md) | Voting protocol: dom steering, sub fan-out, cycle prevention, truth-only output |
+| [Ethics](doc/Ethics.md) | Ethical AI through truth architecture, symmetry constraints, LFGC |
 | [FreedomEmpathyTruth](doc/FreedomEmpathyTruth.md) | Freedom, Empathy, and Truth — safety principles |
-| [Architecture](doc/Architecture.md) | Local-first software architecture |
+| [PrivacyAndSecurity](doc/PrivacyAndSecurity.md) | Privacy and security considerations |
+| [Entanglement](doc/Entanglement.md) | Worldline entanglement policy, spatiotemporal persistence, three-channel separation |
+| [HierarchicalMixtureOfExperts](doc/HierarchicalMixtureOfExperts.md) | HME logic, distributed truth, conceptual spaces |
+| [Logic](doc/Logic.md) | Logical operators (and/or/not/non) under Strong Kleene semantics |
+| [Training](doc/Training.md) | DegreeOfTruth, Sensation preprocessing, online training pipeline |
+| [Implementation](doc/Implementation.md) | Implementation notes |
 | [Config](doc/Config.md) | Configuration format, settings reference, environment variables |
 | [State](doc/State.md) | State file format, conversation tree, truth table, merge |
-| [Training](doc/Training.md) | DegreeOfTruth, Sensation preprocessing, online training pipeline |
-| [Entanglement](doc/Entanglement.md) | Worldline entanglement policy, spatiotemporal persistence, three-channel separation |
-| [Ethics](doc/Ethics.md) | Ethical AI through truth architecture, symmetry constraints, LFGC |
-| [Security](doc/Security.md) | Security considerations |
-| [ProposedLicense](doc/ProposedLicense.md) | Licensing architecture: GPL-3.0 code, CC BY-SA 4.0 content, Apache-2.0 weights |
-| [Installation](doc/Installation.md) | Build, deploy, and runtime instructions |
-| [BuddhistLogic](doc/BuddhistLogic.md) | Buddhist pramana theory, tetralemma, Kleene logic mapping |
+| [UserInterface](doc/UserInterface.md) | Canonical UI strings for the client (truth editor labels, templates, descriptions) |
 | [FutureWork](doc/FutureWork.md) | Roadmap: trust network, sentence-level prediction, mereological operations, MCP integration |
-| [WikiOracle](doc/WikiOracle.md) | Consistency-first design note |
+| [ProposedLicense](doc/ProposedLicense.md) | Licensing architecture: GPL-3.0 code, CC BY-SA 4.0 content, Apache-2.0 weights |

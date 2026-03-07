@@ -70,7 +70,7 @@ WIKIORACLE_APP ?= bin/wikioracle.py
 # --- Local/Remote switching ---------------------------------------------------
 HOST      ?= local
 NANO_PORT ?= 8000
-NANO_HOST ?= 0.0.0.0
+NANO_HOST ?= 127.0.0.1
 NANO_SOURCE ?= sft
 NANO_MODEL_TAG ?=
 NANO_STEP ?=
@@ -109,27 +109,25 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
 
 # Ordered list of doc chapters for PDF generation
 PDF_CHAPTERS := README.md \
-				doc/README.md \
-                doc/Constitution.md \
-                doc/WhatIsTruth.md \
-                doc/HierarchicalMixtureOfExperts.md \
-                doc/Authority.md \
-                doc/Logic.md \
-                doc/Non.md \
-                doc/Voting.md \
-                doc/FreedomEmpathyTruth.md \
-                doc/Architecture.md \
-                doc/Config.md \
-                doc/State.md \
-                doc/Training.md \
-                doc/Entanglement.md \
-                doc/Ethics.md \
-                doc/Security.md \
-                doc/ProposedLicense.md \
-                doc/Installation.md \
-                doc/FutureWork.md \
-                doc/WikiOracle.md \
-                doc/BuddhistLogic.md
+  doc/README.md \
+  doc/WikiOracle.md \
+  doc/Constitution.md \
+  doc/Installation.md \
+  doc/WhatIsTruth.md \
+  doc/Ethics.md \
+  doc/FreedomEmpathyTruth.md \
+  doc/PrivacyAndSecurity.md \
+  doc/Entanglement.md \
+  doc/HierarchicalMixtureOfExperts.md \
+  doc/Logic.md \
+  doc/Training.md \
+  doc/Implementation.md \
+  doc/Config.md \
+  doc/State.md \
+  doc/UserInterface.md \
+  doc/FutureWork.md \
+  doc/ProposedLicense.md
+
 
 # --- Help ---------------------------------------------------------------------
 
@@ -689,7 +687,9 @@ build_preprocess:
 # --- PDF generation -----------------------------------------------------------
 # Generate a single PDF from all doc/*.md files with README as index.
 
-doc_pdf:
+doc_pdf : doc/WikiOracle.pdf
+
+doc/WikiOracle.pdf : doc/*.md
 	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
 	mkdir -p output
 	pandoc $(PDFOPTS) \
@@ -697,7 +697,7 @@ doc_pdf:
 		--metadata title="WikiOracle Documentation" \
 		--toc --toc-depth=2 \
 		--resource-path=doc \
-		-o output/WikiOracle.pdf \
+		-o $@ \
 		$(PDF_CHAPTERS)
 	@echo "Done: output/WikiOracle.pdf"
 

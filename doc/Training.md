@@ -201,7 +201,11 @@ and training happen after the response is delivered.
      facts pass through (`filter_knowledge_only()`).
    - Entries with identifiable content are always filtered regardless
      of `store_particulars` (`detect_identifiability()`).
-   - Feelings never reach the merge (already excluded by `_extract_facts()`).
+   - Feelings never reach the merge (`_is_server_storable()` rejects them).
+   - Operators whose leaf operands include feelings are rejected
+     (`validate_operator_operands()`).
+   - Feelings are also stripped from training messages
+     (`strip_feelings_from_training()` in `bin/sensation.py`).
 6. Merge the surviving truth entries into the server truth table
    (`truth.xml`):
    - **Match found**: nudge the server entry's trust toward the incoming
@@ -246,10 +250,19 @@ used for state files (WikiOracle State).  Each truth entry is an
 </entry>
 ```
 
-Entry types stored: `<fact>` (knowledge — no `<place>`/`<time>` children),
-`<reference>`, `<authority>`, and operators (`<and>`, `<or>`, `<not>`, `<non>`).
+**Resolution:** Before entries reach the server truth table, they are
+resolved by `resolve_entries()` in `bin/truth.py`:
 
-Entry types **not** stored: `<feeling>`, `<provider>`, and (when
+- `<reference>` → `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
+- `<authority>` → list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
+- `<provider>` → `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
+- `<fact>`, `<feeling>`, operators → pass through unchanged
+
+Entry types stored after resolution: `<fact>` (knowledge — no `<place>`/`<time>` children)
+and operators (`<and>`, `<or>`, `<not>`, `<non>`) whose leaf operands are all allowable facts.
+
+Entry types **not** stored: `<feeling>`, `<provider>`, unresolved `<reference>`,
+unresolved `<authority>`, operators over feelings, and (when
 `store_particulars` is false) news facts with `<place>` or `<time>`
 child elements.  Content matching identifiability patterns (PII) is
 always excluded.

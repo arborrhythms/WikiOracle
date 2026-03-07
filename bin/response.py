@@ -41,10 +41,12 @@ from truth import (
     merge_client_truth,
     resolve_api_key,
     resolve_authority_entries,
+    resolve_entries,
     save_server_truth,
     strip_xhtml,
     user_guid,
     utc_now_iso,
+    validate_operator_operands,
 )
 from state import (
     add_child_conversation,
@@ -397,7 +399,11 @@ def build_query(
     if query_config.get("chat", {}).get("rag", True):
         trust_entries = state.get("truth") or []
 
-        # st: the evaluable subset (facts + references) — used as input
+        # Resolve references→facts, authorities→facts, providers→feelings
+        # before any evaluation step sees the entries.
+        trust_entries = resolve_entries(trust_entries)
+
+        # st: the evaluable subset (facts + feelings) — used as input
         # to dynamic evaluation steps
         st = static_truth(trust_entries)
 
@@ -745,7 +751,7 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float) -> str
         for i, m in enumerate(messages):
             print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
     payload = {"messages": messages, "temperature": temperature, "max_tokens": 1024}
-    provider_timeout = PROVIDERS.get("wikioracle", {}).get("timeout") or cfg.timeout_s
+    provider_timeout = max(PROVIDERS.get("wikioracle", {}).get("timeout") or cfg.timeout_s, 15)
     resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
                          timeout=provider_timeout, stream=True)
     if resp.status_code >= 400:
@@ -1436,7 +1442,7 @@ def process_chat(
     context_text = strip_xhtml(state.get("context", ""))
     print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
           f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
-          f"api_key={'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
+          f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
     truth_count = len(state.get("truth") or [])
     rag_flag = query_config.get("chat", {}).get("rag", "MISSING")
 
@@ -1697,6 +1703,10 @@ def process_chat(
             # Ensure user GUID is stored at root level of state
             state["user_guid"] = author_guid
 
+            # Resolve references→facts, authorities→facts, providers→feelings
+            # before DoT computation and merge.
+            client_truth = resolve_entries(client_truth)
+
             server_truth_path = Path(ot_cfg.get("truth_corpus_path", "data/truth.xml"))
             server_truth = load_server_truth(server_truth_path)
 
@@ -1740,6 +1750,8 @@ def process_chat(
                     else:
                         surviving.append(e)
                 client_truth = surviving
+            # Validate operators: reject any whose leaf operands are feelings
+            client_truth = validate_operator_operands(client_truth)
             merge_rate = float(ot_cfg.get("merge_rate", 0.1))
             server_truth = merge_client_truth(
                 server_truth, client_truth,

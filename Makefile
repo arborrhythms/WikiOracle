@@ -20,7 +20,10 @@ WO_NANOCHAT      ?= /opt/bitnami/wordpress/files/wikiOracle.org/nanochat
 WO_CHECKPOINT    := $(WO_NANOCHAT)/chatsft_checkpoints
 IDENTITY_URL     := https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
 
-# GPU training defaults (override on command line, e.g. make NPROC=4 pretrain-gpu)
+# Architecture: cpu or gpu (override on command line, e.g. make train ARCH=gpu)
+ARCH             ?= cpu
+
+# GPU training defaults (override on command line, e.g. make NPROC=4 train_pretrain ARCH=gpu)
 NPROC            ?= 1               # 1 for p5.4xlarge (use 8 for p4d.24xlarge)
 WANDB_RUN        ?= dummy
 
@@ -62,6 +65,12 @@ WO_DEST           ?= /opt/bitnami/wordpress/files/wikiOracle.org/chat
 ALERT_EMAIL ?=
 WIKIORACLE_APP ?= bin/wikioracle.py
 
+# --- Local/Remote switching ---------------------------------------------------
+HOST      ?= local
+NANO_PORT ?= 8000
+NANO_PID  := .nano.pid
+WO_PID    := .wo.pid
+
 DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
                --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)
 
@@ -69,23 +78,20 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
 
 # --- Phony targets ------------------------------------------------------------
 
-.PHONY: all all-gpu some some-gpu help \
-        venv setup-cpu setup-gpu \
-        data tokenizer \
-        pretrain-cpu pretrain-gpu \
-        sft-cpu sft-gpu \
-        train-cpu train-gpu \
-        eval-cpu eval-gpu \
-        init run test run-cli run-web \
-        report clean clean-all \
-        remote remote-retrieve remote-ssh remote-status remote-logs \
-        remote-deploy remote-deploy-launch \
-        wo-deploy wo-start wo-stop wo-restart wo-status wo-logs \
-        wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs \
-        checkpoint-pull checkpoint-push \
-        preprocess \
-        openclaw-setup openclaw-run \
-        pdf
+.PHONY: all some deploy help \
+        build_venv build_setup \
+        build_data build_tokenizer build_preprocess \
+        train_pretrain train_finetune train \
+        test_eval test_unit \
+        run_init run_server run_debug run_cli run_web \
+        nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
+        wo_deploy wo_start wo_stop wo_restart wo_status wo_logs \
+        doc_report clean clean_all \
+        remote remote_retrieve remote_ssh remote_status remote_logs \
+        remote_deploy remote_deploy_launch \
+        checkpoint_pull checkpoint_push \
+        openclaw_setup openclaw_run \
+        doc_pdf
 
 # --- PDF generation options ---------------------------------------------------
 PDOPTS := --pdf-engine=xelatex \
@@ -121,83 +127,84 @@ PDF_CHAPTERS := doc/README.md \
 help:
 	@echo "WikiOracle / NanoChat Makefile"
 	@echo ""
-	@echo "  make all                Full local run: setup + train + eval + report (CPU)"
-	@echo "  make all-gpu            Full local run (GPU)"
-	@echo "  make some               Lightweight CPU smoke test (10 iters)"
-	@echo "  make some-gpu           Lightweight GPU smoke test (10 iters)"
-	@echo "  make remote             Launch EC2 p4d.24xlarge, copy code, train, auto-terminate"
+	@echo "  make all                Full pipeline: setup + train + eval + report (ARCH=cpu)"
+	@echo "  make all ARCH=gpu       Full pipeline (GPU)"
+	@echo "  make some               Lightweight smoke test (10 iters, ARCH=cpu)"
+	@echo "  make some ARCH=gpu      Lightweight smoke test (GPU)"
+	@echo "  make deploy             Deploy + restart nano and wo services"
+	@echo "  make remote             Launch EC2, copy code, train, auto-terminate"
 	@echo ""
-	@echo "Setup:"
-	@echo "  make venv         Create .venv and install shim deps (flask, requests)"
-	@echo "  make setup-cpu          Install NanoChat dependencies (CPU/MPS)"
-	@echo "  make setup-gpu          Install dependencies (GPU/CUDA)"
+	@echo "Build / Setup (build_*):"
+	@echo "  make build_venv         Create .venv and install shim deps (flask, requests)"
+	@echo "  make build_setup        Install NanoChat dependencies (CPU/MPS)"
+	@echo "  make build_setup ARCH=gpu  Install dependencies (GPU/CUDA)"
+	@echo "  make build_data         Download training data shards"
+	@echo "  make build_tokenizer    Train and evaluate the BPE tokenizer"
+	@echo "  make build_preprocess   Preprocess corpus for sensation tags"
 	@echo ""
-	@echo "Data & Tokenizer:"
-	@echo "  make data               Download training data shards"
-	@echo "  make tokenizer          Train and evaluate the BPE tokenizer"
+	@echo "Training (train_*):"
+	@echo "  make train_pretrain     Pretrain base model (ARCH=cpu|gpu)"
+	@echo "  make train_finetune     Supervised fine-tuning (ARCH=cpu|gpu)"
+	@echo "  make train              Full pipeline: data + tok + pretrain + finetune (ARCH=cpu|gpu)"
 	@echo ""
-	@echo "Training (CPU/MPS - MacBook demo, ~30 min):"
-	@echo "  make pretrain-cpu       Pretrain base model on CPU/MPS"
-	@echo "  make sft-cpu            Supervised fine-tuning on CPU/MPS"
-	@echo "  make train-cpu          Full pipeline: data + tok + pretrain + sft (CPU)"
+	@echo "Test / Evaluation (test_*):"
+	@echo "  make test_unit          Run unit tests"
+	@echo "  make test_eval          Evaluate model (ARCH=cpu|gpu)"
 	@echo ""
-	@echo "Training (GPU - 1xH100-80GB on p5.4xlarge):"
-	@echo "  make pretrain-gpu       Pretrain base model on GPU"
-	@echo "  make sft-gpu            Supervised fine-tuning on GPU"
-	@echo "  make train-gpu          Full pipeline: data + tok + pretrain + sft (GPU)"
+	@echo "Run / Inference (run_*):"
+	@echo "  make run_server         Start WikiOracle local shim (foreground)"
+	@echo "  make run_debug          Start WikiOracle local shim (debug mode)"
+	@echo "  make run_init           Remove state files for a fresh start"
+	@echo "  make run_cli            Chat with the model (CLI)"
+	@echo "  make run_web            Chat with the model (Web UI + /train)"
 	@echo ""
-	@echo "Evaluation & Inference:"
-	@echo "  make test              Run unit tests"
-	@echo "  make run               Start WikiOracle local shim (config.xml)"
-	@echo "  make eval-cpu           Evaluate model (CPU)"
-	@echo "  make eval-gpu           Evaluate model (GPU)"
-	@echo "  make run-cli            Chat with the model (CLI)"
-	@echo "  make run-web            Chat with the model (Web UI)"
-	@echo "  make report             Generate training report"
+	@echo "NanoChat Server (nano_*):"
+	@echo "  make nano_deploy        Deploy nanochat.service     (remote only)"
+	@echo "  make nano_start         Start NanoChat              (local: PID file, remote: systemctl)"
+	@echo "  make nano_stop          Stop NanoChat"
+	@echo "  make nano_restart       Restart NanoChat"
+	@echo "  make nano_status        Check NanoChat status"
+	@echo "  make nano_logs          Tail NanoChat logs           (remote only)"
 	@echo ""
-	@echo "Remote (EC2):"
+	@echo "WikiOracle Server (wo_*):"
+	@echo "  make wo_deploy          Deploy WikiOracle shim      (remote only)"
+	@echo "  make wo_start           Start WikiOracle             (local: PID file, remote: systemctl)"
+	@echo "  make wo_stop            Stop WikiOracle"
+	@echo "  make wo_restart         Restart WikiOracle"
+	@echo "  make wo_status          Check WikiOracle status"
+	@echo "  make wo_logs            Tail WikiOracle logs         (remote only)"
+	@echo ""
+	@echo "Remote (remote_*):"
 	@echo "  make remote             Launch EC2 instance, copy repo, start training"
-	@echo "  make remote-retrieve    Pull artifacts, generate summary, terminate instance"
-	@echo "  make remote-ssh         SSH into running EC2 instance"
-	@echo "  make remote-status      Check EC2 instance state"
-	@echo "  make remote-logs        Tail training log on remote instance"
+	@echo "  make remote_retrieve    Pull artifacts, generate summary, terminate instance"
+	@echo "  make remote_ssh         SSH into running EC2 instance"
+	@echo "  make remote_status      Check EC2 instance state"
+	@echo "  make remote_logs        Tail training log on remote instance"
 	@echo ""
-	@echo "Deploy (EC2 -> WikiOracle):"
-	@echo "  make remote-deploy-launch  Launch EC2, train, deploy to WikiOracle"
-	@echo "  make remote-deploy         Deploy from running EC2 to WikiOracle"
+	@echo "Deploy (remote_ → wo):"
+	@echo "  make remote_deploy_launch  Launch EC2, train, deploy to WikiOracle"
+	@echo "  make remote_deploy         Deploy from running EC2 to WikiOracle"
 	@echo ""
-	@echo "WikiOracle Server (NanoChat LLM):"
-	@echo "  make wo-deploy             Deploy nanochat.service to WikiOracle"
-	@echo "  make wo-start              Start NanoChat server on WikiOracle"
-	@echo "  make wo-stop               Stop NanoChat server on WikiOracle"
-	@echo "  make wo-restart            Restart NanoChat server on WikiOracle"
-	@echo "  make wo-status             Check NanoChat server status on WikiOracle"
-	@echo "  make wo-logs               Tail NanoChat server logs on WikiOracle"
+	@echo "Checkpoint Backup (checkpoint_*):"
+	@echo "  make checkpoint_pull    Pull SFT weights from WikiOracle → output/checkpoints/"
+	@echo "  make checkpoint_push    Push output/checkpoints/ → WikiOracle SFT weights"
 	@echo ""
-	@echo "WikiOracle Chat Shim (served at /chat):"
-	@echo "  make wo-chat-deploy        Deploy chat shim files to WikiOracle"
-	@echo "  make wo-chat-start         Start chat shim on WikiOracle"
-	@echo "  make wo-chat-stop          Stop chat shim on WikiOracle"
-	@echo "  make wo-chat-restart       Restart chat shim on WikiOracle"
-	@echo "  make wo-chat-status        Check chat shim status on WikiOracle"
-	@echo "  make wo-chat-logs          Tail chat shim logs on WikiOracle"
+	@echo "OpenClaw (openclaw_*):"
+	@echo "  make openclaw_setup     Install OpenClaw dependencies (Slack/Discord/Telegram)"
+	@echo "  make openclaw_run       Run OpenClaw adapter (use OPENCLAW_ARGS='--adapter slack')"
 	@echo ""
-	@echo "Checkpoint Backup (WikiOracle ↔ local):"
-	@echo "  make checkpoint-pull    Pull SFT weights from WikiOracle → output/checkpoints/"
-	@echo "  make checkpoint-push    Push output/checkpoints/ → WikiOracle SFT weights"
-	@echo ""
-	@echo "OpenClaw (multi-channel front-end):"
-	@echo "  make openclaw-setup        Install OpenClaw dependencies (Slack/Discord/Telegram)"
-	@echo "  make openclaw-run          Run OpenClaw adapter (use OPENCLAW_ARGS='--adapter slack')"
-	@echo ""
-	@echo "Documentation:"
-	@echo "  make pdf                Generate PDF from all doc/*.md → output/WikiOracle.pdf"
+	@echo "Documentation (doc_*):"
+	@echo "  make doc_pdf            Generate PDF from all doc/*.md → output/WikiOracle.pdf"
+	@echo "  make doc_report         Generate training report"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              Remove Python caches"
-	@echo "  make clean-all          Remove caches and venv"
+	@echo "  make clean_all          Remove caches and venv"
 	@echo ""
 	@echo "Overridable variables (pass on command line):"
+	@echo "  ARCH=cpu|gpu            Target architecture (default: cpu)"
+	@echo "  HOST=local|remote       Target host for nano_*/wo_* (default: local)"
+	@echo "  NANO_PORT=8000          NanoChat server port (local mode)"
 	@echo "  NPROC=8                 GPUs per node for torchrun"
 	@echo "  WANDB_RUN=name          Weights & Biases run name (default: dummy)"
 	@echo "  CPU_DEPTH=6             Model depth for CPU training"
@@ -209,17 +216,18 @@ help:
 	@echo "  EC2_DISK_SIZE           Root EBS volume in GB (default: 200)"
 	@echo "  ALERT_EMAIL             Email for idle-instance alerts (required for remote builds)"
 
-# ---- All ----------------------------------------------------------------------
+# ---- All / Deploy -------------------------------------------------------------
 
-all: wo-deploy wo-chat-deploy wo-restart wo-chat-restart
+all: build_setup train test_eval doc_report
 
-all-gpu: setup-gpu train-gpu eval-gpu report
+deploy: nano_deploy wo_deploy nano_restart wo_restart
 
 some:
-	$(MAKE) all CPU_ITERS=10
-
-some-gpu:
-	$(MAKE) all-gpu GPU_ITERS=10 DATA_SHARDS_FULL=8 EVAL_MAX_PER_TASK=16
+ifeq ($(ARCH),gpu)
+	$(MAKE) all ARCH=gpu GPU_ITERS=10 DATA_SHARDS_FULL=8 EVAL_MAX_PER_TASK=16
+else
+	$(MAKE) all ARCH=cpu CPU_ITERS=10
+endif
 
 # --- Remote (EC2) -------------------------------------------------------------
 
@@ -231,7 +239,7 @@ ifndef ALERT_EMAIL
 	$(error ALERT_EMAIL is required for remote builds — e.g. make remote ALERT_EMAIL=you@example.com)
 endif
 ifndef EC2_TARGET
-	$(error EC2_TARGET is required for remote builds — e.g. make remote EC2_TARGET=all-gpu)
+	$(error EC2_TARGET is required for remote builds — e.g. make remote EC2_TARGET=all)
 endif
 	python3 bin/remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
@@ -242,24 +250,24 @@ endif
 		--target="$(EC2_TARGET)" \
 		--alert-email=$(ALERT_EMAIL)
 
-remote-retrieve:
+remote_retrieve:
 	python3 bin/remote.py $(REMOTE_ARGS) retrieve
 
-remote-ssh:
+remote_ssh:
 	python3 bin/remote.py $(REMOTE_ARGS) ssh
 
-remote-logs:
+remote_logs:
 	python3 bin/remote.py $(REMOTE_ARGS) logs
 
-remote-status:
+remote_status:
 	python3 bin/remote.py $(REMOTE_ARGS) status
 
-remote-deploy-launch:
+remote_deploy_launch:
 ifndef ALERT_EMAIL
-	$(error ALERT_EMAIL is required for remote builds — e.g. make remote-deploy-launch ALERT_EMAIL=you@example.com)
+	$(error ALERT_EMAIL is required for remote builds — e.g. make remote_deploy_launch ALERT_EMAIL=you@example.com)
 endif
 ifndef EC2_TARGET
-	$(error EC2_TARGET is required for remote builds — e.g. make remote-deploy-launch EC2_TARGET=all-gpu)
+	$(error EC2_TARGET is required for remote builds — e.g. make remote_deploy_launch EC2_TARGET=all)
 endif
 	python3 bin/remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
@@ -271,126 +279,197 @@ endif
 		--alert-email=$(ALERT_EMAIL) \
 		--deploy $(DEPLOY_ARGS)
 
-remote-deploy:
+remote_deploy:
 	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
 
-# --- WikiOracle Server (NanoChat LLM) -----------------------------------------
+# --- NanoChat Server (HOST=local|remote) --------------------------------------
+# When HOST=local  → background process with PID file (localhost:NANO_PORT)
+# When HOST=remote → SSH to WO_HOST, manage via systemctl nanochat
 
 WO_SSH := ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10 $(WO_USER)@$(WO_HOST)
 
-wo-deploy:
+nano_deploy:
+ifeq ($(HOST),local)
+	@echo "Nothing to deploy locally."
+else
 	@echo "Deploying nanochat.service to $(WO_HOST) ..."
 	scp -i $(WO_KEY_FILE) -o ConnectTimeout=10 \
 		data/nanochat.service $(WO_USER)@$(WO_HOST):/tmp/nanochat.service
 	$(WO_SSH) "sudo cp /tmp/nanochat.service /etc/systemd/system/ && sudo systemctl daemon-reload && rm /tmp/nanochat.service"
-	@echo "nanochat.service deployed. Run 'make wo-restart' to apply."
+	@echo "nanochat.service deployed. Run 'make nano_restart HOST=remote' to apply."
+endif
 
-wo-start:
+nano_start:
+ifeq ($(HOST),local)
+	@if [ -f $(NANO_PID) ] && kill -0 $$(cat $(NANO_PID)) 2>/dev/null; then \
+		echo "NanoChat already running (PID $$(cat $(NANO_PID)), port $(NANO_PORT))"; \
+	else \
+		cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
+			NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
+			python -m scripts.chat_web -p $(NANO_PORT) -d float32 --device-type cpu & \
+		echo $$! > $(NANO_PID); \
+		echo "NanoChat starting on port $(NANO_PORT) (PID $$(cat $(NANO_PID)))"; \
+	fi
+else
 	$(WO_SSH) "sudo systemctl start nanochat"
 	@echo "NanoChat server started on $(WO_HOST)"
+endif
 
-wo-stop:
+nano_stop:
+ifeq ($(HOST),local)
+	@if [ -f $(NANO_PID) ]; then \
+		kill $$(cat $(NANO_PID)) 2>/dev/null && echo "NanoChat stopped" || echo "NanoChat not running"; \
+		rm -f $(NANO_PID); \
+	else \
+		echo "No PID file found"; \
+	fi
+else
 	$(WO_SSH) "sudo systemctl stop nanochat"
 	@echo "NanoChat server stopped on $(WO_HOST)"
+endif
 
-wo-restart:
+nano_restart:
+ifeq ($(HOST),local)
+	$(MAKE) nano_stop
+	$(MAKE) nano_start NANO_PORT=$(NANO_PORT)
+else
 	$(WO_SSH) "sudo systemctl restart nanochat"
 	@echo "NanoChat server restarted on $(WO_HOST)"
+endif
 
-wo-status:
+nano_status:
+ifeq ($(HOST),local)
+	@if [ -f $(NANO_PID) ] && kill -0 $$(cat $(NANO_PID)) 2>/dev/null; then \
+		echo "NanoChat running (PID $$(cat $(NANO_PID)), port $(NANO_PORT))"; \
+	else \
+		echo "NanoChat not running"; \
+	fi
+else
 	$(WO_SSH) "sudo systemctl status nanochat --no-pager -l"
+endif
 
-wo-logs:
+nano_logs:
+ifeq ($(HOST),local)
+	@echo "Local NanoChat logs go to stdout. Use 'make run_web' for foreground mode."
+else
 	$(WO_SSH) "sudo journalctl -u nanochat -f --no-pager"
+endif
 
-# --- WikiOracle Chat Shim (served at /chat on WikiOracle.org) ----------------
-# The chat shim runs as a stateless Flask app behind the WordPress reverse proxy.
-# It listens on 127.0.0.1:8787 and serves from /chat URL prefix.
+# --- WikiOracle Server (HOST=local|remote) ------------------------------------
+# When HOST=local  → background Flask shim with PID file
+# When HOST=remote → SSH to WO_HOST, manage via systemctl wikioracle
 
-WO_CHAT_DEST     := $(WO_DEST)
 # Extra untracked files the server needs (e.g. runtime config with secrets).
-WO_CHAT_EXTRA    := config.xml
+WO_DEPLOY_EXTRA := config.xml
 
-.PHONY: wo-chat-deploy wo-chat-start wo-chat-stop wo-chat-restart wo-chat-status wo-chat-logs wo-fix-proxy
-
-wo-chat-deploy:
-	@echo "Deploying WikiOracle chat shim to $(WO_HOST):$(WO_CHAT_DEST) ..."
+wo_deploy:
+ifeq ($(HOST),local)
+	@echo "Nothing to deploy locally."
+else
+	@echo "Deploying WikiOracle to $(WO_HOST):$(WO_DEST) ..."
 	rsync -avz --delete --exclude .venv \
 		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
-		--files-from=<(git ls-files -- bin client data test requirements.txt; echo $(WO_CHAT_EXTRA)) \
-		. $(WO_USER)@$(WO_HOST):$(WO_CHAT_DEST)/
-	$(WO_SSH) "sudo cp $(WO_CHAT_DEST)/data/wikioracle.service /etc/systemd/system/ && sudo systemctl daemon-reload"
-	@echo "Chat shim deployed. Run 'make wo-chat-restart' to apply."
+		--files-from=<(git ls-files -- bin client data test requirements.txt; echo $(WO_DEPLOY_EXTRA)) \
+		. $(WO_USER)@$(WO_HOST):$(WO_DEST)/
+	$(WO_SSH) "sudo cp $(WO_DEST)/data/wikioracle.service /etc/systemd/system/ && sudo systemctl daemon-reload"
+	@echo "WikiOracle deployed. Run 'make wo_restart HOST=remote' to apply."
+endif
 
-wo-chat-start:
+wo_start:
+ifeq ($(HOST),local)
+	@if [ -f $(WO_PID) ] && kill -0 $$(cat $(WO_PID)) 2>/dev/null; then \
+		echo "WikiOracle already running (PID $$(cat $(WO_PID)))"; \
+	else \
+		$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) & \
+		echo $$! > $(WO_PID); \
+		echo "WikiOracle starting (PID $$(cat $(WO_PID)))"; \
+	fi
+else
 	$(WO_SSH) "sudo systemctl start wikioracle"
-	@echo "WikiOracle chat shim started on $(WO_HOST)"
+	@echo "WikiOracle started on $(WO_HOST)"
+endif
 
-wo-chat-stop:
+wo_stop:
+ifeq ($(HOST),local)
+	@if [ -f $(WO_PID) ]; then \
+		kill $$(cat $(WO_PID)) 2>/dev/null && echo "WikiOracle stopped" || echo "WikiOracle not running"; \
+		rm -f $(WO_PID); \
+	else \
+		echo "No PID file found"; \
+	fi
+else
 	$(WO_SSH) "sudo systemctl stop wikioracle"
-	@echo "WikiOracle chat shim stopped on $(WO_HOST)"
+	@echo "WikiOracle stopped on $(WO_HOST)"
+endif
 
-wo-chat-restart:
+wo_restart:
+ifeq ($(HOST),local)
+	$(MAKE) wo_stop
+	$(MAKE) wo_start
+else
 	$(WO_SSH) "sudo systemctl restart wikioracle"
-	@echo "WikiOracle chat shim restarted on $(WO_HOST)"
+	@echo "WikiOracle restarted on $(WO_HOST)"
+endif
 
-wo-chat-status:
+wo_status:
+ifeq ($(HOST),local)
+	@if [ -f $(WO_PID) ] && kill -0 $$(cat $(WO_PID)) 2>/dev/null; then \
+		echo "WikiOracle running (PID $$(cat $(WO_PID)))"; \
+	else \
+		echo "WikiOracle not running"; \
+	fi
+else
 	$(WO_SSH) "sudo systemctl status wikioracle --no-pager -l"
+endif
 
-wo-chat-logs:
+wo_logs:
+ifeq ($(HOST),local)
+	@echo "Local WikiOracle logs go to stdout. Use 'make run_server' for foreground mode."
+else
 	$(WO_SSH) "sudo journalctl -u wikioracle -f --no-pager"
+endif
 
-# --- Setup --------------------------------------------------------------------
+# --- Build / Setup ------------------------------------------------------------
 
 $(VENV_DIR):
 	command -v uv &> /dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$$HOME/.local/bin:$$PATH"; }
 	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv venv
 
-venv:
+build_venv:
 	python3 -m venv $(SHIM_VENV)
 	$(SHIM_ACTIVATE) && pip install -r requirements.txt
 
-setup-cpu: $(VENV_DIR)
-	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra cpu
-
-setup-gpu: $(VENV_DIR)
+build_setup: $(VENV_DIR)
+ifeq ($(ARCH),gpu)
 	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra gpu
+else
+	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra cpu
+endif
 
 # --- Data ---------------------------------------------------------------------
 
-data:
+build_data:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python -m nanochat.dataset -n $(DATA_SHARDS_INIT)
 
 # --- Tokenizer ----------------------------------------------------------------
 
-tokenizer: data
+build_tokenizer: build_data
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python -m scripts.tok_train && \
 		python -m scripts.tok_eval
 
-# --- Identity conversations (SFT data) ---------------------------------------
+# --- Identity conversations (fine-tuning data) --------------------------------
 
 $(IDENTITY_DATA):
 	curl -L -o "$(IDENTITY_DATA)" $(IDENTITY_URL)
 
 # --- Pretrain -----------------------------------------------------------------
 
-pretrain-cpu: tokenizer
-	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-		python -m scripts.base_train \
-			--depth=$(CPU_DEPTH) \
-			--head-dim=64 \
-			--window-pattern=$(GPU_WINDOW) \
-			--max-seq-len=$(CPU_SEQ_LEN) \
-			--device-batch-size=$(CPU_BATCH) \
-			--num-iterations=$(CPU_ITERS) \
-			--run=$(WANDB_RUN)
-
-pretrain-gpu: tokenizer
+train_pretrain: build_tokenizer
+ifeq ($(ARCH),gpu)
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		export OMP_NUM_THREADS=1 && \
@@ -403,19 +482,23 @@ pretrain-gpu: tokenizer
 			--window-pattern=$(GPU_WINDOW) \
 			$(if $(GPU_ITERS),--num-iterations=$(GPU_ITERS)) \
 			--run=$(WANDB_RUN)
-
-# --- SFT (Supervised Fine-Tuning) --------------------------------------------
-
-sft-cpu: $(IDENTITY_DATA)
+else
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-		python -m scripts.chat_sft \
+		python -m scripts.base_train \
+			--depth=$(CPU_DEPTH) \
+			--head-dim=64 \
+			--window-pattern=$(GPU_WINDOW) \
 			--max-seq-len=$(CPU_SEQ_LEN) \
 			--device-batch-size=$(CPU_BATCH) \
-			--num-iterations=1500 \
+			--num-iterations=$(CPU_ITERS) \
 			--run=$(WANDB_RUN)
+endif
 
-sft-gpu: $(IDENTITY_DATA)
+# --- Fine-Tuning (Supervised) ------------------------------------------------
+
+train_finetune: $(IDENTITY_DATA)
+ifeq ($(ARCH),gpu)
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		export OMP_NUM_THREADS=1 && \
@@ -424,27 +507,25 @@ sft-gpu: $(IDENTITY_DATA)
 			--device-batch-size=$(GPU_BATCH) \
 			$(if $(GPU_ITERS),--num-iterations=$(GPU_ITERS)) \
 			--run=$(WANDB_RUN)
-
-# --- Full training pipelines --------------------------------------------------
-
-train-cpu: data tokenizer pretrain-cpu sft-cpu
-	@echo "CPU training pipeline complete."
-
-train-gpu: data tokenizer pretrain-gpu sft-gpu
-	@echo "GPU training pipeline complete."
-
-# --- Evaluation ---------------------------------------------------------------
-
-eval-cpu:
+else
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-		python -m scripts.base_eval \
-			--device-batch-size=1 \
-			--split-tokens=16384 \
-			--max-per-task=16 && \
-		python -m scripts.chat_eval -i sft
+		python -m scripts.chat_sft \
+			--max-seq-len=$(CPU_SEQ_LEN) \
+			--device-batch-size=$(CPU_BATCH) \
+			--num-iterations=1500 \
+			--run=$(WANDB_RUN)
+endif
 
-eval-gpu:
+# --- Full training pipeline ---------------------------------------------------
+
+train: build_data build_tokenizer train_pretrain train_finetune
+	@echo "$(ARCH) training pipeline complete."
+
+# --- Test / Evaluation --------------------------------------------------------
+
+test_eval:
+ifeq ($(ARCH),gpu)
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		export OMP_NUM_THREADS=1 && \
@@ -455,76 +536,81 @@ eval-gpu:
 		torchrun --standalone --nproc_per_node=$(NPROC) \
 			-m scripts.chat_eval -- -i sft \
 			$(if $(EVAL_MAX_PER_TASK),-x $(EVAL_MAX_PER_TASK))
+else
+	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
+		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		python -m scripts.base_eval \
+			--device-batch-size=1 \
+			--split-tokens=16384 \
+			--max-per-task=16 && \
+		python -m scripts.chat_eval -i sft
+endif
 
-# --- Inference ----------------------------------------------------------------
+# --- Run / Inference ----------------------------------------------------------
 
-init:
+run_init:
 	rm -f state.xml llm.xml
 	@echo "State files removed — server will create a fresh one on next start."
 
-run:
+run_server:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP)
 
-debug:
+run_debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
-test:
+test_unit:
 	$(SHIM_ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
-		python3 -m unittest test.test_wikioracle_state test.test_prompt_bundle test.test_derived_truth test.test_authority test.test_stateless_contract test.test_hme_inference test.test_voting test.test_alpha_state test.test_degree_of_truth test.test_user_guid test.test_sensation test.test_spacetime test.test_config_xml test.test_state_xml test.test_online_llm test.test_online_training -v
-	@echo "── Online vote test (warning only) ──"
-	@$(SHIM_ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
-		python3 -m unittest test.test_online_vote -v 2>&1 \
-		|| echo "⚠  Online vote test failed (non-blocking)"
+		python3 test/run_tests.py
 
-run-cli:
+run_cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python -m scripts.chat_cli
 
-run-web:
+run_web:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python ../bin/nanochat_ext.py
 
-# --- Report -------------------------------------------------------------------
+# --- Documentation ------------------------------------------------------------
 
-report:
+doc_report:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python -m nanochat.report generate
 
 # --- Checkpoint backup / restore -----------------------------------------------
-# Use checkpoint-pull before enabling online training to snapshot the current
-# SFT weights.  Use checkpoint-push to restore them if capture occurs.
+# Use checkpoint_pull before enabling online training to snapshot the current
+# fine-tuning weights.  Use checkpoint_push to restore them if capture occurs.
 
-checkpoint-pull:
-	@echo "Pulling SFT checkpoints from $(WO_HOST) → $(CHECKPOINT_BAK)/ ..."
+checkpoint_pull:
+	@echo "Pulling fine-tuning checkpoints from $(WO_HOST) → $(CHECKPOINT_BAK)/ ..."
 	mkdir -p "$(CHECKPOINT_BAK)"
 	rsync -avz --delete \
 		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
 		"$(WO_USER)@$(WO_HOST):$(WO_CHECKPOINT)/" "$(CHECKPOINT_BAK)/"
 	@echo "Done. Backup at $(CHECKPOINT_BAK)/"
 
-checkpoint-push:
+checkpoint_push:
 	@test -d "$(CHECKPOINT_BAK)" || { echo "No backup at $(CHECKPOINT_BAK)/"; exit 1; }
-	@echo "Pushing $(CHECKPOINT_BAK)/ → $(WO_HOST) SFT checkpoints ..."
+	@echo "Pushing $(CHECKPOINT_BAK)/ → $(WO_HOST) fine-tuning checkpoints ..."
 	rsync -avz --delete \
 		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
 		"$(CHECKPOINT_BAK)/" "$(WO_USER)@$(WO_HOST):$(WO_CHECKPOINT)/"
-	@echo "Done. Run 'make wo-restart' to reload weights."
+	@echo "Done. Run 'make wo_restart' to reload weights."
 
 # --- OpenClaw -----------------------------------------------------------------
 
 OPENCLAW_DIR  := openclaw
 OPENCLAW_VENV := $(OPENCLAW_DIR)/.venv
 
-openclaw-setup:
+openclaw_setup:
 	git submodule update --init $(OPENCLAW_DIR)
 	python3 -m venv $(OPENCLAW_VENV)
 	source "$(CURDIR)/$(OPENCLAW_VENV)/bin/activate" && pip install -r $(OPENCLAW_DIR)/requirements.txt
 
-openclaw-run:
-	@test -d "$(OPENCLAW_VENV)" || { echo "Run 'make openclaw-setup' first"; exit 1; }
+openclaw_run:
+	@test -d "$(OPENCLAW_VENV)" || { echo "Run 'make openclaw_setup' first"; exit 1; }
 	source "$(CURDIR)/$(OPENCLAW_VENV)/bin/activate" && PYTHONPATH="$(CURDIR)/bin" python3 -m openclaw $(OPENCLAW_ARGS)
 
 # --- Sensation preprocessing --------------------------------------------------
@@ -532,14 +618,14 @@ openclaw-run:
 CORPUS_INPUT  ?= $(NANOCHAT_BASE)/identity_conversations.jsonl
 CORPUS_OUTPUT ?= data/tagged_corpus.jsonl
 
-preprocess:
+build_preprocess:
 	@echo "Preprocessing $(CORPUS_INPUT) → $(CORPUS_OUTPUT) ..."
 	$(SHIM_ACTIVATE) && python3 bin/sensation.py corpus "$(CORPUS_INPUT)" "$(CORPUS_OUTPUT)"
 
 # --- PDF generation -----------------------------------------------------------
 # Generate a single PDF from all doc/*.md files with README as index.
 
-pdf:
+doc_pdf:
 	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
 	mkdir -p output
 	pandoc $(PDOPTS) \
@@ -556,5 +642,5 @@ clean:
 	find $(NANOCHAT_DIR) -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find $(NANOCHAT_DIR) -name '*.pyc' -delete 2>/dev/null || true
 
-clean-all: clean
+clean_all: clean
 	rm -rf $(VENV_DIR)

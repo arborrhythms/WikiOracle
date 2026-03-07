@@ -257,20 +257,21 @@ class TestPromptStructure(unittest.TestCase):
         self.assertEqual(len(trust), 17)
 
     def test_all_entry_types_included_in_rag(self):
-        """When rag=True, ALL state.truth entries are sent — including
-        providers, operators, and authorities."""
+        """When rag=True, resolved state.truth entries are sent.
+
+        After resolution: references→facts (id preserved),
+        authorities→facts (new IDs from remote), providers→feelings.
+        """
         bundle = _build_bundle_for_query(self.state, "Is Socrates mortal?")
         ids = _source_ids(bundle)
         self.assertIn("provider_claude", ids,
-                       "Provider entries should be included in RAG sources")
+                       "Provider (resolved to feeling) should be in RAG sources")
         self.assertIn("op_socrates_mortal", ids,
                        "Operator entries should be included in RAG sources")
-        self.assertIn("auth_test_01", ids,
-                       "Authority entries should be included in RAG sources")
         self.assertIn("axiom_01", ids,
                        "Fact entries should be included in RAG sources")
         self.assertIn("src_wiki_01", ids,
-                       "Reference entries should be included in RAG sources")
+                       "Reference (resolved to fact) should be in RAG sources")
 
 
 if __name__ == "__main__":

@@ -437,13 +437,55 @@ def preprocess_conversation(
 #  Dynamic training example (called from response.py pipeline)
 # =====================================================================
 
+_RE_FEELING_BLOCK = re.compile(
+    r"<feeling(?:\s[^>]*)?>.*?</feeling>",
+    re.DOTALL,
+)
+_RE_FEELING_SELFCLOSE = re.compile(
+    r"<feeling(?:\s[^>]*)?/>",
+)
+
+
+def strip_feelings_from_training(messages: list[dict]) -> list[dict]:
+    """Remove ``<feeling>`` blocks from training messages.
+
+    Feelings must not be used to train model parameters (Entanglement
+    policy, doc/Entanglement.md).  This function strips all
+    ``<feeling>...</feeling>`` and ``<feeling .../>`` blocks from
+    message content.  Messages that become empty after stripping are
+    removed entirely.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        Tagged messages (``[{"role": ..., "content": ...}, ...]``).
+
+    Returns
+    -------
+    list[dict]
+        Messages with feeling content removed.
+    """
+    result = []
+    for msg in messages:
+        content = msg.get("content", "")
+        content = _RE_FEELING_BLOCK.sub("", content)
+        content = _RE_FEELING_SELFCLOSE.sub("", content)
+        content = content.strip()
+        if content:
+            result.append({"role": msg["role"], "content": content})
+    return result
+
+
 def preprocess_training_example(
     messages: list[dict],
     degree_of_truth: float,
 ) -> list[dict]:
     """Tag a single training example for the ``/train`` endpoint.
 
-    Returns the same messages list shape with XML tags in content.
+    Returns the same messages list shape with XML tags in content,
+    with ``<feeling>`` blocks stripped — feelings must not train
+    model parameters (doc/Entanglement.md).
+
     The degree_of_truth is NOT used for trust assignment here — it
     controls learning rate scaling in nanochat_ext.py.  Trust values
     inside the XML are per-sentence heuristic estimates.
@@ -458,10 +500,10 @@ def preprocess_training_example(
     Returns
     -------
     list[dict]
-        Tagged messages, same shape as input.
+        Tagged messages with feelings stripped, same shape as input.
     """
     result = preprocess_conversation(messages, extract_truth=False)
-    return result["messages"]
+    return strip_feelings_from_training(result["messages"])
 
 
 # =====================================================================

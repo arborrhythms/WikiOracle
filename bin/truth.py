@@ -1280,20 +1280,243 @@ def user_guid(user_name: str, uid: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Entry resolution — references, authorities, providers → facts / feelings
+# ---------------------------------------------------------------------------
+# Before use (inference, training, server truth table), raw truth entries
+# are resolved: references and authorities become facts, providers become
+# feelings.  Each resolver is a standalone subroutine for future enhancement.
+
+import urllib.parse as _urlparse
+
+
+def resolve_reference(entry: dict) -> dict:
+    """Resolve a ``<reference>`` entry to a ``<fact>`` with ``src=`` domain.
+
+    Extracts text content from the reference body and the domain from
+    its ``href`` attribute.  Returns a new entry with the content
+    re-tagged as ``<fact src="domain">text</fact>``.
+
+    If the reference has no text content (URL-only), the resulting fact
+    has empty text — a placeholder for future deep-lookup enhancement.
+    """
+    content = entry.get("content", "")
+    if "<reference" not in content:
+        return entry
+
+    try:
+        root = ET.fromstring(f"<root>{content}</root>")
+    except ET.ParseError:
+        return entry
+
+    ref_el = root.find(".//reference")
+    if ref_el is None:
+        return entry
+
+    href = ref_el.get("href", "")
+    domain = ""
+    if href:
+        parsed = _urlparse.urlparse(href)
+        domain = parsed.netloc or parsed.path  # fallback for bare domains
+
+    text = (ref_el.text or "").strip()
+    # Also collect any tail/child text
+    for child in ref_el:
+        text += ET.tostring(child, encoding="unicode", method="text") or ""
+    text = text.strip()
+
+    if domain and text:
+        new_content = f'<fact src="{html.escape(domain, quote=True)}">{html.escape(text)}</fact>'
+    elif domain:
+        new_content = f'<fact src="{html.escape(domain, quote=True)}"/>'
+    elif text:
+        new_content = f"<fact>{html.escape(text)}</fact>"
+    else:
+        new_content = "<fact/>"
+
+    resolved = dict(entry)
+    resolved["content"] = new_content
+    return _normalize_trust_entry(resolved)
+
+
+def resolve_authority(
+    entry: dict,
+    timeout_s: int = 30,
+    allowed_data_dir: str | None = None,
+) -> list[dict]:
+    """Resolve an ``<authority>`` entry to a list of ``<fact>`` entries.
+
+    Delegates to :func:`resolve_authority_entries` for HTTP fetch and
+    parse, then re-tags each remote entry as a ``<fact>`` with
+    ``src=`` set to the authority URL domain.  Trust is already scaled
+    by the authority entry's trust.
+    """
+    auth = parse_authority_block(entry.get("content", ""))
+    if auth is None:
+        return [entry]  # not actually an authority — pass through
+
+    url = auth.get("url", "")
+    domain = ""
+    if url:
+        parsed = _urlparse.urlparse(url)
+        domain = parsed.netloc or parsed.path
+
+    # Reuse the existing resolution infrastructure
+    resolved_pairs = resolve_authority_entries(
+        [(entry, auth)],
+        timeout_s=timeout_s,
+        allowed_data_dir=allowed_data_dir,
+    )
+
+    facts = []
+    for _auth_entry, remote_entries in resolved_pairs:
+        for re_entry in remote_entries:
+            remote_content = re_entry.get("content", "")
+            # Strip any existing XHTML tag and re-wrap as <fact src="...">
+            text = strip_xhtml(remote_content)
+            if domain and text:
+                new_content = f'<fact src="{html.escape(domain, quote=True)}">{html.escape(text)}</fact>'
+            elif text:
+                new_content = f"<fact>{html.escape(text)}</fact>"
+            else:
+                continue  # empty entry — skip
+
+            fact = {
+                "id": re_entry.get("id", ""),
+                "title": re_entry.get("title", "untitled"),
+                "trust": re_entry.get("trust", 0.0),
+                "content": new_content,
+                "time": re_entry.get("time", ""),
+            }
+            facts.append(_normalize_trust_entry(fact))
+    return facts
+
+
+def resolve_provider(entry: dict) -> dict:
+    """Resolve a ``<provider>`` entry to a ``<feeling>``.
+
+    For now, provider responses are treated as feelings since providers
+    cannot yet report truth claims wrapped in ``<fact>`` with a DoT.
+    Future work: call provider API with system context, return mix of
+    facts/feelings/operators.
+    """
+    content = entry.get("content", "")
+    if "<provider" not in content:
+        return entry
+
+    pconfig = parse_provider_block(content)
+    if pconfig is None:
+        return entry
+
+    # Extract a human-readable provider label
+    model = pconfig.get("model", "unknown")
+    provider_label = model or "unknown provider"
+
+    resolved = dict(entry)
+    resolved["content"] = f"<feeling>Provider: {html.escape(provider_label)}</feeling>"
+    return _normalize_trust_entry(resolved)
+
+
+def resolve_entries(
+    entries: list,
+    timeout_s: int = 30,
+    allowed_data_dir: str | None = None,
+) -> list:
+    """Resolve all truth entries: references→facts, authorities→facts, providers→feelings.
+
+    Facts, feelings, and operators pass through unchanged.
+    Returns a flat list of resolved entries.
+    """
+    result = []
+    for entry in entries:
+        content = entry.get("content", "")
+        if "<reference" in content and "<fact" not in content:
+            result.append(resolve_reference(entry))
+        elif "<authority" in content:
+            result.extend(resolve_authority(
+                entry, timeout_s=timeout_s,
+                allowed_data_dir=allowed_data_dir,
+            ))
+        elif "<provider" in content:
+            result.append(resolve_provider(entry))
+        else:
+            result.append(entry)
+    return result
+
+
+def validate_operator_operands(entries: list) -> list:
+    """Filter out operators whose leaf operands include feelings.
+
+    Operators must compose only allowable facts (or other operators
+    over allowable facts).  Any operator whose operand chain reaches
+    a ``<feeling>`` is excluded from the returned list.
+
+    Non-operator entries pass through unchanged.
+    """
+    by_id = {e.get("id", ""): e for e in entries if e.get("id")}
+
+    def _has_feeling_leaf(entry_id: str, visited: set | None = None) -> bool:
+        """Recursively check if any leaf operand is a feeling."""
+        if visited is None:
+            visited = set()
+        if entry_id in visited:
+            return False  # cycle — treat as non-feeling
+        visited.add(entry_id)
+
+        target = by_id.get(entry_id)
+        if target is None:
+            return False  # missing ref — conservative: allow
+        content = target.get("content", "")
+
+        if "<feeling" in content:
+            return True
+        if not _has_operator_tag(content):
+            return False  # leaf fact — not a feeling
+
+        # It's an operator — check its children
+        op = parse_operator_block(content)
+        if op is None:
+            return False
+        for ref_id in op.get("refs", []):
+            if _has_feeling_leaf(ref_id, visited):
+                return True
+        # Also check arg1/arg2 on the entry envelope
+        for arg_key in ("arg1", "arg2"):
+            arg_id = target.get(arg_key, "")
+            if arg_id and _has_feeling_leaf(arg_id, visited):
+                return True
+        return False
+
+    result = []
+    for entry in entries:
+        content = entry.get("content", "")
+        if _has_operator_tag(content):
+            eid = entry.get("id", "")
+            if _has_feeling_leaf(eid):
+                continue  # reject: operator over feelings
+        result.append(entry)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Server truth table — persistence and merging
 # ---------------------------------------------------------------------------
 # Tags that are stored in the server truth table.
-# Feelings and providers are excluded — only factual content is retained.
-_SERVER_TRUTH_TAGS = frozenset({"fact", "reference", "authority", "and", "or", "not", "non"})
+# Only resolved facts and operators are retained.  References, authorities,
+# providers, and feelings must be resolved or excluded before reaching here.
+_SERVER_TRUTH_TAGS = frozenset({"fact", "and", "or", "not", "non"})
 
 
 def _is_server_storable(entry: dict) -> bool:
-    """Return True if the entry should be stored in the server truth table."""
+    """Return True if the entry should be stored in the server truth table.
+
+    Only ``<fact>`` and operator entries (``<and>``, ``<or>``, ``<not>``,
+    ``<non>``) are stored.  Feelings, providers, references, and
+    authorities must be resolved before reaching the merge pipeline.
+    """
     content = entry.get("content", "")
-    if "<feeling" in content:
-        return False
-    if "<provider" in content:
-        return False
+    for tag in ("feeling", "provider", "reference", "authority"):
+        if f"<{tag}" in content:
+            return False
     return True
 
 

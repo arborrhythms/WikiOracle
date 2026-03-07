@@ -128,15 +128,17 @@ class TestBuildProviderBundle(unittest.TestCase):
         self.assertEqual(bundle.transient_sources[0].title, "GPT-4")
 
     def test_all_entry_types_included_in_sources(self):
-        """When rag=True, ALL state.truth entries appear in sources."""
+        """When rag=True, resolved state.truth entries appear in sources.
+
+        After resolution: authorities→facts (or dropped if fetch fails),
+        providers→feelings, facts and operators pass through.
+        """
         trust = [
             _make_trust_entry("Normal", 0.9, "Normal fact", "t1"),
             {"title": "LLM Provider", "trust": 0.95, "id": "t2",
              "content": "<provider><api_url>https://api.openai.com</api_url></provider>"},
             {"title": "Op", "trust": 0.8, "id": "t3",
              "content": '<and><child id="t1"/></and>'},
-            {"title": "Auth", "trust": 0.7, "id": "t4",
-             "content": '<authority url="http://example.com/state"/>'},
         ]
         state = _make_state(truth=trust)
         bundle = build_query(state, "q", {"chat": {"rag": True}})
@@ -144,9 +146,11 @@ class TestBuildProviderBundle(unittest.TestCase):
         self.assertIn("Normal", titles)
         self.assertIn("LLM Provider", titles)
         self.assertIn("Op", titles)
-        self.assertIn("Auth", titles)
         kinds = {s.kind for s in bundle.sources}
-        self.assertEqual(kinds, {"fact", "provider", "operator", "authority"})
+        # Provider is resolved to feeling; operator and fact pass through
+        self.assertIn("fact", kinds)
+        self.assertIn("operator", kinds)
+        self.assertIn("feeling", kinds)
 
     def test_no_entries_when_rag_false(self):
         """When rag=False, NO state.truth entries appear in sources."""

@@ -1,80 +1,116 @@
 #!/usr/bin/env python3
-"""Online integration test: run a vote and verify the diamond pattern.
+"""Diamond vote integration test using a local NanoChat server.
 
-Requires a Gemini API key in config.xml.  Copies alpha/beta fixtures
-to output/, rewrites authority URLs, runs the vote via Flask test client,
-and validates the diamond conversation structure.
+Starts NanoChat via ``make nano_start`` on a test port, copies alpha/beta
+fixtures to output/ with beta providers rewritten to point at the local
+server, runs the vote via Flask test client, and validates the diamond
+conversation structure:
+
+       root (query + prelim)     <- 1 root, 2 messages
+      /    \\
+    beta1  beta2                 <- children of root, 1 message each
+      \\    /
+       final                     <- parentId: [beta1, beta2], 1 message, selected
 
 Run via:
-    make test   (runs in the online vote section, non-blocking)
-
-Or standalone:
-    source .venv/bin/activate && python3 -m unittest test.test_online_vote -v
+    make test
 """
 
 import os
 import shutil
+import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
+
+import requests as _req
 
 _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project / "bin"))
 
+_PORT = 8198
+_NANO_URL = f"http://127.0.0.1:{_PORT}"
+
+
+def _wait_for_server(url: str, timeout: int = 45) -> bool:
+    """Poll *url*/docs until it responds or *timeout* expires."""
+    for _ in range(timeout):
+        try:
+            r = _req.get(f"{url}/docs", timeout=2)
+            if r.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
+
 
 class TestAlphaOutputDiamond(unittest.TestCase):
-    """Integration test: run a vote and verify the diamond pattern.
+    """Integration test: run a diamond vote against a local NanoChat server.
 
-    Copies alpha/beta fixtures to output/, rewrites authority URLs,
-    runs the vote via Flask test client, and validates the diamond
-    conversation structure:
-
-           root (query + prelim)     <- 1 root, 2 messages
-          /    \\
-        beta1  beta2                 <- children of root, 1 message each
-          \\    /
-           final                     <- parentId: [beta1, beta2], 1 message, selected
-
-    Requires a Gemini API key in config.xml.  Skipped otherwise.
+    Starts NanoChat via ``make nano_start NANO_PORT=<port>``, rewrites the
+    alpha.xml beta providers to point at localhost, then exercises the full
+    voting pipeline through the WikiOracle Flask app.  Stops the server via
+    ``make nano_stop`` in tearDownClass.
     """
 
     _test_dir = Path(__file__).resolve().parent
     _output_dir = _project / "output"
     _output_file = _output_dir / "alpha.xml"
-    _skip_reason = None
     _vote_state = None
+    _setup_error = None
     _orig_env = None
     _orig_stateless = None
     _orig_debug = None
+    _orig_wo_url = None
 
     @classmethod
     def setUpClass(cls):
         import config as config_mod
-        from config import _load_config, load_config
+        from config import load_config
+        from response import PROVIDERS
         from wikioracle import create_app
 
-        # Check for Gemini API key
-        raw_cfg = _load_config()
-        if not raw_cfg or not raw_cfg.get("providers", {}).get("gemini", {}).get("api_key"):
-            cls._skip_reason = "No Gemini API key in config"
+        # ── Start NanoChat server via Makefile target ──
+        result = subprocess.run(
+            ["make", "nano_start", f"NANO_PORT={_PORT}"],
+            cwd=str(_project),
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            cls._setup_error = f"make nano_start failed:\n{result.stdout}\n{result.stderr}"
+            return
+        if not _wait_for_server(_NANO_URL):
+            cls._setup_error = f"NanoChat did not start within 45s"
             return
 
-        # Preserve global state
+        # ── Preserve global state ──
         cls._orig_env = os.environ.get("WIKIORACLE_STATE_FILE")
         cls._orig_stateless = config_mod.STATELESS_MODE
         cls._orig_debug = config_mod.DEBUG_MODE
+        cls._orig_wo_url = PROVIDERS.get("wikioracle", {}).get("url")
 
-        # Set up output directory with fixtures
+        # Point the wikioracle provider at the test server
+        PROVIDERS.setdefault("wikioracle", {})["url"] = f"{_NANO_URL}/chat/completions"
+
+        # ── Set up fixtures ──
         cls._output_dir.mkdir(exist_ok=True)
         for name in ("alpha.xml", "beta1.xml", "beta2.xml"):
             shutil.copy2(cls._test_dir / name, cls._output_dir / name)
 
-        # Rewrite authority paths: file://test/ -> file://output/
+        # Rewrite alpha.xml:
+        #   - authority paths: file://test/ -> file://output/
+        #   - beta providers: Gemini -> local NanoChat
         text = cls._output_file.read_text(encoding="utf-8")
         text = text.replace("file://test/", "file://output/")
+        text = text.replace(
+            'api_url="https://generativelanguage.googleapis.com/v1beta/models" model="gemini-2.5-flash"',
+            f'api_url="{_NANO_URL}/chat/completions" model="nanochat"',
+        )
         cls._output_file.write_text(text, encoding="utf-8")
 
-        # Configure the Flask app to use the output alpha state
+        # ── Configure Flask app ──
         os.environ["WIKIORACLE_STATE_FILE"] = str(cls._output_file)
         config_mod.STATELESS_MODE = False
         config_mod.DEBUG_MODE = False
@@ -84,23 +120,23 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         app.testing = True
         client = app.test_client()
 
-        # Run the vote: POST /chat with Gemini as provider
+        # ── Run the vote ──
         resp = client.post("/chat",
             json={
                 "message": "Lets have a vote on taxes. Should we raise them?",
-                "config": {"provider": "gemini"},
+                "config": {"provider": "wikioracle"},
             },
             headers={"X-Requested-With": "WikiOracle"},
         )
+
         data = resp.get_json()
         if not data or not data.get("ok"):
             err = data.get("error", "unknown") if data else "no response"
-            cls._skip_reason = f"Vote call failed: {err}"
+            cls._setup_error = f"Vote call failed: {err}"
             return
-        # Check if the response text is actually a provider error (quota etc.)
         text = data.get("text", "")
         if text.startswith("[Error"):
-            cls._skip_reason = f"Provider returned error: {text[:120]}"
+            cls._setup_error = f"Provider returned error: {text[:200]}"
             return
 
         # Load the state that the server wrote to disk
@@ -110,6 +146,15 @@ class TestAlphaOutputDiamond(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         import config as config_mod
+        from response import PROVIDERS
+
+        # Stop NanoChat via Makefile target
+        subprocess.run(
+            ["make", "nano_stop"],
+            cwd=str(_project),
+            capture_output=True,
+        )
+
         # Restore global state
         if cls._orig_env is not None:
             os.environ["WIKIORACLE_STATE_FILE"] = cls._orig_env
@@ -119,12 +164,13 @@ class TestAlphaOutputDiamond(unittest.TestCase):
             config_mod.STATELESS_MODE = cls._orig_stateless
         if cls._orig_debug is not None:
             config_mod.DEBUG_MODE = cls._orig_debug
-
-    def setUp(self):
-        if self._skip_reason:
-            self.skipTest(self._skip_reason)
+        if cls._orig_wo_url is not None:
+            PROVIDERS.setdefault("wikioracle", {})["url"] = cls._orig_wo_url
 
     def test_diamond_in_output_alpha(self):
+        if self._setup_error:
+            self.fail(self._setup_error)
+
         state = self._vote_state
         self.assertIsNotNone(state, "Vote state should have been loaded")
 

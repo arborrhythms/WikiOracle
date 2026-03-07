@@ -20,14 +20,8 @@
 - Use MCP servers as authority-adjacent inputs: convert MCP resource/tool outputs into `<reference>`/`<fact>` entries with explicit certainty and scope, replacing per-source custom integrations.
 - Multi-channel front-end via OpenClaw: route messages from Slack/Discord/Telegram to WikiOracle's `/chat` endpoint, preserving local-first truth ownership.
 
----
+## Output Certainty
+- the Oracle should respond to the user using Facts and Feelings; right now even its responses are just feelings (without an accurate or attempted Degree of Truth).
+- Other LLM providers are not sophisticated enough to report truth claims wrapped in <fact> with a DoT baseed on output, so maybe we can map to that format using their citations as facts with DoT and and the rest as feeling.
+Until we do so, we cannot end up training on the results of other LLMs (which is probably a good thing anyway).
 
-## See also
-
-- [Authority.md](./Authority.md) — Network of Trust extends the current authority delegation system.
-- [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — mereological operations would replace HME truth computation.
-- [Logic.md](./Logic.md) — mereological operations replace AND/OR with union/intersection.
-- [Non.md](./Non.md) — extending the operator algebra with mereological operators.
-- [Entanglement.md](./Entanglement.md) — point-free spacetime extends the spatiotemporal extent model.
-- [Architecture.md](./Architecture.md) — MCP integration extends the current architecture.
-- [Training.md](./Training.md) — sentence-level prediction relates to NanoChat architecture.

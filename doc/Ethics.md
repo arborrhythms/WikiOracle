@@ -248,8 +248,6 @@ This is the core of the Truth Symmetry enforcement described above.
 If swapping identity references makes a claim contradictory or
 indefensible, it reveals an ethical inconsistency that the system flags.
 
----
-
 ## 9. Truth improves ethics
 
 Ethical progress historically correlates with improved truth systems.

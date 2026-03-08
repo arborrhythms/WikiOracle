@@ -72,31 +72,7 @@ function generateUUID() {
   return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20, 32);
 }
 
-// ─── Tree operations ───
-
-function findInTree(nodes, id) {
-  for (var i = 0; i < nodes.length; i++) {
-    if (nodes[i].id === id) return nodes[i];
-    var found = findInTree(nodes[i].children || [], id);
-    if (found) return found;
-  }
-  return null;
-}
-
-function removeFromTree(nodes, id) {
-  for (var i = 0; i < nodes.length; i++) {
-    if (nodes[i].id === id) { nodes.splice(i, 1); return true; }
-    if (removeFromTree(nodes[i].children || [], id)) return true;
-  }
-  return false;
-}
-
-function countTreeMessages(node) {
-  var n = (node.messages || []).length;
-  var children = node.children || [];
-  for (var i = 0; i < children.length; i++) n += countTreeMessages(children[i]);
-  return n;
-}
+// ─── Tree operations (moved to graph.js) ───
 
 // ─── Double-tap detection (mobile) ───
 //
@@ -1101,60 +1077,7 @@ function _serializeConversations(conversations, depth, prefix) {
   return html;
 }
 
-// Build an ordered ancestor path (root → ... → target) for the selected conversation.
-function _getAncestorPath(conversations, convId) {
-  if (!convId) return null;
-  function _search(convs, target) {
-    for (var i = 0; i < convs.length; i++) {
-      if (convs[i].id === target) return [convs[i]];
-      var deeper = _search(convs[i].children || [], target);
-      if (deeper) { deeper.unshift(convs[i]); return deeper; }
-    }
-    return null;
-  }
-  return _search(conversations, convId);
-}
-
-function _getSelectedConversationPath(conversations) {
-  var best = null;
-  function _walk(convs, path) {
-    for (var i = 0; i < convs.length; i++) {
-      var conv = convs[i];
-      var next = path.concat([conv]);
-      if (conv.selected) {
-        best = next;
-        _walk(conv.children || [], next);
-      } else {
-        _walk(conv.children || [], path);
-      }
-    }
-  }
-  _walk(conversations || [], []);
-  return best || [];
-}
-
-function _selectedConversationIdFromFlags(conversations) {
-  var path = _getSelectedConversationPath(conversations);
-  return path.length ? path[path.length - 1].id : null;
-}
-
-function _syncConversationSelection(conversations, selectedId) {
-  function _clear(convs) {
-    for (var i = 0; i < convs.length; i++) {
-      delete convs[i].selected;
-      _clear(convs[i].children || []);
-    }
-  }
-
-  _clear(conversations || []);
-  if (!selectedId) return [];
-
-  var path = _getAncestorPath(conversations || [], selectedId) || [];
-  for (var i = 0; i < path.length; i++) {
-    path[i].selected = true;
-  }
-  return path;
-}
+// ─── Selection helpers (moved to graph.js) ───
 
 // Serialize the ancestor path as nested conversation divs with correct hierarchical numbers.
 // `allConversations` is the full tree (needed to compute sibling indices).
@@ -1216,7 +1139,7 @@ async function _openReadView() {
   // If nothing is selected, show all root conversations.
   let body = "";
   let pathDesc = "";
-  const ancestorPath = state.selected_conversation ? _getAncestorPath(state.conversations, state.selected_conversation) : null;
+  const ancestorPath = state.selected_conversation ? getAncestorPath(state.conversations, state.selected_conversation) : null;
   let pathLine = "";
   if (ancestorPath && ancestorPath.length > 0) {
     body = _serializeAncestorPath(state.conversations, ancestorPath);

@@ -770,7 +770,7 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
             try:
                 data = json.loads(line[6:])
                 if data.get("error"):
-                    return f"[NanoChat error: {data['error']}]"
+                    return f"[Error from NanoChat: {data['error']}]"
                 if data.get("done"):
                     done = True
                     break
@@ -781,12 +781,12 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
     except (requests.exceptions.ChunkedEncodingError,
             requests.exceptions.ConnectionError,
             requests.exceptions.ReadTimeout) as exc:
-        return f"[Connection lost to NanoChat ({url}): {exc}]"
+        return f"[Error: connection lost to NanoChat ({url}): {exc}]"
     if full_text:
         return "".join(full_text)
     if not done:
-        return f"[NanoChat stream ended abnormally ({url}). Check server logs.]"
-    return f"[No response from NanoChat ({url}). Check server logs.]"
+        return f"[Error: NanoChat stream ended abnormally ({url}). Check server logs.]"
+    return f"[Error: no response from NanoChat ({url}). Check server logs.]"
 
 
 def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -> str:

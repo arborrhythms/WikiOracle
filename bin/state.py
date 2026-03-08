@@ -40,6 +40,22 @@ from truth import (
     utc_now_iso,
 )
 
+# Graph algorithms live in graph.py; re-exported here for backward compatibility.
+from graph import (  # noqa: F401
+    iter_conversation_paths as _iter_conversation_paths,
+    collect_selected_flags as _collect_selected_flags,
+    apply_selection_flags as _apply_selection_flags,
+    resolve_selection as _resolve_selection,
+    find_conversation,
+    get_ancestor_chain,
+    get_all_ancestor_ids,
+    get_context_messages,
+    remove_conversation,
+    all_conversation_ids,
+    all_message_ids,
+    flatten_conversations,
+)
+
 
 # ---------------------------------------------------------------------------
 # State-level constants
@@ -150,144 +166,9 @@ def _normalize_parent_id(value: Any) -> str | list[str] | None:
     return parts
 
 
-def _iter_conversation_paths(conversations: list) -> Iterable[tuple[dict, list[dict]]]:
-    """Yield each conversation with its root-to-node path."""
-    def _walk(nodes: list, path: list[dict]) -> Iterable[tuple[dict, list[dict]]]:
-        for conv in nodes:
-            new_path = path + [conv]
-            yield conv, new_path
-            yield from _walk(conv.get("children", []), new_path)
 
-    yield from _walk(conversations, [])
-
-
-def _collect_selected_flags(conversations: list) -> tuple[list[list[dict]], list[tuple[list[dict], dict]]]:
-    """Collect explicitly selected conversations and messages from the tree."""
-    selected_conversations: list[list[dict]] = []
-    selected_messages: list[tuple[list[dict], dict]] = []
-    for conv, path in _iter_conversation_paths(conversations):
-        if conv.get("selected") is True:
-            selected_conversations.append(path)
-        for msg in conv.get("messages", []):
-            if msg.get("selected") is True:
-                selected_messages.append((path, msg))
-    return selected_conversations, selected_messages
-
-
-def _apply_selection_flags(
-    conversations: list,
-    selected_conversation_id: str | None,
-    selected_message_id: str | None,
-) -> None:
-    """Rewrite selected flags so conversations form one path and messages are singleton."""
-    for conv, path in _iter_conversation_paths(conversations):
-        conv.pop("selected", None)
-        for msg in conv.get("messages", []):
-            msg.pop("selected", None)
-
-    if not selected_conversation_id:
-        return
-
-    selected_chain = get_ancestor_chain(conversations, selected_conversation_id)
-    selected_ids = {conv.get("id") for conv in selected_chain}
-    for conv, path in _iter_conversation_paths(conversations):
-        if conv.get("id") in selected_ids:
-            conv["selected"] = True
-        if conv.get("id") == selected_conversation_id and selected_message_id:
-            for msg in conv.get("messages", []):
-                if msg.get("id") == selected_message_id:
-                    msg["selected"] = True
-                    break
-
-
-def _resolve_selection(
-    conversations: list,
-    selected_hint: Any,
-    selected_message_hint: Any,
-    *,
-    strict: bool,
-) -> tuple[str | None, str | None]:
-    """Resolve conversation/message selection from explicit flags and legacy hints."""
-    selected_hint_id = str(selected_hint).strip() if isinstance(selected_hint, str) and selected_hint.strip() else None
-    selected_message_hint_id = (
-        str(selected_message_hint).strip()
-        if isinstance(selected_message_hint, str) and selected_message_hint.strip()
-        else None
-    )
-
-    conv_paths, msg_refs = _collect_selected_flags(conversations)
-    if strict and len(msg_refs) > 1:
-        raise StateValidationError("Selected messages must be a singleton")
-
-    chosen_msg_path: list[dict] | None = None
-    chosen_msg_id: str | None = None
-    if msg_refs:
-        chosen_msg_path, chosen_msg = msg_refs[0]
-        chosen_msg_id = chosen_msg.get("id")
-        if strict and selected_message_hint_id and selected_message_hint_id != chosen_msg_id:
-            raise StateValidationError("selected_message conflicts with message selected=\"true\"")
-    elif selected_message_hint_id:
-        for conv, _path in _iter_conversation_paths(conversations):
-            for msg in conv.get("messages", []):
-                if msg.get("id") == selected_message_hint_id:
-                    chosen_msg_path = get_ancestor_chain(conversations, conv.get("id"))
-                    chosen_msg_id = selected_message_hint_id
-                    break
-            if chosen_msg_id:
-                break
-        if strict and selected_message_hint_id and not chosen_msg_id:
-            raise StateValidationError(f"Unknown selected_message: {selected_message_hint_id}")
-
-    selected_conversation_id: str | None = None
-
-    if chosen_msg_path:
-        selected_conversation_id = chosen_msg_path[-1].get("id")
-
-    if conv_paths:
-        candidate_path = max(conv_paths, key=len)
-        candidate_ids = [conv.get("id") for conv in candidate_path]
-        for path in conv_paths:
-            path_ids = [conv.get("id") for conv in path]
-            if candidate_ids[:len(path_ids)] != path_ids:
-                if strict:
-                    raise StateValidationError("Selected conversations must form one root-to-node path")
-                candidate_path = path
-                candidate_ids = path_ids
-                break
-        explicit_selected_ids = {path[-1].get("id") for path in conv_paths}
-        candidate_id_set = set(candidate_ids)
-        if strict and explicit_selected_ids != candidate_id_set:
-            raise StateValidationError("Selected conversations must mark every node on the selected path")
-        if selected_conversation_id and selected_conversation_id != candidate_ids[-1]:
-            if strict:
-                raise StateValidationError("Selected message must belong to the terminal selected conversation")
-        else:
-            selected_conversation_id = candidate_ids[-1]
-
-    if selected_hint_id:
-        hint_path = get_ancestor_chain(conversations, selected_hint_id)
-        if strict and not hint_path:
-            raise StateValidationError(f"Unknown selected_conversation: {selected_hint_id}")
-        if hint_path:
-            if selected_conversation_id and selected_conversation_id != selected_hint_id:
-                if strict:
-                    raise StateValidationError("selected_conversation conflicts with selected conversation path")
-            else:
-                selected_conversation_id = selected_hint_id
-
-    if selected_conversation_id:
-        chain = get_ancestor_chain(conversations, selected_conversation_id)
-        if strict and not chain:
-            raise StateValidationError(f"Unknown selected_conversation: {selected_conversation_id}")
-        if chosen_msg_id and chain and chosen_msg_path:
-            chosen_ids = [conv.get("id") for conv in chosen_msg_path]
-            chain_ids = [conv.get("id") for conv in chain]
-            if strict and chosen_ids != chain_ids:
-                raise StateValidationError("Selected message must lie on the selected conversation path")
-    elif chosen_msg_id:
-        selected_conversation_id = chosen_msg_path[-1].get("id") if chosen_msg_path else None
-
-    return selected_conversation_id, chosen_msg_id
+# Selection helpers (_iter_conversation_paths, _collect_selected_flags,
+# _apply_selection_flags, _resolve_selection) moved to graph.py.
 
 
 def _normalize_inner_message(raw: Any) -> dict:
@@ -702,17 +583,28 @@ def _truth_entry_from_xml_element(el: ET.Element) -> dict:
     return _normalize_trust_entry(entry)
 
 
-def _conv_to_xml(conv: dict, parent_el: ET.Element) -> None:
-    """Recursively serialize a conversation dict to XML elements."""
+def _conv_to_xml(conv: dict, parent_el: ET.Element, _seen_ids: set | None = None) -> None:
+    """Recursively serialize a conversation dict to XML elements.
+
+    Diamond nodes (same ID under multiple parents) are fully serialized at
+    each position, but ``selected="true"`` is only written on the first
+    occurrence to keep the selected path unambiguous when re-parsed.
+    """
+    if _seen_ids is None:
+        _seen_ids = set()
+    conv_id = conv.get("id", "")
+    is_first = conv_id not in _seen_ids
+    _seen_ids.add(conv_id)
+
     conv_el = ET.SubElement(parent_el, "conversation")
-    conv_el.set("id", conv.get("id", ""))
+    conv_el.set("id", conv_id)
     pid = conv.get("parentId")
     if pid is not None:
         if isinstance(pid, list):
             conv_el.set("parentId", ",".join(pid))
         else:
             conv_el.set("parentId", str(pid))
-    if conv.get("selected") is True:
+    if conv.get("selected") is True and is_first:
         conv_el.set("selected", "true")
 
     title_el = ET.SubElement(conv_el, "title")
@@ -724,13 +616,13 @@ def _conv_to_xml(conv: dict, parent_el: ET.Element) -> None:
         msg_el.set("role", msg.get("role", "user"))
         msg_el.set("username", msg.get("username", "Unknown"))
         msg_el.set("time", msg.get("time", ""))
-        if msg.get("selected") is True:
+        if msg.get("selected") is True and is_first:
             msg_el.set("selected", "true")
         _set_xhtml_content(msg_el, "content", msg.get("content", ""))
 
     children = conv.get("children", [])
     for child_conv in children:
-        _conv_to_xml(child_conv, conv_el)
+        _conv_to_xml(child_conv, conv_el, _seen_ids)
 
 
 def _conv_from_xml(conv_el: ET.Element) -> dict:
@@ -915,50 +807,8 @@ def atomic_write_xml(path: Path, state: dict, *, reject_symlinks: bool = False) 
 
 
 # ---------------------------------------------------------------------------
-# Conversation tree utilities
+# Conversation tree utilities (moved to graph.py, re-exported above)
 # ---------------------------------------------------------------------------
-def find_conversation(conversations: list, conv_id: str) -> dict | None:
-    """Find a conversation by ID in the tree (recursive)."""
-    for conv in conversations:
-        if conv.get("id") == conv_id:
-            return conv
-        found = find_conversation(conv.get("children", []), conv_id)
-        if found is not None:
-            return found
-    return None
-
-
-def get_ancestor_chain(conversations: list, conv_id: str) -> list:
-    """Return list of conversations from root to the given conv_id (inclusive).
-
-    Each element is the conversation dict. Returns [] if not found.
-    """
-    def _search(convs, target, path):
-        """Depth-first search that returns the first root-to-target path found."""
-        for conv in convs:
-            new_path = path + [conv]
-            if conv.get("id") == target:
-                return new_path
-            result = _search(conv.get("children", []), target, new_path)
-            if result:
-                return result
-        return None
-
-    return _search(conversations, conv_id, []) or []
-
-
-def get_context_messages(conversations: list, conv_id: str) -> list:
-    """Get all messages in the ancestor chain up to and including conv_id.
-
-    Used to build the upstream context window for an LLM call.
-    Returns flat list of messages in conversation order.
-    """
-    chain = get_ancestor_chain(conversations, conv_id)
-    all_msgs = []
-    for conv in chain:
-        all_msgs.extend(conv.get("messages", []))
-    return all_msgs
-
 
 def add_message_to_conversation(conversations: list, conv_id: str, message: dict) -> bool:
     """Append a message to a conversation's messages array. Returns True if found."""
@@ -987,36 +837,6 @@ def add_child_conversation(conversations: list, parent_conv_id: str, new_conv: d
     return True
 
 
-def remove_conversation(conversations: list, conv_id: str) -> bool:
-    """Remove a conversation and all its children from the tree. Returns True if found."""
-    for i, conv in enumerate(conversations):
-        if conv.get("id") == conv_id:
-            conversations.pop(i)
-            return True
-        if remove_conversation(conv.get("children", []), conv_id):
-            return True
-    return False
-
-
-def all_conversation_ids(conversations: list) -> set:
-    """Collect all conversation IDs in the tree."""
-    ids = set()
-    for conv in conversations:
-        ids.add(conv.get("id", ""))
-        ids.update(all_conversation_ids(conv.get("children", [])))
-    return ids
-
-
-def all_message_ids(conversations: list) -> set:
-    """Collect all message IDs across all conversations."""
-    ids = set()
-    for conv in conversations:
-        for msg in conv.get("messages", []):
-            ids.add(msg.get("id", ""))
-        ids.update(all_message_ids(conv.get("children", [])))
-    return ids
-
-
 # ---------------------------------------------------------------------------
 # Merge: collision-safe
 # ---------------------------------------------------------------------------
@@ -1038,17 +858,7 @@ def _resolve_id_collision(desired_id: str, payload: dict, existing: dict, *, pre
         i += 1
 
 
-def _flatten_all_conversations(convs: list) -> list:
-    """Flatten tree into list of (conv_dict_without_children, parent_id) tuples."""
-    result = []
-    def _walk(conv_list, parent_id=None):
-        """Traverse all conversations and collect flat node/parent tuples."""
-        for conv in conv_list:
-            flat = {k: v for k, v in conv.items() if k != "children"}
-            result.append((flat, parent_id))
-            _walk(conv.get("children", []), conv.get("id"))
-    _walk(convs)
-    return result
+_flatten_all_conversations = flatten_conversations
 
 
 def _sort_by_timestamp(items: list) -> list:

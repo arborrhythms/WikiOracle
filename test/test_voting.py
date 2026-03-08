@@ -1085,9 +1085,18 @@ class TestDiamondConversationTree(unittest.TestCase):
             call_count["n"] += 1
             resp = mock.MagicMock()
             resp.status_code = 200
-            resp.json.return_value = {
-                "choices": [{"message": {"content": f"Response #{call_count['n']}"}}]
-            }
+            content = f"Response #{call_count['n']}"
+            if kwargs.get("stream"):
+                # NanoChat SSE streaming format
+                lines = [
+                    f'data: {{"token": "{content}"}}',
+                    'data: {"done": true}',
+                ]
+                resp.iter_lines.return_value = iter(lines)
+            else:
+                resp.json.return_value = {
+                    "choices": [{"message": {"content": content}}]
+                }
             return resp
 
         with mock.patch("response.requests.post", side_effect=mock_provider_call), \
@@ -1147,6 +1156,23 @@ class TestDiamondConversationTree(unittest.TestCase):
         self.assertEqual(sorted(final["parentId"]), sorted(beta_ids),
                          "Final parentId should list all beta IDs")
 
+        # No message content should be an error — verify providers returned real content
+        self.assertFalse(text.startswith("[Error"),
+                         f"Final response should not be an error: {text[:200]}")
+        for msg in root["messages"]:
+            self.assertFalse(
+                (msg.get("content") or "").startswith("[Error"),
+                f"Root message should not be an error: {(msg.get('content') or '')[:200]}")
+        for beta in betas:
+            for msg in beta["messages"]:
+                self.assertFalse(
+                    (msg.get("content") or "").startswith("[Error"),
+                    f"Beta message should not be an error: {(msg.get('content') or '')[:200]}")
+        for msg in final["messages"]:
+            self.assertFalse(
+                (msg.get("content") or "").startswith("[Error"),
+                f"Final message should not be an error: {(msg.get('content') or '')[:200]}")
+
     def test_no_vote_creates_flat_conversation(self):
         """Without providers, process_chat creates a simple linear conversation."""
         from state import ensure_minimal_state
@@ -1180,9 +1206,16 @@ class TestDiamondConversationTree(unittest.TestCase):
         def mock_call(url, **kwargs):
             resp = mock.MagicMock()
             resp.status_code = 200
-            resp.json.return_value = {
-                "choices": [{"message": {"content": "Hi there!"}}]
-            }
+            if kwargs.get("stream"):
+                # NanoChat SSE streaming format
+                resp.iter_lines.return_value = iter([
+                    'data: {"token": "Hi there!"}',
+                    'data: {"done": true}',
+                ])
+            else:
+                resp.json.return_value = {
+                    "choices": [{"message": {"content": "Hi there!"}}]
+                }
             return resp
 
         with mock.patch("response.requests.post", side_effect=mock_call), \
@@ -1206,6 +1239,9 @@ class TestDiamondConversationTree(unittest.TestCase):
         self.assertEqual(root["messages"][0]["role"], "user")
         self.assertEqual(root["messages"][1]["role"], "assistant")
         self.assertEqual(root.get("children", []), [])
+        # Response must not be an error message
+        self.assertFalse(text.startswith("[Error"),
+                         f"Response should not be an error: {text[:200]}")
 
 
 # Diamond integration test moved to test/test_online_vote.py

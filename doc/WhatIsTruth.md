@@ -2,6 +2,10 @@
 
 Revision: 2026.02.27
 
+*Thoughts are non-rivalrous: if someone repeats your idea, you still possess it. Therefore an idea as such cannot be a property object.*
+*All lies are harmful because they undermine the dignity of others. Lies prevent people acting freely and rationally. When someone lies, he interferes with his audience’s right to receive information that is correct. Also, lies distort the ability to make informed decisions. Kant goes further and argues that lies cause broader harm by undermining a speaker’s credibility, which, in turn, causes people to distrust each other’s contentions. Kant even goes as far as to say lying is immoral, under all conditions.*
+    ~ Immanuel Kant
+
 ## Plural Truth and Shared Empathy in the Design of WikiOracle
 
 Truth is not the same thing as consensus.

@@ -1,8 +1,7 @@
 // query.js — Server communication layer for WikiOracle front-end.
-// Loaded after util.js; depends on config global (config.js) for url_prefix.
+// Loaded after util.js and graph.js; depends on config global (config.js) for url_prefix.
 //
-// Exports: api, _apiPath, findConversation, findParentConversation,
-//          _buildAncestorPath, _mergeResponseConversation,
+// Exports: api, _apiPath, _mergeResponseConversation,
 //          _buildRuntimeConfig, _clientMerge
 
 // ─── API helpers ───
@@ -33,81 +32,7 @@ async function api(method, path, body) {
   return resp.json();
 }
 
-// ─── Conversation tree helpers ───
-function findConversation(conversations, convId) {
-  return findInTree(conversations, convId);
-}
-
-// Return the parent conversation object of convId, or null if convId is a root.
-function findParentConversation(conversations, convId) {
-  if (!convId || !conversations) return null;
-  for (var i = 0; i < conversations.length; i++) {
-    var ch = conversations[i].children || [];
-    for (var k = 0; k < ch.length; k++) {
-      if (ch[k].id === convId) return conversations[i];
-    }
-    var deeper = findParentConversation(ch, convId);
-    if (deeper) return deeper;
-  }
-  return null;
-}
-
-// Build a pruned conversation tree containing only the ancestor path to convId.
-// Each node on the path keeps only the child that leads to the target.
-// Returns a new array (does not mutate the original).
-function _buildAncestorPath(conversations, convId) {
-  if (!convId || !conversations) return [];
-  function _search(convs, target) {
-    for (var i = 0; i < convs.length; i++) {
-      var c = convs[i];
-      if (c.id === target) {
-        // Found target — return it with its children intact (includes optimistic conv)
-        return [{
-          id: c.id,
-          title: c.title,
-          messages: (c.messages || []).map(function(m) {
-            return {
-              id: m.id,
-              role: m.role,
-              username: m.username,
-              time: m.time,
-              content: m.content,
-              selected: !!m.selected,
-              _pending: !!m._pending,
-            };
-          }),
-          children: c.children || [],
-          parentId: c.parentId,
-          selected: !!c.selected,
-        }];
-      }
-      var deeper = _search(c.children || [], target);
-      if (deeper) {
-        // This node is on the path — keep only the child that leads to target
-        return [{
-          id: c.id,
-          title: c.title,
-          messages: (c.messages || []).map(function(m) {
-            return {
-              id: m.id,
-              role: m.role,
-              username: m.username,
-              time: m.time,
-              content: m.content,
-              selected: !!m.selected,
-              _pending: !!m._pending,
-            };
-          }),
-          children: deeper,
-          parentId: c.parentId,
-          selected: !!c.selected,
-        }];
-      }
-    }
-    return null;
-  }
-  return _search(conversations, convId) || [];
-}
+// ─── Conversation tree helpers (moved to graph.js) ───
 
 // Merge a response-state's conversation tree back into the full local state.
 // Finds the selected conversation in responseBundle and updates/inserts it in localConvs.
@@ -211,36 +136,7 @@ function _clientMerge(importState) {
   if (!Array.isArray(state.conversations)) state.conversations = [];
   const importConvs = importState.conversations || [];
 
-  function mergeConvLists(base, incoming) {
-    const baseById = {};
-    for (const c of base) { if (c.id) baseById[c.id] = c; }
-    for (const inc of incoming) {
-      const existing = inc.id ? baseById[inc.id] : null;
-      if (existing) {
-        // Merge messages by id: import wins for duplicates, appends new
-        const msgById = {};
-        for (const m of (existing.messages || [])) { if (m.id) msgById[m.id] = m; }
-        for (const m of (inc.messages || [])) {
-          if (m.id && msgById[m.id]) {
-            const idx = existing.messages.indexOf(msgById[m.id]);
-            if (idx >= 0) existing.messages[idx] = m;
-          } else {
-            existing.messages.push(m);
-          }
-        }
-        // Update title and parentId if import has them
-        if (inc.title) existing.title = inc.title;
-        if (inc.parentId !== undefined) existing.parentId = inc.parentId;
-        // Recursively merge children
-        if (!existing.children) existing.children = [];
-        mergeConvLists(existing.children, inc.children || []);
-      } else {
-        base.push(inc);
-        if (inc.id) baseById[inc.id] = inc;
-      }
-    }
-  }
-  mergeConvLists(state.conversations, importConvs);
+  mergeConversationTrees(state.conversations, importConvs);
 
   // Context: keep current state context (don't overwrite)
 

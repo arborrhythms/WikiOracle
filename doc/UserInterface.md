@@ -75,6 +75,41 @@ SVG tree visualisation
 
 A 200ms timer disambiguates click from double-click. Context menus are appended to `document.body` with fixed positioning to avoid clipping by the tree container's `overflow: hidden`.
 
+### Keyboard navigation
+
+| Key | Action |
+|---|---|
+| Arrow Up | Navigate to parent conversation |
+| Arrow Down | Navigate to first child conversation |
+| Arrow Right | Next node in inorder traversal |
+| Arrow Left | Previous node in inorder traversal |
+
+Keyboard events are ignored when a text input, textarea, or select
+element has focus, or when the context overlay is active.
+
+#### Diamond traversal
+
+A diamond (DAG merge) occurs when a conversation has multiple parents
+(e.g. the final synthesis in an HME vote that merges two beta
+branches):
+
+```
+        root
+       /    \
+     beta1  beta2
+       \    /
+        final      ← parentId: [beta1, beta2]
+```
+
+Arrow Right / Arrow Left perform standard tree preorder traversal.
+In a DAG the same node appears under multiple parents; it is visited
+**once per parent** so that each parent's subtree is a complete
+reading path:
+
+```
+→  root  →  beta1  →  final  →  beta2  →  final  →  END
+```
+
 ### Chat panel
 
 | Gesture | Action |

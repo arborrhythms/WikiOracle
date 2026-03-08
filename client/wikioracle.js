@@ -145,22 +145,34 @@ function _syncClientSelectionState() {
     selectedId = null;
   }
   if (selectedId === null) {
-    var flagged = _selectedConversationIdFromFlags(state.conversations);
+    var flagged = selectedConversationIdFromFlags(state.conversations);
     if (flagged) selectedId = flagged;
   }
 
   state.selected_conversation = selectedId;
-  var path = _syncConversationSelection(state.conversations, selectedId) || [];
+
+  // Check if _treePath is already valid for this selectedId.  When navigating
+  // a diamond node via a non-first parent (e.g. Beta2 → Final), the explicit
+  // _treePath must be preserved — DFS would always find the first parent.
+  var treePathValid = selectedId !== null
+    && _treePath.length > 0
+    && _treePath[_treePath.length - 1] === selectedId
+    && findNodeByPath(state.conversations, _treePath);
+
+  var explicitPath = treePathValid ? _treePath : undefined;
+  var path = syncConversationSelection(state.conversations, selectedId, explicitPath) || [];
+
   if (selectedId === null) {
     _treePath = [];
-  } else {
+  } else if (!treePathValid) {
     var pathIds = path.map(function(conv) { return conv.id; });
     if (pathIds.length > 0) {
       _treePath = pathIds;
-    } else if (!_findNodeByPath(state.conversations, _treePath) || _treePath[_treePath.length - 1] !== selectedId) {
-      _treePath = _buildTreePath(state.conversations || [], selectedId);
+    } else {
+      _treePath = buildTreePath(state.conversations || [], selectedId);
     }
   }
+  // else: _treePath is already valid, keep it
   return path;
 }
 
@@ -188,31 +200,15 @@ function navigateToNode(nodeId, path) {
   if (path !== undefined) {
     _treePath = path;
   } else {
-    _treePath = _buildTreePath(state.conversations || [], nodeId);
+    _treePath = buildTreePath(state.conversations || [], nodeId);
   }
-  _syncConversationSelection(state.conversations || [], nodeId);
+  syncConversationSelection(state.conversations || [], nodeId, _treePath);
   renderMessages();
   // Persist selected_conversation to server
   _persistState();
 }
 
-// Build the path from root to nodeId by DFS.  Returns [root, ..., nodeId]
-// or [] if nodeId is null (root view).  For diamond nodes that appear under
-// multiple parents, returns the first path found.
-function _buildTreePath(convs, targetId) {
-  if (!targetId) return [];
-  function _search(nodes, trail) {
-    for (var i = 0; i < nodes.length; i++) {
-      var cur = nodes[i];
-      var next = trail.concat([cur.id]);
-      if (cur.id === targetId) return next;
-      var deeper = _search(cur.children || [], next);
-      if (deeper) return deeper;
-    }
-    return null;
-  }
-  return _search(convs, []) || [];
-}
+// _buildTreePath moved to graph.js as buildTreePath
 
 function _createEmptyChildConversation(parentId) {
   if (!state || !parentId) return null;
@@ -230,11 +226,11 @@ function _createEmptyChildConversation(parentId) {
   if (!Array.isArray(parent.children)) parent.children = [];
   parent.children.push(newConv);
 
-  const parentPath = _buildTreePath(state.conversations || [], parentId);
+  const parentPath = buildTreePath(state.conversations || [], parentId);
   const childPath = parentPath.concat([newConv.id]);
   state.selected_conversation = newConv.id;
   _treePath = childPath;
-  _syncConversationSelection(state.conversations || [], newConv.id);
+  syncConversationSelection(state.conversations || [], newConv.id, _treePath);
   return newConv;
 }
 
@@ -256,7 +252,7 @@ function branchFromNode(convId) {
     state.conversations.push(newConv);
     state.selected_conversation = newConv.id;
     _treePath = [newConv.id];
-    _syncConversationSelection(state.conversations || [], newConv.id);
+    syncConversationSelection(state.conversations || [], newConv.id, _treePath);
     renderMessages();
     _persistState();
     setStatus("Created new conversation.");
@@ -607,29 +603,7 @@ function _pasteMessage(targetIdx) {
 
 // ─── Tree statistics (for root summary view) ───
 
-function _computeTreeStats(conversations) {
-  var stats = { convCount: 0, msgCount: 0, qCount: 0, rCount: 0,
-                earliest: null, latest: null };
-  function walk(nodes) {
-    for (var i = 0; i < nodes.length; i++) {
-      stats.convCount++;
-      var msgs = nodes[i].messages || [];
-      for (var j = 0; j < msgs.length; j++) {
-        stats.msgCount++;
-        if (msgs[j].role === "user") stats.qCount++;
-        else stats.rCount++;
-        var t = msgs[j].time;
-        if (t) {
-          if (!stats.earliest || t < stats.earliest) stats.earliest = t;
-          if (!stats.latest   || t > stats.latest)   stats.latest = t;
-        }
-      }
-      walk(nodes[i].children || []);
-    }
-  }
-  walk(conversations);
-  return stats;
-}
+// computeTreeStats moved to graph.js
 
 function _friendlyDate(iso) {
   if (!iso) return "—";
@@ -763,7 +737,7 @@ function renderMessages() {
 
   // ─── Root summary dashboard (when viewing the root node) ───
   if (state.selected_conversation === null && !_pendingBranchParent) {
-    var stats = _computeTreeStats(state.conversations);
+    var stats = computeTreeStats(state.conversations);
     var trustEntries = Array.isArray(state.truth) ? state.truth : [];
     var contextText = stripTags(state.context || "").trim();
 
@@ -1103,7 +1077,7 @@ async function sendMessage() {
       version: state.version, schema: state.schema, time: state.time,
       title: state.title, context: state.context, truth: _clientTruth,
       selected_conversation: state.selected_conversation,
-      conversations: _buildAncestorPath(state.conversations, targetConvId),
+      conversations: buildAncestorSubtree(state.conversations, targetConvId),
       _path_only: true,
     };
     // If new root (no targetConvId), include the optimistic conversation
@@ -1488,94 +1462,7 @@ function bindEvents() {
     }
   });
 
-  // ─── Tree navigation helpers (shared by arrow keys and scroll-at-border) ───
-
-  // Resolve a treePath to the node it points to.
-  // Returns null if the path is empty (virtual root) or invalid.
-  function _findNodeByPath(convs, path) {
-    var nodes = convs;
-    var node = null;
-    for (var i = 0; i < path.length; i++) {
-      var found = false;
-      for (var j = 0; j < nodes.length; j++) {
-        if (nodes[j].id === path[i]) {
-          node = nodes[j];
-          nodes = node.children || [];
-          found = true;
-          break;
-        }
-      }
-      if (!found) return null;
-    }
-    return node;
-  }
-
-  // Return the deepest last-descendant path from a given node+path.
-  // e.g. for a node with children [A, B] where B has children [C],
-  // deepestLast returns path extended with [B.id, C.id].
-  function _deepestLast(node, path) {
-    while (node && node.children && node.children.length > 0) {
-      var last = node.children[node.children.length - 1];
-      path = path.concat([last.id]);
-      node = last;
-    }
-    return path;
-  }
-
-  // Next node in preorder traversal from current _treePath.
-  // Returns the new path, or null if at the end.
-  function _nextPreorder(convs) {
-    if (_treePath.length === 0) {
-      // At virtual root — go to first top-level conversation
-      if (convs.length > 0) return [convs[0].id];
-      return null;
-    }
-    // If current node has children, go to first child
-    var cur = _findNodeByPath(convs, _treePath);
-    if (cur && cur.children && cur.children.length > 0) {
-      return _treePath.concat([cur.children[0].id]);
-    }
-    // Otherwise walk up the path looking for a next sibling
-    for (var depth = _treePath.length - 1; depth >= 0; depth--) {
-      var parentPath = _treePath.slice(0, depth);
-      var parent = depth === 0
-        ? { children: convs }
-        : _findNodeByPath(convs, parentPath);
-      if (!parent || !parent.children) continue;
-      var childId = _treePath[depth];
-      var siblings = parent.children;
-      for (var si = 0; si < siblings.length; si++) {
-        if (siblings[si].id === childId && si < siblings.length - 1) {
-          return parentPath.concat([siblings[si + 1].id]);
-        }
-      }
-    }
-    return null; // end of tree
-  }
-
-  // Previous node in preorder traversal from current _treePath.
-  // Returns the new path, or null if at the beginning.
-  function _prevPreorder(convs) {
-    if (_treePath.length === 0) return null; // at virtual root
-    var parentPath = _treePath.slice(0, -1);
-    var childId = _treePath[_treePath.length - 1];
-    var parent = parentPath.length === 0
-      ? { children: convs }
-      : _findNodeByPath(convs, parentPath);
-    if (!parent || !parent.children) return parentPath.length > 0 ? parentPath : [];
-    var siblings = parent.children;
-    var idx = -1;
-    for (var si = 0; si < siblings.length; si++) {
-      if (siblings[si].id === childId) { idx = si; break; }
-    }
-    if (idx <= 0) {
-      // First child (or not found) — go to parent
-      return parentPath; // [] = virtual root
-    }
-    // Previous sibling's deepest last descendant
-    var prevSib = siblings[idx - 1];
-    return _deepestLast(prevSib, parentPath.concat([prevSib.id]));
-  }
+  // ─── Tree navigation (helpers moved to graph.js) ───
 
   function _treeNav(direction) {
     if (!state) return false;
@@ -1595,7 +1482,7 @@ function bindEvents() {
         // Down = first child of current node
         var cur = _treePath.length === 0
           ? { children: convs }
-          : _findNodeByPath(convs, _treePath);
+          : findNodeByPath(convs, _treePath);
         if (cur && cur.children && cur.children.length > 0) {
           var child = cur.children[0];
           var childPath = _treePath.concat([child.id]);
@@ -1607,7 +1494,7 @@ function bindEvents() {
         return false;
       }
       case "right": {
-        var nextPath = _nextPreorder(convs);
+        var nextPath = nextPreorder(convs, _treePath);
         if (nextPath) {
           var nodeId = nextPath.length > 0 ? nextPath[nextPath.length - 1] : null;
           _navScrollHint = "top";
@@ -1618,7 +1505,7 @@ function bindEvents() {
         return false;
       }
       case "left": {
-        var prevPath = _prevPreorder(convs);
+        var prevPath = prevPreorder(convs, _treePath);
         if (prevPath) {
           var nodeId = prevPath.length > 0 ? prevPath[prevPath.length - 1] : null;
           _navScrollHint = "top";

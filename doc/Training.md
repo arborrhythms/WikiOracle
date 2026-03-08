@@ -63,6 +63,48 @@ the landscape over time.  This is analogous to the annealing process
 in Hopfield networks, where the energy landscape gradually settles
 into deeper minima as more patterns are stored.
 
+### Zero-Mean Balance
+
+The DoT-annealed training algorithm has a **zero-mean balance**
+property: over many interactions with diverse DoT values, the expected
+net gradient contribution tends to zero.  This arises because:
+
+* DoT = +1 and DoT = −1 both train at full strength but push in
+  opposite directions (learning truth vs. learning falsehood).
+* DoT near 0 contributes nearly nothing (the sigmoid zero-crossing).
+* Over a diverse population of users, the average DoT tends toward
+  zero if the truth table is balanced.
+
+This is directly analogous to the **symmetric energy wells** of
+Hopfield networks.  In a Hopfield network, stored patterns and their
+complements are both stable attractors.  In our system, truths and
+refuted falsehoods are both stable attractors, and the zero-crossing
+is the energy barrier between them.
+
+The EMA weight anchoring adds a third stabilizing force: regardless of
+the DoT distribution, the model is always gently pulled back toward
+its checkpoint state.  This is analogous to the **temperature decay**
+in simulated annealing — as training progresses, the system becomes
+increasingly resistant to perturbation while allowing deeper learning
+within established wells.
+
+### Sigmoid Warmup as Annealing Schedule
+
+The sigmoid warmup schedule serves as a **cooling schedule** for the
+annealing process.  When online training is first enabled:
+
+1. The truth table is empty or sparse — DoT values are unreliable.
+2. The warmup suppresses the learning rate to near-zero.
+3. As interactions accumulate, the truth table gains signal.
+4. The warmup ramps up, allowing the model to learn from now-reliable
+   DoT values.
+5. At steady state (step >> warmup_steps), the warmup factor is ~1.0
+   and training proceeds at full configured strength.
+
+This mirrors the annealing schedule in physical systems: high
+temperature (high exploration, low commitment) → low temperature (low
+exploration, high commitment to learned patterns).
+
 ## Sensation — Preprocessing Pipeline
 
 `bin/sensation.py` transforms plain-text conversations into XML-tagged
@@ -215,15 +257,28 @@ and training happen after the response is delivered.
    * Entries are restricted to facts, operators, authorities, and
      references.  Feelings and provider entries are not stored.
 
+**Stage 3a — Truth Table Trimming**
+
+When the server truth table exceeds `truth_max_entries` (default 1000),
+the merge step trims the table by removing entries with `|trust|` closest
+to 0.0 (no information value), keeping entries with highest `|trust|`
+(strongest signal, positive or negative).  This is checked during the
+merge step, not as a separate operation.  The trim count is logged.
+
+The `truth_max_entries` parameter is configurable per-user via the
+Settings dialog (see [UserInterface.md](./UserInterface.md)) and
+defaults to 1000 in the chat config.
+
 **Stage 4 — Tag and Train**
 
 7. Preprocess the training example through Sensation (`sensation.py`)
    to add `<Q>`/`<R>` and `<fact>`/`<feeling>` XML tags.
-8. Call NanoChat's online training endpoint with the tagged prompt and
-   DegreeOfTruth.
-9. NanoChat performs a **single optimizer step** at:
-
-       lr_effective = lr_base × |DegreeOfTruth|
+8. Strip `<feeling>` blocks from training messages
+   (`strip_feelings_from_training()` in `bin/sensation.py`) — feelings
+   must never train model parameters (Entanglement policy,
+   doc/Entanglement.md).
+9. Call NanoChat's online training endpoint (`POST /train`) with the
+   tagged prompt, DegreeOfTruth, and training hyperparameters.
 
 ### Device Configuration
 
@@ -232,10 +287,206 @@ Online training runs on the device specified by
 
 * `cpu` (default) — safe for the WikiOracle production server
 * `cuda` — use NVIDIA GPU if available
+* `mps` — Apple Metal Performance Shaders (macOS)
 * `auto` — probe CUDA → MPS → CPU and use the best available
 
 The model is moved to the training device for the gradient step, then
 moved back to the inference device afterward.
+
+### Training Algorithm — DoT-Annealed Selective Training
+
+The `/train` endpoint (`bin/nanochat_ext.py`) implements a carefully
+designed online training algorithm that prevents weight collapse while
+enabling meaningful learning from each interaction.
+
+#### Consistent AdamW Optimizer
+
+All parameter groups use **AdamW** consistently.  The batch training
+regime uses Muon (Newton-Schulz orthogonalization) for transformer
+matrices, but online training uses AdamW for all groups because:
+
+1. **No persistent optimizer state** — the optimizer is created fresh
+   each `/train` call.  Muon's advantage comes from accumulated
+   momentum; without persistent state, its Newton-Schulz
+   orthogonalization provides limited benefit.
+2. **Effectively sign-SGD** — AdamW without momentum history is
+   effectively sign-SGD: simpler, faster, well-understood.
+3. **Independent interactions** — each `/train` call is fully
+   independent.  A bad gradient cannot poison future steps because
+   there is no momentum history to contaminate.  The effective step
+   size is bounded by `lr`.
+
+#### Parameter Groups
+
+The optimizer creates six parameter groups that mirror the production
+training regime in `nanochat/nanochat/gpt.py:GPT.setup_optimizer()`:
+
+| Group | Base LR | Parameters |
+|-------|---------|------------|
+| `lm_head` | 0.0027 | Output projection weights (language model head) |
+| `wte` | 0.136 | Token embedding weights |
+| `value_embeds` | 0.136 | Value residual stream embeddings |
+| `resid_lambdas` | 0.005 | Per-layer residual scaling scalars |
+| `x0_lambdas` | 0.5 | Skip-connection blending scalars |
+| `transformer_h` | 0.02 | All transformer block matrix parameters (attention, MLP, norms) |
+
+Parameters not matching any named group are included in `transformer_h`.
+All groups use the same AdamW optimizer — no Muon.
+
+#### Learning Rate Modulation
+
+The effective learning rate for each parameter group is computed as:
+
+    lr_effective = lr_base × lr_scale
+
+where:
+
+    lr_scale = (truth_weight × |DoT| + (1 - truth_weight)) × sigmoid_warmup(step)
+
+The **truth_weight** parameter (0.0–1.0) controls how much DoT gates
+the learning rate:
+
+| `truth_weight` | `lr_effective` | Behavior |
+|----------------|----------------|----------|
+| 0.0 | `lr_base × warmup` | Vanilla SFT — full LR regardless of DoT.  No truth bias. |
+| 0.5 | `lr_base × (0.5 × |DoT| + 0.5) × warmup` | Half-gated — DoT attenuates but never fully suppresses. |
+| 1.0 | `lr_base × |DoT| × warmup` | Fully DoT-gated — zero DoT means zero learning. |
+
+The `truth_weight` replaces the former boolean `rag` checkbox in the
+Settings dialog.  At `truth_weight=0`, the system trains on everything
+like vanilla SFT (feelings-only, no truth bias).  At `truth_weight=1`,
+DoT governs learning completely.
+
+The RAG flag (`rag`) remains separate conceptually: `truth_weight > 0`
+controls whether truth entries *influence training*, while truth
+entries are *sent to the provider for context* whenever
+`truth_weight > 0`.
+
+#### Sigmoid Warmup
+
+The sigmoid warmup schedule prevents early random updates from
+corrupting the model when online training is first enabled:
+
+    sigmoid_warmup(step) = 1 / (1 + exp(-k × (step - midpoint)))
+
+| Step | Warmup value | Effect |
+|------|-------------|--------|
+| 0 | ~0.007 | Nearly zero — first interactions barely train |
+| midpoint | 0.5 | Half strength |
+| 2 × midpoint | ~0.993 | Nearly full strength — training ramp is complete |
+
+The `warmup_steps` parameter (default 50) is the sigmoid midpoint.
+The steepness parameter `k` is fixed at 0.1.
+
+This schedule ensures that the first few interactions after enabling
+online training have minimal weight impact, allowing the truth table
+to accumulate signal before the model commits to learning from it.
+
+#### Gradient Clipping
+
+After the backward pass, gradients are clipped to prevent catastrophic
+single-step weight changes:
+
+    torch.nn.utils.clip_grad_norm_(all_params, max_norm=grad_clip)
+
+The `grad_clip` parameter (default 1.0) bounds the global gradient
+norm.  The actual gradient norm after clipping is returned in the
+`/train` response as `grad_norm` for monitoring.
+
+If `grad_norm` consistently hits the clip threshold, this indicates
+either: (a) the learning rate is too high for the current data, or
+(b) the training example is an outlier.  Both are handled gracefully
+by clipping — the step still proceeds, just with bounded magnitude.
+
+#### EMA Weight Anchoring (Anti-Capture)
+
+After each optimizer step, model weights are blended back toward the
+**checkpoint anchor** using exponential moving average:
+
+    for p, anchor in zip(model.parameters(), anchor_params):
+        p.data.lerp_(anchor, anchor_effective)
+
+where:
+
+    anchor_effective = anchor_decay × truth_weight
+
+The anchor weights are the original checkpoint weights, initialized on
+the first `/train` call.  The `anchor_decay` parameter (default 0.001)
+controls the blend-back rate.
+
+Key properties:
+
+* **truth_weight=0**: `anchor_effective = 0` — no anchor pull.  Weights
+  drift freely (vanilla SFT mode).
+* **truth_weight=1**: `anchor_effective = anchor_decay` — full anchor
+  pull.  Weights are always tugged back toward the checkpoint.
+* The anchor prevents **gradual drift** while allowing meaningful
+  learning.  Over many steps, the weights can move significantly from
+  the checkpoint, but each individual step is bounded.
+* **Reset via `make nano_restart`** — reloads both the model and the
+  anchor, resetting the training state.
+
+The anchor is stored in `app.state.anchor_params` as a list of cloned
+parameter tensors.  The step count is stored in
+`app.state.train_step_count`.
+
+#### Training Flow (Per `/train` Call)
+
+```
+POST /train
+  ├── Clamp DoT to [-1, +1], truth_weight to [0, 1]
+  ├── If truth_weight > 0 and |DoT| < 1e-6 → skip (no signal)
+  ├── Acquire model worker from pool
+  ├── Tokenize messages (bos + user_start/end + assistant_start/end)
+  ├── If < 2 tokens → skip (empty)
+  ├── Initialize EMA anchor weights (first call only)
+  ├── Move model to training device
+  ├── Build 6 parameter groups (fresh each call)
+  ├── Compute lr_scale = (tw × |DoT| + (1 - tw)) × sigmoid_warmup(step)
+  ├── Scale each group's LR: lr_base × lr_scale
+  ├── Create fresh AdamW optimizer
+  ├── Forward pass → cross-entropy loss
+  ├── Backward pass
+  ├── Gradient clipping → grad_norm
+  ├── Optimizer step
+  ├── EMA anchor blend-back (if truth_weight > 0)
+  ├── Increment step count
+  ├── Move model back to inference device
+  └── Return {status, loss/gain, step, grad_norm}
+```
+
+The response uses key `"loss"` for positive DoT (learning truth) and
+`"gain"` for negative DoT (learning falsehood).  Both are the
+cross-entropy loss value; the key name indicates the semantic direction.
+
+#### Configuration Summary
+
+| Parameter | Config path | Default | Description |
+|-----------|------------|---------|-------------|
+| `truth_weight` | `chat.truth_weight` | 0.7 | DoT gating strength (0=vanilla SFT, 1=full DoT) |
+| `warmup_steps` | `server.online_training.warmup_steps` | 50 | Sigmoid warmup midpoint |
+| `grad_clip` | `server.online_training.grad_clip` | 1.0 | Max gradient norm |
+| `anchor_decay` | `server.online_training.anchor_decay` | 0.001 | EMA blend-back rate |
+| `truth_max_entries` | `chat.truth_max_entries` | 1000 | Max server truth table size |
+| `device` | `server.online_training.device` | `"cpu"` | Training device |
+
+See [Config.md](./Config.md) §5a for the full configuration reference.
+
+### SFT Corpus Preparation
+
+The `prepare_sft_corpus()` function in `bin/sensation.py` provides
+batch conversion of the NanoChat SFT corpus to XML-tagged format with
+feelings stripped.  This is the batch equivalent of
+`preprocess_training_example()` and is used when retraining NanoChat
+from scratch with WikiOracle's protocol:
+
+    make build_sft
+    # or: python bin/sensation.py sft input.jsonl output.jsonl
+
+Each input line is a JSON array of `{"role": ..., "content": ...}`
+message dicts.  Output lines are the same shape but with content
+XML-tagged using `<Q>`/`<R>` and `<fact>`/`<feeling>` tags, with
+feelings stripped (matching the online training pipeline).
 
 ### Server Truth Table
 
@@ -279,14 +530,40 @@ server can track per‑user trust alongside factual claims.
 
 ### Anti‑Capture
 
-The server truth table prevents capture by any single user:
+The online training system has multiple layers of defense against
+weight collapse and capture by any single user:
 
-* Entries are merged with a slow‑moving average, so no single user
-  can instantly override collective truth.
+**Truth table level:**
+
+* Entries are merged with a **slow‑moving average** (`merge_rate`,
+  default 0.1), so no single user can instantly override collective
+  truth.
 * Disproven entries naturally drift toward −1 as contradicting evidence
   accumulates from other users.
-* DegreeOfTruth gates the learning rate, so claims that diverge from
-  consensus have minimal training impact.
+* **Truth table trimming** (`truth_max_entries`, default 1000) removes
+  low-signal entries (|trust| near 0), keeping the table focused on
+  strong signal.
+
+**Training level:**
+
+* **DegreeOfTruth gates the learning rate** — claims that diverge
+  from consensus (DoT near 0) have minimal training impact.
+* **Gradient clipping** (`grad_clip`, default 1.0) prevents any single
+  training step from making catastrophic weight changes.
+* **EMA weight anchoring** (`anchor_decay`, default 0.001) continuously
+  blends weights back toward the checkpoint, preventing gradual drift.
+  The anchor pull is scaled by `truth_weight`, so at full truth-gating
+  the model is always tugged back toward its initialized state.
+* **Sigmoid warmup** (`warmup_steps`, default 50) prevents the first
+  few interactions from corrupting weights before the truth table has
+  accumulated sufficient signal.
+* **Fresh optimizer per call** — no persistent momentum state means a
+  bad gradient cannot poison future steps.  Each interaction is
+  independent.
+* **Consistent AdamW** — without accumulated Muon state, AdamW is
+  effectively sign-SGD with bounded step size.
+
+**Operational level:**
 
 Manual rollback is available via Makefile targets:
 
@@ -323,6 +600,60 @@ truth‑space embeddings with frame clustering, conditional truth values
 indexed by worldview, or explicit user prompts to resolve ambiguity
 when the truth table produces conflicting signals.
 
+### OpenClaw Integration
+
+OpenClaw is WikiOracle's multi-channel front-end, bridging Slack,
+Discord, and Telegram to the `/chat` endpoint via
+`bin/openclaw_ext.py`.  Training interactions from OpenClaw channels
+flow through the same pipeline described above:
+
+1. OpenClaw adapter receives a message from Slack/Discord/Telegram.
+2. `WikiOracleBridge.send()` forwards it to WikiOracle `/chat`.
+3. WikiOracle responds (Stage 1).
+4. Stages 2–4 execute asynchronously: DoT computation, truth merge,
+   and NanoChat training.
+5. The response is relayed back to the originating channel.
+
+Per-channel session state is persisted in `~/.openclaw/sessions/` as
+JSON files, keyed by sanitized channel ID.  This allows conversation
+context to persist across messages within the same channel.
+
+The training pipeline treats OpenClaw messages identically to direct
+HTTP clients — the same DoT computation, truth table merge, Sensation
+preprocessing, and `/train` call apply.  The bridge is transparent to
+the training system.
+
+### Server Truth Table Visibility (Debug Mode)
+
+When `DEBUG_MODE` is enabled and online training is active, the
+`/chat` response includes a `server_truth` key containing the server's
+truth table entries formatted as authority-tagged entries:
+
+```json
+{
+  "server_truth": [
+    {
+      "type": "authority",
+      "id": "entry-id",
+      "title": "...",
+      "trust": 0.8,
+      "content": "<fact>...</fact>",
+      "source": "wikioracle",
+      "_server_origin": true
+    }
+  ]
+}
+```
+
+The client displays these entries in the truth table with a visual
+marker (server badge, different border style).  Entries with
+`_server_origin: true` are **stripped from the truth table before
+sending queries** to prevent loopback — the client never sends server
+truth back to the server.
+
+The `server_id` field in `config.xml` under `<server>` provides a
+stable identifier for this server instance (default: `"wikioracle"`).
+
 ---
 
 ## See also
@@ -333,6 +664,7 @@ when the truth table produces conflicting signals.
 * [Constitution.md](./Constitution.md) — anti-capture as a constitutional commitment.
 * [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — DegreeOfTruth operates over the HME truth table.
 * [Config.md](./Config.md) — online training configuration settings and behavior when disabled.
+* [UserInterface.md](./UserInterface.md) — the Settings dialog (truth_weight slider, store_particulars, truth_max_entries).
 * [Ethics.md](./Ethics.md) — entanglement-resistant training as an ethical design choice.
 * [BuddhistLogic.md](./BuddhistLogic.md) — the Sensation pipeline follows Buddhist epistemology.
 * [FutureWork.md](./FutureWork.md) — dissonance detection and pluralistic truth.

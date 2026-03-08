@@ -350,6 +350,35 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 resp = {"ok": True, "text": response_text, "state": response_state}
             if symmetry_rejected:
                 resp["symmetry_rejected"] = symmetry_rejected
+
+            # ── Debug mode: include server truth table as authority entries ──
+            # When debug mode is enabled and online training is active, return
+            # the server's truth entries so the client can display them.
+            # Entries are tagged with _server_origin so the client strips them
+            # before sending queries back (prevents loopback).
+            if config_mod.DEBUG_MODE:
+                ot = _CONFIG.get("server", {}).get("online_training", {})
+                if ot.get("enabled", False) and not config_mod.STATELESS_MODE:
+                    try:
+                        from truth import load_server_truth
+                        _st_path = Path(ot.get("truth_corpus_path", "data/truth.xml"))
+                        _st_entries = load_server_truth(_st_path)
+                        _server_id = _CONFIG.get("server", {}).get("server_id", "wikioracle")
+                        server_truth = []
+                        for entry in _st_entries:
+                            server_truth.append({
+                                "type": "authority",
+                                "id": entry.get("id", ""),
+                                "title": entry.get("title", ""),
+                                "trust": entry.get("trust", 0.5),
+                                "content": entry.get("content", ""),
+                                "source": _server_id,
+                                "_server_origin": True,
+                            })
+                        resp["server_truth"] = server_truth
+                    except Exception as _st_exc:
+                        log.warning("Debug server truth: %s", _st_exc)
+
             return jsonify(resp)
         except Exception as exc:
             log.exception("POST /chat failed")

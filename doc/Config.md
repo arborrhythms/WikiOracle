@@ -56,27 +56,41 @@ The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) — nev
 
 ## 3. Chat
 
-Chat behaviour settings controlling how the LLM produces responses.
+Chat behaviour settings controlling how the LLM produces responses and how the online training pipeline is tuned.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `temperature` | decimal 0.0–2.0 | `0.7` | Sampling temperature. 0.0 is deterministic; 2.0 is maximum randomness. |
-| `rag` | boolean | `false` | Enable retrieval-augmented generation. When true, **all** truth entries are sent to the provider as grounding evidence. When false, no truth of any kind is sent. See [Architecture.md](./Architecture.md) §Chat pipeline. |
+| `max_tokens` | positive int | `128` | Maximum tokens in the LLM response. |
+| `timeout` | positive int | `120` | Request timeout in seconds. |
+| `truth_weight` | decimal 0.0–1.0 | `0.7` | Controls how much DegreeOfTruth (DoT) gates the online training learning rate, and whether truth entries are sent to the provider as RAG context. See [§Truth weight and RAG](#truth-weight-and-rag) below. |
+| `truth_max_entries` | positive int | `1000` | Maximum number of entries in the server truth table before trimming. Entries with `\|trust\|` closest to 0.0 are removed first. Range: 100–10000. |
+| `store_particulars` | boolean | `false` | Store particular (spatiotemporally-bound) facts in the server truth table. When false, only universal facts persist. Client-side override for the server's `store_particulars`. See [Ethics.md](./Ethics.md) §Entanglement Policy. |
 | `url_fetch` | boolean | `false` | Allow the assistant to fetch and incorporate content from URLs referenced in the conversation. |
-| `confirm_actions` | boolean | `true` | Prompt the user for confirmation before destructive operations (deletes, merges). |
+| `confirm_actions` | boolean | `false` | Prompt the user for confirmation before destructive operations (deletes, merges). |
 
 ```xml
 <chat>
   <temperature>0.7</temperature>
-  <rag>false</rag>
+  <max_tokens>128</max_tokens>
+  <timeout>120</timeout>
+  <truth_weight>0.7</truth_weight>
+  <truth_max_entries>1000</truth_max_entries>
+  <store_particulars>false</store_particulars>
   <url_fetch>false</url_fetch>
-  <confirm_actions>true</confirm_actions>
+  <confirm_actions>false</confirm_actions>
 </chat>
 ```
 
-### RAG and truth delivery
+### Truth weight and RAG
 
-The `rag` flag is a binary gate. When `rag` is true, the full truth table — facts, feelings, references, operators, authorities, and providers — is assembled into the provider bundle and sent to the UI-selected provider. When `rag` is false, none of it is sent. There is no partial mode; the HME pipeline is all-or-nothing. See [Architecture.md](./Architecture.md) §Chat pipeline (HME provider resolution) for the full data flow.
+The `truth_weight` field (0.0–1.0) replaces the former boolean `rag` flag.  It serves a dual purpose:
+
+1. **RAG delivery gate**: When `truth_weight > 0`, the full truth table — facts, feelings, references, operators, authorities, and providers — is assembled into the provider bundle and sent to the UI-selected provider.  When `truth_weight = 0`, no truth is sent (equivalent to the former `rag: false`).
+
+2. **Training LR modulation**: During online training, `truth_weight` controls how much DoT gates the learning rate.  See [Training.md](./Training.md) §Training Algorithm for the formula.
+
+**Legacy migration**: The former `rag` boolean is automatically migrated: `rag: true` → `truth_weight: 0.7`, `rag: false` → `truth_weight: 0.0`.  This migration runs in both the client (`client/config.js`) and server (`bin/response.py`).
 
 ## 4. UI
 
@@ -110,6 +124,7 @@ Runtime parameters. These values serve as defaults and are typically overridden 
 |---|---|---|---|
 | `stateless` | boolean | `false` | Stateless mode — no disk writes. Equivalent to `--stateless` CLI flag. See [Entanglement.md](./Entanglement.md). |
 | `url_prefix` | string | `""` | URL path prefix prepended to all routes (e.g. `/chat`) for reverse-proxy deployments. Equivalent to `--url-prefix`. |
+| `server_id` | string | `"wikioracle"` | Stable identifier for this server instance. Used as the `source` field in server truth entries returned to the client in debug mode. Defaults to `"wikioracle"`. |
 | `online_training` | section | — | Online learning subsystem. See [§5a](#5a-online-training) below. |
 | `allowed_urls` | section | — | URL whitelist for authority/provider fetches. See [§5b](#5b-allowed-urls) below. |
 
@@ -130,6 +145,10 @@ Controls the continuous learning pipeline (Stages 2–4). See [Training.md](./Tr
 | `operators_dynamic_enabled` | boolean | `true` | Load custom operators. Custom operators extend the training pipeline with user-defined transformations. |
 | `store_particulars` | boolean | `false` | When true, particular facts (narrow spatiotemporal extent) are stored in the truth table alongside universal facts (broad extent). When false, only universals persist — consistent with Zero-Knowledge / Selective Disclosure principles. Particular facts always train weights regardless of this setting; the fact/feeling distinction is the privacy boundary. See [Ethics.md](./Ethics.md) §Entanglement Policy. |
 | `truth_symmetry` | boolean | `true` | Enforce Truth Symmetry. Claims involving value judgements are checked for asymmetric harm under identity exchange before admission to the truth table. See [Ethics.md](./Ethics.md) §5–8. |
+| `warmup_steps` | positive int | `50` | Sigmoid warmup midpoint for the annealing schedule. The first ~2×`warmup_steps` interactions ramp from near-zero to full training strength, preventing early corruption. See [Training.md](./Training.md) §Sigmoid Warmup. |
+| `grad_clip` | decimal > 0 | `1.0` | Maximum gradient norm for `clip_grad_norm_()`. Prevents catastrophic single-step weight changes. Lower values are more conservative. See [Training.md](./Training.md) §Gradient Clipping. |
+| `anchor_decay` | decimal 0.0–1.0 | `0.001` | EMA blend-back rate toward checkpoint weights after each training step. Higher values pull the model back more aggressively toward its initial state. Modulated by `truth_weight`: `anchor_effective = anchor_decay × truth_weight`. See [Training.md](./Training.md) §EMA Weight Anchoring. |
+| `truth_max_entries` | positive int | `1000` | Maximum server truth table entries before trimming. Entries with `\|trust\|` closest to 0.0 are removed first during the merge stage. Also configurable per-user via `chat.truth_max_entries`. |
 
 ```xml
 <online_training>
@@ -144,6 +163,10 @@ Controls the continuous learning pipeline (Stages 2–4). See [Training.md](./Tr
   <operators_dynamic_enabled>true</operators_dynamic_enabled>
   <store_particulars>false</store_particulars>
   <truth_symmetry>true</truth_symmetry>
+  <warmup_steps>50</warmup_steps>
+  <grad_clip>1.0</grad_clip>
+  <anchor_decay>0.001</anchor_decay>
+  <truth_max_entries>1000</truth_max_entries>
 </online_training>
 ```
 

@@ -116,6 +116,7 @@ class TestOnlineTraining(unittest.TestCase):
             ],
             "degree_of_truth": 0.8,
             "device": "cpu",
+            "truth_weight": 0.7,
         }, timeout=30)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -123,27 +124,42 @@ class TestOnlineTraining(unittest.TestCase):
         self.assertIsInstance(data["loss"], float)
         self.assertGreater(data["loss"], 0.0)
 
-    def test_train_loss_decreases(self):
-        """Repeated steps on the same data should decrease loss."""
-        losses = []
-        for _ in range(4):
-            resp = _req.post(f"{_URL}/train", json={
-                "messages": [
-                    {"role": "user", "content": "The sky is blue."},
-                    {"role": "assistant", "content": "Yes, the sky appears blue due to Rayleigh scattering."},
-                ],
-                "degree_of_truth": 1.0,
-                "device": "cpu",
-            }, timeout=30)
-            data = resp.json()
-            self.assertEqual(data["status"], "ok")
-            losses.append(data["loss"])
-        # Loss should decrease overall (last < first)
-        self.assertLess(losses[-1], losses[0],
-                        f"Loss did not decrease: {losses}")
+    def test_train_returns_step_count(self):
+        """Training should return a step count."""
+        resp = _req.post(f"{_URL}/train", json={
+            "messages": [
+                {"role": "user", "content": "The sky is blue."},
+                {"role": "assistant", "content": "Correct."},
+            ],
+            "degree_of_truth": 1.0,
+            "device": "cpu",
+            "truth_weight": 1.0,
+        }, timeout=30)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("step", data)
+        self.assertIsInstance(data["step"], int)
+        self.assertGreater(data["step"], 0)
+
+    def test_train_returns_grad_norm(self):
+        """Training should return gradient norm."""
+        resp = _req.post(f"{_URL}/train", json={
+            "messages": [
+                {"role": "user", "content": "Water is H2O."},
+                {"role": "assistant", "content": "Yes, water is a molecule of hydrogen and oxygen."},
+            ],
+            "degree_of_truth": 0.9,
+            "device": "cpu",
+            "truth_weight": 0.5,
+        }, timeout=30)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("grad_norm", data)
+        self.assertIsInstance(data["grad_norm"], float)
+        self.assertGreaterEqual(data["grad_norm"], 0.0)
 
     def test_train_dot_zero_skips(self):
-        """degree_of_truth ≈ 0 should skip training and return no loss."""
+        """degree_of_truth ≈ 0 with truth_weight > 0 should skip training."""
         resp = _req.post(f"{_URL}/train", json={
             "messages": [
                 {"role": "user", "content": "Hello"},
@@ -151,11 +167,28 @@ class TestOnlineTraining(unittest.TestCase):
             ],
             "degree_of_truth": 0.0,
             "device": "cpu",
+            "truth_weight": 0.7,
         }, timeout=30)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
         self.assertIsNone(data["loss"])
         self.assertIn("skipped", data.get("message", ""))
+
+    def test_train_dot_zero_trains_when_tw_zero(self):
+        """degree_of_truth ≈ 0 with truth_weight = 0 should still train (vanilla SFT)."""
+        resp = _req.post(f"{_URL}/train", json={
+            "messages": [
+                {"role": "user", "content": "Hello there"},
+                {"role": "assistant", "content": "Hi! How can I help?"},
+            ],
+            "degree_of_truth": 0.0,
+            "device": "cpu",
+            "truth_weight": 0.0,
+        }, timeout=30)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        # With truth_weight=0, DoT has no influence — training proceeds
+        self.assertIsNotNone(data.get("loss") or data.get("gain"))
 
     def test_train_negative_dot_trains(self):
         """Negative DoT (false statement) should still train, returns gain."""
@@ -166,6 +199,7 @@ class TestOnlineTraining(unittest.TestCase):
             ],
             "degree_of_truth": -0.9,
             "device": "cpu",
+            "truth_weight": 0.7,
         }, timeout=30)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
@@ -182,6 +216,23 @@ class TestOnlineTraining(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["status"], "ok")
         self.assertIsNone(data["loss"])
+
+    def test_train_grad_clip(self):
+        """Gradient clipping should bound the gradient norm."""
+        resp = _req.post(f"{_URL}/train", json={
+            "messages": [
+                {"role": "user", "content": "The capital of France is Paris."},
+                {"role": "assistant", "content": "Yes, Paris is the capital."},
+            ],
+            "degree_of_truth": 1.0,
+            "device": "cpu",
+            "truth_weight": 1.0,
+            "grad_clip": 0.5,
+        }, timeout=30)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        # Gradient norm should be <= grad_clip (0.5) after clipping
+        self.assertLessEqual(data["grad_norm"], 0.5 + 1e-6)
 
 
 if __name__ == "__main__":

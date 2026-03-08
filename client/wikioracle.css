@@ -142,6 +142,9 @@ body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disa
 .root-summary-context { white-space: pre-line; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 
 .root-summary-default, .context-default { opacity: 0.5; font-style: italic; }
+/* Server-origin truth entries (debug mode) — visually distinct from client truth */
+.truth-server-origin { opacity: 0.65; border-left: 3px solid var(--accent, #3b82f6); padding-left: 0.5rem; }
+.truth-server-badge { font-size: 0.65rem; color: var(--accent, #3b82f6); text-transform: uppercase; letter-spacing: 0.06em; margin-left: 0.3rem; }
 .root-summary-hint { font-size: 0.82rem; color: var(--fg-muted); margin-top: 1.4rem; }
 .root-init-section { text-align: center; background: none; border: none; margin-top: 0.6rem; padding: 0; }
 .root-init-btn { font-size: 0.78rem; color: var(--fg-muted); background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 1rem; cursor: pointer; }

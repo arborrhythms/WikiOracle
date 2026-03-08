@@ -539,7 +539,11 @@ function openSettings() {
   const toSlider = document.getElementById("setTimeout");
   toSlider.value = chat.timeout ?? 120;
   document.getElementById("setTimeoutVal").textContent = toSlider.value;
-  document.getElementById("setRag").checked = chat.rag !== false;
+  const twSlider = document.getElementById("setTruthWeight");
+  twSlider.value = chat.truth_weight ?? 0.7;
+  document.getElementById("setTruthWeightVal").textContent = twSlider.value;
+  document.getElementById("setTruthMaxEntries").value = chat.truth_max_entries ?? 1000;
+  document.getElementById("setStoreParticulars").checked = !!chat.store_particulars;
   document.getElementById("setUrlFetch").checked = !!chat.url_fetch;
   document.getElementById("setConfirm").checked = !!chat.confirm_actions;
 
@@ -563,7 +567,9 @@ async function saveSettings() {
     temperature: parseFloat(document.getElementById("setTemp").value),
     max_tokens: parseInt(document.getElementById("setMaxTokens").value, 10),
     timeout: parseInt(document.getElementById("setTimeout").value, 10),
-    rag: document.getElementById("setRag").checked,
+    truth_weight: parseFloat(document.getElementById("setTruthWeight").value),
+    truth_max_entries: parseInt(document.getElementById("setTruthMaxEntries").value, 10),
+    store_particulars: document.getElementById("setStoreParticulars").checked,
     url_fetch: document.getElementById("setUrlFetch").checked,
     confirm_actions: document.getElementById("setConfirm").checked,
   };

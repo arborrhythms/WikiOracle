@@ -454,6 +454,10 @@ CONFIG_SCHEMA = [
     ("server.online_training.operators_dynamic_enabled", "Load custom operators"),
     ("server.online_training.store_particulars", "Store particular facts in truth table (see doc/Ethics.md §Entanglement Policy)"),
     ("server.online_training.truth_symmetry", "Enforce Truth Symmetry (see doc/Ethics.md)"),
+    ("server.online_training.warmup_steps", "Sigmoid warmup midpoint for training annealing"),
+    ("server.online_training.grad_clip", "Max gradient norm for clipping"),
+    ("server.online_training.anchor_decay", "EMA blend-back rate toward checkpoint weights"),
+    ("server.online_training.truth_max_entries", "Max server truth table entries before trimming"),
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
     ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
@@ -731,6 +735,10 @@ def _normalize_config(cfg_data: dict) -> dict:
     ot.setdefault("operators_dynamic_enabled", True)
     ot.setdefault("store_particulars", False)
     ot.setdefault("truth_symmetry", True)
+    ot.setdefault("warmup_steps", 50)
+    ot.setdefault("grad_clip", 1.0)
+    ot.setdefault("anchor_decay", 0.001)
+    ot.setdefault("truth_max_entries", 1000)
     server.setdefault("stateless", False)
     server.setdefault("url_prefix", "")
     server.setdefault("allowed_urls", _default_allowed_urls())

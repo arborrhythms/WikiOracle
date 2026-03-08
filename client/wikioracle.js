@@ -1075,9 +1075,11 @@ async function sendMessage() {
     };
     // Include pruned state (ancestor path only) + runtime_config
     const targetConvId = conversationId || branchFrom || state.selected_conversation;
+    // Strip server-origin truth entries before sending to avoid loopback
+    var _clientTruth = (state.truth || []).filter(function(e) { return !e._server_origin; });
     const prunedState = {
       version: state.version, schema: state.schema, time: state.time,
-      title: state.title, context: state.context, truth: state.truth,
+      title: state.title, context: state.context, truth: _clientTruth,
       selected_conversation: state.selected_conversation,
       conversations: _buildAncestorPath(state.conversations, targetConvId),
       _path_only: true,
@@ -1109,6 +1111,20 @@ async function sendMessage() {
     // Show symmetry rejection dialog if the server flagged entries
     if (data.symmetry_rejected && data.symmetry_rejected.length > 0) {
       showSymmetryDialog(data.symmetry_rejected);
+    }
+    // ── Debug: inject server truth entries into local truth table ──
+    // Server returns these as authority entries when debug mode is on.
+    // Tagged with _server_origin so they are stripped before sending
+    // queries back to the server (prevents loopback).
+    if (data.server_truth && Array.isArray(data.server_truth)) {
+      if (!Array.isArray(state.truth)) state.truth = [];
+      // Remove any previous server-origin entries
+      state.truth = state.truth.filter(function(e) { return !e._server_origin; });
+      // Add the new batch
+      for (var si = 0; si < data.server_truth.length; si++) {
+        state.truth.push(data.server_truth[si]);
+      }
+      _persistState();
     }
   } catch (e) {
     // Rollback: reload conversations from sessionStorage (stateless) or
@@ -1422,6 +1438,9 @@ function bindEvents() {
   });
   document.getElementById("setTimeout").addEventListener("input", function() {
     document.getElementById("setTimeoutVal").textContent = this.value;
+  });
+  document.getElementById("setTruthWeight").addEventListener("input", function() {
+    document.getElementById("setTruthWeightVal").textContent = this.value;
   });
   document.getElementById("setProvider").addEventListener("change", function() {
     _populateModelDropdown(this.value);

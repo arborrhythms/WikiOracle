@@ -17,7 +17,9 @@
 let config = {
   user: { name: "User" },
   chat: { temperature: 0.7, max_tokens: 128, timeout: 120,
-          rag: true, url_fetch: false, confirm_actions: false },
+          truth_weight: 0.7, truth_max_entries: 1000,
+          store_particulars: false,
+          url_fetch: false, confirm_actions: false },
   ui: { default_provider: "wikioracle", layout: "flat", theme: "system",
         splitter_pct: 0, swipe_nav_horizontal: true,
         swipe_nav_vertical: false },
@@ -73,9 +75,18 @@ function _normalizeConfig(cfg) {
   if (cfg.chat.temperature === undefined) cfg.chat.temperature = 0.7;
   if (cfg.chat.max_tokens === undefined) cfg.chat.max_tokens = 128;
   if (cfg.chat.timeout === undefined) cfg.chat.timeout = 120;
-  if (cfg.chat.rag === undefined) cfg.chat.rag = true;
+  if (cfg.chat.truth_weight === undefined) cfg.chat.truth_weight = 0.7;
+  if (cfg.chat.truth_max_entries === undefined) cfg.chat.truth_max_entries = 1000;
+  if (cfg.chat.store_particulars === undefined) cfg.chat.store_particulars = false;
   if (cfg.chat.url_fetch === undefined) cfg.chat.url_fetch = false;
   if (cfg.chat.confirm_actions === undefined) cfg.chat.confirm_actions = false;
+  // Migrate legacy rag boolean → truth_weight
+  if (cfg.chat.rag !== undefined) {
+    if (cfg.chat.truth_weight === undefined || cfg.chat.truth_weight === 0.7) {
+      cfg.chat.truth_weight = cfg.chat.rag ? 0.7 : 0.0;
+    }
+    delete cfg.chat.rag;
+  }
   if (!cfg.server) cfg.server = {};
   if (cfg.server.stateless === undefined) cfg.server.stateless = false;
   if (cfg.server.url_prefix === undefined) cfg.server.url_prefix = "";

@@ -393,10 +393,12 @@ def build_query(
     #    t  = st + dynamic_truth(st)        — augmented with operators,
     #                                         authorities, and providers
     #
-    # When rag is true ALL state.truth is sent, plus dynamic results.
-    # When rag is false NO truth of any kind is sent.
+    # When truth_weight > 0 (or legacy rag=true), ALL state.truth is sent.
+    # When truth_weight == 0 (or rag=false), NO truth of any kind is sent.
     #
-    if query_config.get("chat", {}).get("rag", True):
+    chat_cfg = query_config.get("chat", {})
+    _rag_on = chat_cfg.get("truth_weight", chat_cfg.get("rag", 0.7))
+    if (isinstance(_rag_on, bool) and _rag_on) or (isinstance(_rag_on, (int, float)) and _rag_on > 0):
         trust_entries = state.get("truth") or []
 
         # Resolve references→facts, authorities→facts, providers→feelings
@@ -1417,16 +1419,23 @@ def process_chat(
     provider = query_config.get("provider", "wikioracle")
     client_model = (query_config.get("model") or "").strip()
     print(f"[WikiOracle] Chat request: provider='{provider}' (from client config), "
-          f"rag={query_config.get('chat', {}).get('rag', '?')}")
+          f"truth_weight={query_config.get('chat', {}).get('truth_weight', '?')}")
 
     temperature = max(0.0, min(2.0, float(
         query_config.get("temp", cfg_chat.get("temperature", 0.7))
     )))
-    # Chat settings live at query_config.chat.{rag, url_fetch, ...}.
+    # Chat settings live at query_config.chat.{truth_weight, url_fetch, ...}.
     # The client sends these directly; fill in defaults from config.xml.
     if "chat" not in query_config or not isinstance(query_config.get("chat"), dict):
         query_config["chat"] = {}
-    query_config["chat"].setdefault("rag", cfg_chat.get("rag", True))
+    # Migrate legacy rag boolean → truth_weight
+    if "rag" in query_config["chat"] and "truth_weight" not in query_config["chat"]:
+        query_config["chat"]["truth_weight"] = 0.7 if query_config["chat"]["rag"] else 0.0
+    query_config["chat"].setdefault("truth_weight", float(cfg_chat.get("truth_weight",
+                                    cfg_chat.get("rag", 0.7) if isinstance(cfg_chat.get("rag"), bool)
+                                    else cfg_chat.get("rag", 0.7))))
+    query_config["chat"].setdefault("truth_max_entries", int(cfg_chat.get("truth_max_entries", 1000)))
+    query_config["chat"].setdefault("store_particulars", cfg_chat.get("store_particulars", False))
     query_config["chat"].setdefault("url_fetch", cfg_chat.get("url_fetch", False))
     query_config["chat"].setdefault("max_tokens", cfg_chat.get("max_tokens", 128))
     query_config["chat"].setdefault("timeout", cfg_chat.get("timeout", 120))
@@ -1464,7 +1473,7 @@ def process_chat(
           f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
           f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
     truth_count = len(state.get("truth") or [])
-    rag_flag = query_config.get("chat", {}).get("rag", "MISSING")
+    truth_weight_flag = query_config.get("chat", {}).get("truth_weight", "MISSING")
 
     client_api_key = ""
     if config_mod.STATELESS_MODE:
@@ -1752,8 +1761,16 @@ def process_chat(
             # - When store_particulars is false (default), only universal
             #   facts persist to the truth table.
             # - Identifiable content is always filtered regardless.
-            if not ot_cfg.get("store_particulars", False):
+            # Client-side override: query_config.chat.store_particulars
+            _store_part = query_config.get("chat", {}).get(
+                "store_particulars", ot_cfg.get("store_particulars", False))
+            if not _store_part:
                 client_truth = filter_knowledge_only(client_truth)
+            # Strip server-origin entries before merge (avoid loopback)
+            client_truth = [
+                e for e in client_truth
+                if not e.get("_server_origin")
+            ]
             client_truth = [
                 e for e in client_truth
                 if not detect_identifiability(e.get("content", ""))
@@ -1779,6 +1796,22 @@ def process_chat(
                 server_truth, client_truth,
                 merge_rate=merge_rate, author=author_guid,
             )
+
+            # ── Truth table size cap (truth_max_entries) ──
+            # Trim entries with |trust| closest to 0 when table exceeds max.
+            _truth_max = int(query_config.get("chat", {}).get(
+                "truth_max_entries", ot_cfg.get("truth_max_entries", 1000)))
+            if len(server_truth) > _truth_max:
+                before_count = len(server_truth)
+                # Sort by |trust| descending — keep strongest signals
+                server_truth.sort(key=lambda e: abs(float(e.get("trust", 0))),
+                                  reverse=True)
+                server_truth = server_truth[:_truth_max]
+                trimmed = before_count - len(server_truth)
+                print(f"[WikiOracle] Truth table trimmed: {trimmed} entries removed "
+                      f"(was {before_count}, now {len(server_truth)}, "
+                      f"max={_truth_max})")
+
             save_server_truth(server_truth_path, server_truth)
             print(f"[WikiOracle] Online training: DoT={dot:.3f} "
                   f"(server={len(server_truth)} entries, client={len(client_truth)} entries)")
@@ -1793,6 +1826,11 @@ def process_chat(
                 # Append the response as the final assistant turn
                 train_messages.append({"role": "assistant", "content": response_text})
                 train_device = ot_cfg.get("device", "cpu")
+                # truth_weight from client config (0.0–1.0)
+                _truth_weight = float(query_config.get("chat", {}).get("truth_weight", 0.7))
+                _warmup_steps = int(ot_cfg.get("warmup_steps", 50))
+                _grad_clip = float(ot_cfg.get("grad_clip", 1.0))
+                _anchor_decay = float(ot_cfg.get("anchor_decay", 0.001))
                 # Snapshot everything the thread needs — no shared mutable state.
                 _train_payload = {
                     "messages": [{"role": m["role"], "content": m.get("content", "")}
@@ -1800,6 +1838,10 @@ def process_chat(
                     "dot": dot,
                     "device": train_device,
                     "url": nanochat_url,
+                    "truth_weight": _truth_weight,
+                    "warmup_steps": _warmup_steps,
+                    "grad_clip": _grad_clip,
+                    "anchor_decay": _anchor_decay,
                 }
 
                 def _do_train(payload: dict) -> None:
@@ -1814,6 +1856,10 @@ def process_chat(
                                 "messages": tagged,
                                 "degree_of_truth": payload["dot"],
                                 "device": payload["device"],
+                                "truth_weight": payload["truth_weight"],
+                                "warmup_steps": payload["warmup_steps"],
+                                "grad_clip": payload["grad_clip"],
+                                "anchor_decay": payload["anchor_decay"],
                             },
                             timeout=300,
                         )

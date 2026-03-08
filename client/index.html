@@ -69,8 +69,19 @@
       <span class="range-val" id="setTimeoutVal">120</span>
     </div>
 
+    <label for="setTruthWeight">Truth weight</label>
+    <div class="settings-row">
+      <input type="range" id="setTruthWeight" min="0" max="1" step="0.05" value="0.7">
+      <span class="range-val" id="setTruthWeightVal">0.7</span>
+    </div>
+
+    <label for="setTruthMaxEntries">Max truth entries</label>
+    <div class="settings-row">
+      <input type="number" id="setTruthMaxEntries" min="100" max="10000" step="100" value="1000">
+    </div>
+
     <label class="settings-check">
-      <input type="checkbox" id="setRag" checked> Use Truth Table
+      <input type="checkbox" id="setStoreParticulars"> Store particular facts
     </label>
 
     <label class="settings-check">

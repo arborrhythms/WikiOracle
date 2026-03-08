@@ -684,6 +684,13 @@ build_preprocess:
 	@echo "Preprocessing $(CORPUS_INPUT) → $(CORPUS_OUTPUT) ..."
 	$(SHIM_ACTIVATE) && python3 bin/sensation.py corpus "$(CORPUS_INPUT)" "$(CORPUS_OUTPUT)"
 
+SFT_INPUT   ?= $(NANOCHAT_BASE)/identity_conversations.jsonl
+SFT_OUTPUT  ?= data/sft_tagged.jsonl
+
+build_sft:
+	@echo "Preparing SFT corpus $(SFT_INPUT) → $(SFT_OUTPUT) ..."
+	$(SHIM_ACTIVATE) && python3 bin/sensation.py sft "$(SFT_INPUT)" "$(SFT_OUTPUT)"
+
 # --- PDF generation -----------------------------------------------------------
 # Generate a single PDF from all doc/*.md files with README as index.
 

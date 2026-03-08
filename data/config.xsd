@@ -468,6 +468,61 @@
           </xs:documentation>
         </xs:annotation>
       </xs:element>
+      <xs:element name="warmup_steps" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Sigmoid warmup midpoint for training annealing.  Training
+            ramps from 0 to full strength over approximately 2×N steps.
+            Default: 50.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:positiveInteger"/>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="grad_clip" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Maximum gradient norm for clipping.  Prevents catastrophic
+            single-step weight changes during online training.
+            Default: 1.0.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:minExclusive value="0"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="anchor_decay" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            EMA blend-back rate toward checkpoint weights (anti-capture).
+            After each online training step, model weights are blended
+            back toward the original checkpoint by this factor × truth_weight.
+            Default: 0.001.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="1"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="truth_max_entries" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Maximum number of entries in the server truth table.
+            When exceeded during the merge step, entries with |trust|
+            closest to 0 are trimmed (weakest signal removed first).
+            Default: 1000.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:positiveInteger"/>
+        </xs:simpleType>
+      </xs:element>
     </xs:all>
   </xs:complexType>
 

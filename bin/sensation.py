@@ -610,6 +610,74 @@ def preprocess_corpus(
 
 
 # =====================================================================
+#  SFT corpus preparation (for NanoChat retraining)
+# =====================================================================
+
+def prepare_sft_corpus(
+    input_path: Path,
+    output_path: Path,
+) -> dict:
+    """Convert a NanoChat SFT corpus (identity_conversations.jsonl) to
+    XML-tagged JSONL suitable for retraining with WikiOracle's protocol.
+
+    Each input line is a JSON array of ``{"role": ..., "content": ...}``
+    message dicts.  Output lines are the same shape but with content
+    XML-tagged using ``<Q>``/``<R>`` and ``<fact>``/``<feeling>`` tags.
+    Feelings are stripped from the output since the training corpus
+    should contain only fact-bearing content (matching the online
+    training pipeline's ``strip_feelings_from_training()``).
+
+    This is the batch equivalent of ``preprocess_training_example()``
+    but designed for the full SFT corpus rather than a single interaction.
+
+    Parameters
+    ----------
+    input_path : Path
+        Source JSONL — each line is a JSON array of role/content dicts.
+    output_path : Path
+        Destination JSONL — same shape, XML-tagged and feelings-stripped.
+
+    Returns
+    -------
+    dict
+        ``{"processed": int, "skipped_empty": int, "errors": int}``
+    """
+    inp = Path(input_path)
+    out = Path(output_path)
+
+    stats = {"processed": 0, "skipped_empty": 0, "errors": 0}
+
+    with inp.open("r", encoding="utf-8") as fin, \
+         out.open("w", encoding="utf-8") as fout:
+
+        for line_no, line in enumerate(fin, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                messages = json.loads(line)
+                if not isinstance(messages, list):
+                    stats["errors"] += 1
+                    continue
+
+                # Tag and strip feelings (same as online training pipeline)
+                tagged = preprocess_training_example(messages, degree_of_truth=1.0)
+
+                if not tagged:
+                    stats["skipped_empty"] += 1
+                    continue
+
+                fout.write(json.dumps(tagged, ensure_ascii=False) + "\n")
+                stats["processed"] += 1
+
+            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                print(f"  ⚠ line {line_no}: {exc}", file=sys.stderr)
+                stats["errors"] += 1
+
+    return stats
+
+
+# =====================================================================
 #  CLI
 # =====================================================================
 
@@ -619,11 +687,13 @@ def main() -> None:
     Usage::
 
         python bin/sensation.py corpus INPUT.jsonl OUTPUT.jsonl
+        python bin/sensation.py sft INPUT.jsonl OUTPUT.jsonl
         python bin/sensation.py tag "Some plain text sentence."
     """
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  sensation.py corpus INPUT.jsonl OUTPUT.jsonl")
+        print("  sensation.py corpus INPUT.jsonl OUTPUT.jsonl   — full corpus with truth records")
+        print("  sensation.py sft INPUT.jsonl OUTPUT.jsonl      — SFT-ready tagged corpus")
         print("  sensation.py tag \"Some text to classify\"")
         sys.exit(1)
 
@@ -644,6 +714,21 @@ def main() -> None:
         print(f"  Facts found:    {stats['facts_found']}")
         print(f"  Feeling tags:   {stats['feelings_found']}")
         print(f"  Errors:         {stats['errors']}")
+
+    elif cmd == "sft":
+        if len(sys.argv) < 4:
+            print("Usage: sensation.py sft INPUT.jsonl OUTPUT.jsonl")
+            sys.exit(1)
+        inp = Path(sys.argv[2])
+        out = Path(sys.argv[3])
+        if not inp.exists():
+            print(f"Input file not found: {inp}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Preparing SFT corpus {inp} → {out} ...")
+        stats = prepare_sft_corpus(inp, out)
+        print(f"Done. {stats['processed']} conversations processed.")
+        print(f"  Skipped (empty): {stats['skipped_empty']}")
+        print(f"  Errors:          {stats['errors']}")
 
     elif cmd == "tag":
         text = " ".join(sys.argv[2:])

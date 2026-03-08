@@ -230,6 +230,50 @@ Runtime configuration can also be set via environment variables. These override 
 | `GEMINI_API_KEY` | — | Google Gemini API key. |
 | `XAI_API_KEY` | — | xAI (Grok) API key. |
 
+## OpenClaw Plugin Config
+
+When using WikiOracle as an OpenClaw provider, the TypeScript extension
+at `openclaw/extensions/wikioracle/` is configured via OpenClaw's
+plugin config system.  Add the following to your OpenClaw config file
+(`~/.openclaw/config.json5` or project-level):
+
+```json5
+{
+  plugins: {
+    entries: ["wikioracle"],
+    wikioracle: {
+      woPath: "/absolute/path/to/WikiOracle/bin/wo",
+      serverUrl: "https://127.0.0.1:8888",
+      insecure: true,
+      stateful: true,
+      stateFile: "state.xml",
+      token: "optional-bearer-token",
+    },
+  },
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `woPath` | string | `"../bin/wo"` | Absolute or relative path to WikiOracle's `bin/wo` CLI. Relative paths resolve from the OpenClaw working directory. |
+| `serverUrl` | string | `"https://127.0.0.1:8888"` | WikiOracle server URL. |
+| `insecure` | boolean | `true` | Skip TLS certificate verification (`bin/wo -k`). Set to `false` for production deployments with valid certificates. |
+| `stateful` | boolean | `true` | Use stateful mode (server owns session state). When `false`, state is serialized to the local file specified by `stateFile`. |
+| `stateFile` | string | `"state.xml"` | Local state file path for stateless mode (`bin/wo -f`). Ignored in stateful mode. |
+| `token` | string | (none) | Optional bearer token for WikiOracle API authentication (`bin/wo -t`). |
+
+The full JSON Schema for the plugin config is defined in
+`openclaw/extensions/wikioracle/openclaw.plugin.json`.
+
+The extension registers three capabilities:
+
+1. **Provider** (`wikioracle`) — selectable in OpenClaw's provider list
+2. **Command** (`/wo <message>`) — direct CLI access from any channel
+3. **Tool** (`wikioracle_query`) — available to OpenClaw agents
+
+See [Training.md](./Training.md) §OpenClaw Integration for the
+message flow and training pipeline details.
+
 ## CLI flags
 
 ```

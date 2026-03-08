@@ -602,26 +602,64 @@ when the truth table produces conflicting signals.
 
 ### OpenClaw Integration
 
-OpenClaw is WikiOracle's multi-channel front-end, bridging Slack,
-Discord, and Telegram to the `/chat` endpoint via
-`bin/openclaw_ext.py`.  Training interactions from OpenClaw channels
-flow through the same pipeline described above:
+OpenClaw is WikiOracle's multi-channel front-end (Slack, Discord,
+Telegram, etc.).  The TypeScript extension at
+`openclaw/extensions/wikioracle/` registers WikiOracle as a native
+OpenClaw provider by spawning `bin/wo` for each query.
 
-1. OpenClaw adapter receives a message from Slack/Discord/Telegram.
-2. `WikiOracleBridge.send()` forwards it to WikiOracle `/chat`.
-3. WikiOracle responds (Stage 1).
-4. Stages 2–4 execute asynchronously: DoT computation, truth merge,
-   and NanoChat training.
-5. The response is relayed back to the originating channel.
+The extension provides three capabilities:
 
-Per-channel session state is persisted in `~/.openclaw/sessions/` as
-JSON files, keyed by sanitized channel ID.  This allows conversation
-context to persist across messages within the same channel.
+1. **Provider** — WikiOracle appears in OpenClaw's provider selector
+   alongside OpenAI, Anthropic, etc.  Selecting it routes all messages
+   through the WikiOracle server's full pipeline.
+
+2. **Command** (`/wo <message>`) — Direct CLI-style access from any
+   OpenClaw channel, bypassing the agent/LLM layer.
+
+3. **Tool** (`wikioracle_query`) — Lets OpenClaw agents invoke
+   WikiOracle programmatically during agentic runs.
+
+The message flow through the training pipeline:
+
+1. OpenClaw receives a message from any channel (Slack/Discord/etc.).
+2. The wikioracle extension spawns `bin/wo` with the message.
+3. `bin/wo` sends `POST /chat` to the WikiOracle server.
+4. WikiOracle responds (Stage 1: provider routing, truth RAG).
+5. Stages 2–4 execute server-side: DoT computation, truth merge,
+   Sensation preprocessing, and NanoChat online training.
+6. `bin/wo` prints the response to stdout; the extension captures it
+   and relays it back to the originating channel.
+
+In stateful mode (default), the WikiOracle server owns session state —
+conversation context persists across messages without client-side
+storage.  In stateless mode, state is serialized to a local XML file
+via `bin/wo -f`.
 
 The training pipeline treats OpenClaw messages identically to direct
-HTTP clients — the same DoT computation, truth table merge, Sensation
-preprocessing, and `/train` call apply.  The bridge is transparent to
-the training system.
+HTTP or web UI clients — the same DoT computation, truth table merge,
+Sensation preprocessing, and `/train` call apply.  The `bin/wo` CLI
+is transparent to the training system.
+
+#### Extension configuration
+
+```json5
+// In OpenClaw's config file (~/.openclaw/config.json5 or project-level)
+{
+  plugins: {
+    entries: ["wikioracle"],
+    wikioracle: {
+      woPath: "/path/to/WikiOracle/bin/wo",
+      serverUrl: "https://127.0.0.1:8888",
+      insecure: true,    // skip TLS verification for local dev
+      stateful: true,    // server owns session state
+      token: "...",      // optional bearer token
+    },
+  },
+}
+```
+
+See `openclaw/extensions/wikioracle/openclaw.plugin.json` for the full
+config schema.
 
 ### Server Truth Table Visibility (Debug Mode)
 

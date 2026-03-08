@@ -21,7 +21,7 @@ Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
 | Response | `bin/response.py` | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4) |
 | Truth | `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, spacetime fact classification, PII detection |
 | Sensation | `bin/sensation.py` | Preprocessing: Korzybski IS detection, XML tagging (`<fact>`/`<feeling>`/`<Q>`/`<R>` with `<place>`/`<time>` child elements), corpus conversion |
-| OpenClaw | `openclaw/` (git submodule) + `bin/openclaw_ext.py` | Multi-channel front-end (Slack/Discord/Telegram) — bridges external platforms to WikiOracle's `/chat` endpoint |
+| OpenClaw | `openclaw/` (git submodule) + `openclaw/extensions/wikioracle/` | Multi-channel front-end (Slack/Discord/Telegram) — TypeScript extension routes messages through `bin/wo` CLI to WikiOracle's full pipeline |
 | NanoChat ext | `bin/nanochat_ext.py` | `POST /train` route mounted onto NanoChat's FastAPI app for online SFT |
 | Client app | `client/wikioracle.js` | State management, API calls, message rendering, drag/context-menu interactions |
 | Client config | `client/config.js` | Config global, sessionStorage persistence, normalization, legacy migration |

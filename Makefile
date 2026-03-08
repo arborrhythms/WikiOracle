@@ -104,7 +104,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         remote remote_retrieve remote_ssh remote_status remote_logs \
         remote_deploy remote_deploy_launch \
         checkpoint_pull checkpoint_push \
-        openclaw_setup openclaw_run \
+        openclaw_setup openclaw_run openclaw_test \
         doc_pdf
 
 # Ordered list of doc chapters for PDF generation
@@ -198,8 +198,9 @@ help:
 	@echo "  make checkpoint_push    Push output/checkpoints/ → WikiOracle SFT weights"
 	@echo ""
 	@echo "OpenClaw (openclaw_*):"
-	@echo "  make openclaw_setup     Install OpenClaw dependencies (Slack/Discord/Telegram)"
-	@echo "  make openclaw_run       Run OpenClaw adapter (use OPENCLAW_ARGS='--adapter slack')"
+	@echo "  make openclaw_setup     Install OpenClaw + WikiOracle extension (pnpm install)"
+	@echo "  make openclaw_run       Start OpenClaw with WikiOracle provider"
+	@echo "  make openclaw_test      Run WikiOracle extension unit tests"
 	@echo ""
 	@echo "Documentation (doc_*):"
 	@echo "  make doc_pdf            Generate PDF from all doc/*.md → output/WikiOracle.pdf"
@@ -664,16 +665,45 @@ checkpoint_push:
 # --- OpenClaw -----------------------------------------------------------------
 
 OPENCLAW_DIR  := openclaw
-OPENCLAW_VENV := $(OPENCLAW_DIR)/.venv
 
-openclaw_setup:
+# pnpm — resolve via corepack (ships with Node ≥ 22), fall back to npx
+PNPM := COREPACK_INTEGRITY_KEYS=0 pnpm
+
+# Safety gate — OpenClaw's pnpm install pulls native binaries, installs git
+# hooks, and runs postinstall scripts.  Never run on a host machine; use a
+# sandboxed / disposable environment only.
+_openclaw_confirm:
+	@echo ""
+	@echo "╔══════════════════════════════════════════════════════════════╗"
+	@echo "║  DANGER!!! ONLY RUN THIS IN A SANDBOXED ENVIROMENT!!!      ║"
+	@echo "║                                                            ║"
+	@echo "║  This target runs pnpm install / OpenClaw tooling that     ║"
+	@echo "║  will download native binaries, install git hooks, and     ║"
+	@echo "║  execute arbitrary postinstall scripts.                    ║"
+	@echo "╚══════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@printf "Type YES to continue: " && read answer && [ "$$answer" = "YES" ] || { echo "Aborted."; exit 1; }
+
+openclaw_setup: _openclaw_confirm
 	git submodule update --init $(OPENCLAW_DIR)
-	python3 -m venv $(OPENCLAW_VENV)
-	source "$(CURDIR)/$(OPENCLAW_VENV)/bin/activate" && pip install -r $(OPENCLAW_DIR)/requirements.txt
+	@command -v node >/dev/null 2>&1 || { echo "Node.js is required — install from https://nodejs.org"; exit 1; }
+	@echo "Enabling corepack for pnpm …"
+	corepack enable pnpm 2>/dev/null || true
+	@echo "Installing OpenClaw dependencies …"
+	cd "$(CURDIR)/$(OPENCLAW_DIR)" && $(PNPM) install
+	@echo ""
+	@echo "OpenClaw setup complete.  WikiOracle extension at:"
+	@echo "  $(OPENCLAW_DIR)/extensions/wikioracle/"
+	@echo ""
+	@echo "Run 'make openclaw_run' to start (ensure WikiOracle server is running first)."
 
-openclaw_run:
-	@test -d "$(OPENCLAW_VENV)" || { echo "Run 'make openclaw_setup' first"; exit 1; }
-	source "$(CURDIR)/$(OPENCLAW_VENV)/bin/activate" && PYTHONPATH="$(CURDIR)/bin" python3 -m openclaw $(OPENCLAW_ARGS)
+openclaw_run: _openclaw_confirm
+	@test -d "$(OPENCLAW_DIR)/node_modules" || { echo "Run 'make openclaw_setup' first"; exit 1; }
+	cd "$(CURDIR)/$(OPENCLAW_DIR)" && $(PNPM) start $(OPENCLAW_ARGS)
+
+openclaw_test: _openclaw_confirm
+	@test -d "$(OPENCLAW_DIR)/node_modules" || { echo "Run 'make openclaw_setup' first"; exit 1; }
+	cd "$(CURDIR)/$(OPENCLAW_DIR)" && $(PNPM) vitest run extensions/wikioracle/ --reporter=verbose
 
 # --- Sensation preprocessing --------------------------------------------------
 

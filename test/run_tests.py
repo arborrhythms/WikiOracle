@@ -88,10 +88,26 @@ class _HTMLResult(unittest.TestResult):
         super().__init__()
         self.records: list[_TestRecord] = []
         self._start_time = 0.0
+        self._current_class = None
+        self._class_start_time = 0.0
+
+    def startTestRun(self):
+        super().startTestRun()
+        self._class_start_time = time.monotonic()
 
     def startTest(self, test):
         super().startTest(test)
-        self._start_time = time.monotonic()
+        test_class = type(test)
+        if test_class is not self._current_class:
+            # First test in a new class — include setUpClass time
+            self._current_class = test_class
+            self._start_time = self._class_start_time
+        else:
+            self._start_time = time.monotonic()
+
+    def stopTest(self, test):
+        super().stopTest(test)
+        self._class_start_time = time.monotonic()
 
     def _record(self, test, status, message=""):
         elapsed = time.monotonic() - self._start_time

@@ -490,8 +490,9 @@ def build_query(
         content = strip_xhtml_fn(msg.get("content", ""))
         bundle.history.append({"role": role, "content": content})
 
-    # 5) User query
-    bundle.query = user_message
+    # 5) User query (use "(continue)" for empty sends so providers
+    #    always receive a non-empty user message)
+    bundle.query = user_message or "(continue)"
 
     # 6) Structured output instructions (always in state after ensure_minimal_state)
     bundle.output = state.get("output", "")

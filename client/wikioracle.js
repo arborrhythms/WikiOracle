@@ -242,6 +242,28 @@ function branchFromNode(convId) {
   // Tree Branch creates and selects an empty child conversation immediately.
   if (!state || !convId) return;
   _pendingBranchParent = null;
+
+  if (convId === "root") {
+    // Branch from root: create a new root-level conversation
+    if (!Array.isArray(state.conversations)) state.conversations = [];
+    const newConv = {
+      id: generateUUID(),
+      title: "",
+      messages: [],
+      children: [],
+      parentId: null,
+    };
+    state.conversations.push(newConv);
+    state.selected_conversation = newConv.id;
+    _treePath = [newConv.id];
+    _syncConversationSelection(state.conversations || [], newConv.id);
+    renderMessages();
+    _persistState();
+    setStatus("Created new conversation.");
+    document.getElementById("msgInput").focus();
+    return;
+  }
+
   const newConv = _createEmptyChildConversation(convId);
   if (!newConv) return;
   renderMessages();
@@ -984,8 +1006,8 @@ function _updatePlaceholder() {
 async function sendMessage() {
   const input = document.getElementById("msgInput");
   const text = input.value.trim();
-  // Allow empty sends only at terminal (leaf) nodes or pending branches
-  const isTerminal = _pendingBranchParent || _isTerminalNode(state.selected_conversation);
+  // Allow empty sends at terminal (leaf) nodes, pending branches, or root
+  const isTerminal = _pendingBranchParent || _isTerminalNode(state.selected_conversation) || state.selected_conversation === null;
   if (!text && !isTerminal) return;
 
   input.value = "";

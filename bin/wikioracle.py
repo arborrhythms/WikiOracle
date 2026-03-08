@@ -290,8 +290,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         user_msg = (body.get("message") or "").strip()
         conversation_id = body.get("conversation_id")
         branch_from = body.get("branch_from")
-        if not user_msg and not conversation_id and not branch_from:
-            return jsonify({"ok": False, "error": "missing_message"}), 400
+        # Empty sends are allowed: at root (new conversation), at terminal
+        # nodes (continue), or via branch_from.  All three create valid turns.
 
         # ── Stateless mode: client must supply state + runtime_config ──
         if config_mod.STATELESS_MODE:

@@ -4,3 +4,4 @@
 [submodule "openclaw"]
 	path = openclaw
 	url = https://github.com/arborrhythms/openclaw.git
+	branch = wikioracle-extension

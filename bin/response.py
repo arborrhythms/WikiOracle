@@ -1522,7 +1522,7 @@ def process_chat(
     if prelim_response:
         bundle.history.append({"role": "user", "content": user_msg})
         bundle.history.append({"role": "assistant", "content": prelim_response})
-    print(f"[WikiOracle] RAG: rag={rag_flag}, truth_entries={truth_count}, "
+    print(f"[WikiOracle] RAG: truth_weight={truth_weight_flag}, truth_entries={truth_count}, "
           f"bundle.sources={len(bundle.sources)}")
     if config_mod.DEBUG_MODE:
         print(f"[DEBUG] ProviderBundle: system={len(bundle.system)} chars, "

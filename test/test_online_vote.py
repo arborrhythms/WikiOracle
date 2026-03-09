@@ -8,7 +8,7 @@ fixtures to output/ with beta providers rewritten to point at the local
 server, runs the vote via Flask test client, and validates the diamond
 conversation structure:
 
-       root (query + prelim)     <- 1 root, 2 messages
+       root (query only)         <- 1 root, 1 message (user query)
       /    \\
     beta1  beta2                 <- children of root, 1 message each
       \\    /
@@ -95,9 +95,14 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         #   - beta providers: Gemini -> local NanoChat
         text = cls._output_file.read_text(encoding="utf-8")
         text = text.replace("file://test/", "file://output/")
+        # Replace child-element api_url and model for beta providers
         text = text.replace(
-            'api_url="https://generativelanguage.googleapis.com/v1beta/models" model="gemini-2.5-flash"',
-            f'api_url="{cls._nano_url}/chat/completions" model="nanochat"',
+            "<api_url>https://generativelanguage.googleapis.com/v1beta/models</api_url>",
+            f"<api_url>{cls._nano_url}/chat/completions</api_url>",
+        )
+        text = text.replace(
+            "<model>gemini-2.5-flash</model>",
+            "<model>nanochat</model>",
         )
         cls._output_file.write_text(text, encoding="utf-8")
 
@@ -170,11 +175,10 @@ class TestAlphaOutputDiamond(unittest.TestCase):
 
         root = convs[0]
 
-        # Root should have 2 messages: user query + alpha preliminary
-        self.assertEqual(len(root["messages"]), 2,
-                         "Diamond root should have user query + alpha prelim")
+        # Root should have 1 message: user query only (no prelim)
+        self.assertEqual(len(root["messages"]), 1,
+                         "Diamond root should have user query only")
         self.assertEqual(root["messages"][0]["role"], "user")
-        self.assertEqual(root["messages"][1]["role"], "assistant")
 
         # Root has only betas as direct children
         betas = root.get("children", [])

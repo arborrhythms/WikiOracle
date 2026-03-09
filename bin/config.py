@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import sys
+import uuid as _uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -234,14 +235,6 @@ def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
     root = tree.getroot()
     data: Dict[str, Any] = {}
 
-    # --- user ---
-    user_el = root.find("user")
-    if user_el is not None:
-        user: Dict[str, Any] = {}
-        for child in user_el:
-            user[child.tag] = _xml_coerce(_xml_text(child))
-        data["user"] = user
-
     # --- providers ---
     providers_el = root.find("providers")
     if providers_el is not None:
@@ -385,8 +378,26 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             pcfg["api_key"] = ycfg["api_key"]
         if ycfg.get("timeout"):
             pcfg["timeout"] = ycfg["timeout"]
+        if ycfg.get("truth_context"):
+            pcfg["truth_context"] = ycfg["truth_context"]
+        if ycfg.get("conversation_context"):
+            pcfg["conversation_context"] = ycfg["conversation_context"]
 
     return providers
+
+
+# Default context strings for provider consultations
+DEFAULT_TRUTH_CONTEXT = (
+    "You are a participant in a distributed truth system. "
+    "Respond with truth statements as XHTML. "
+    "Use <fact> for verifiable claims and <feeling> for subjective opinions."
+)
+DEFAULT_CONVERSATION_CONTEXT = (
+    "You are a participant in a distributed truth system. "
+    "Respond with truth statements as XHTML. "
+    "Use <conversation> to answer the query, <fact> for verifiable claims "
+    "or citations, and <feeling> for subjective opinions."
+)
 
 
 PROVIDERS: Dict[str, Dict[str, Any]] = _build_providers()
@@ -406,8 +417,6 @@ _PROVIDER_MODELS: Dict[str, list] = {
 # Ordered mapping of dotted config paths → human-readable descriptions.
 # Drives field ordering and inline comments when writing config.xml.
 CONFIG_SCHEMA = [
-    ("user.name",                   "Your display name in chat messages"),
-    ("user.uid",                    "Persistent user GUID (auto-generated if blank)"),
     ("providers",                   "LLM provider configuration"),
     ("providers.wikioracle.name",   "Display name for NanoChat provider"),
     ("providers.wikioracle.username", "API login / email"),
@@ -442,6 +451,7 @@ CONFIG_SCHEMA = [
     ("ui.swipe_nav_horizontal",     "Swipe left/right to navigate siblings"),
     ("ui.swipe_nav_vertical",       "Swipe up/down to navigate siblings"),
     ("server",                      "Runtime parameters (usually set via CLI flags)"),
+    ("server.server_id",            "Persistent server identity (auto-generated UUID4)"),
     ("server.online_training",  "Online learning from interactions (see doc/Training.md)"),
     ("server.online_training.enabled",     "Enable continuous truth corpus updates"),
     ("server.online_training.truth_corpus_path", "Append-only truth log"),
@@ -526,18 +536,6 @@ def config_to_xml(data: dict) -> str:
         """
         safe = text.replace("--", "\u2013")  # en-dash
         parent.append(ET.Comment(f" {safe} "))
-
-    # --- user ---
-    user_data = data.get("user")
-    if isinstance(user_data, dict):
-        _add_comment(root, "User")
-        user_el = ET.SubElement(root, "user")
-        for key, val in user_data.items():
-            desc = desc_map.get(f"user.{key}")
-            if desc:
-                _add_comment(user_el, desc)
-            child = ET.SubElement(user_el, key)
-            child.text = _val_str(val)
 
     # --- providers ---
     providers_data = data.get("providers")
@@ -708,9 +706,6 @@ def _normalize_config(cfg_data: dict) -> dict:
     Missing sections/keys are filled with sensible defaults.
     """
     cfg = dict(cfg_data) if isinstance(cfg_data, dict) else {}
-    user = cfg.setdefault("user", {})
-    user.setdefault("name", "User")
-    user.setdefault("uid", "")
     ui = cfg.setdefault("ui", {})
     ui.setdefault("default_provider", "wikioracle")
     ui.setdefault("layout", "flat")
@@ -723,6 +718,8 @@ def _normalize_config(cfg_data: dict) -> dict:
     chat.setdefault("url_fetch", False)
     chat.setdefault("confirm_actions", False)
     server = cfg.setdefault("server", {})
+    if not server.get("server_id"):
+        server["server_id"] = str(_uuid.uuid4())
     ot = server.setdefault("online_training", {})
     ot.setdefault("enabled", False)
     ot.setdefault("truth_corpus_path", "data/truth.xml")

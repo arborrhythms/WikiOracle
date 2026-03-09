@@ -112,6 +112,25 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     _inject_server_runtime()
 
+    # Persist auto-generated server_id to config.xml if not already on disk
+    if not config_mod.STATELESS_MODE:
+        _project_root = Path(__file__).resolve().parent.parent
+        _config_xml_path = _project_root / "config.xml"
+        if _config_xml_path.exists():
+            _disk_cfg = config_mod._load_config_xml(_config_xml_path)
+            if not _disk_cfg.get("server", {}).get("server_id"):
+                normalized = _normalize_config(config_mod._CONFIG)
+                new_sid = normalized.get("server", {}).get("server_id")
+                if new_sid:
+                    _disk_cfg.setdefault("server", {})["server_id"] = new_sid
+                    try:
+                        _config_xml_path.write_text(
+                            config_to_xml(_disk_cfg), encoding="utf-8",
+                        )
+                        log.info("Persisted auto-generated server_id to config.xml")
+                    except OSError as exc:
+                        log.warning("Could not persist server_id: %s", exc)
+
     # Security headers (CORS + CSP)
     @app.after_request
     def add_security_headers(response):

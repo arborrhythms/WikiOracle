@@ -1015,7 +1015,7 @@ async function sendMessage() {
   const userEntry = text ? {
     id: optimisticMsgId,
     role: "user",
-    username: config.user.name || "User",
+    username: (state.user && state.user.name) || "User",
     time: now,
     content: `<p>${escapeHtml(text)}</p>`,
     _pending: true,
@@ -1065,7 +1065,7 @@ async function sendMessage() {
       config: {
         provider: config.ui.default_provider,
         model: config.ui.model || (config.server.providers[config.ui.default_provider] || {}).model || "",
-        username: config.user.name,
+        username: (state.user && state.user.name) || "User",
         chat: config.chat || {},
       },
     };
@@ -1074,8 +1074,10 @@ async function sendMessage() {
     // Strip server-origin truth entries before sending to avoid loopback
     var _clientTruth = (state.truth || []).filter(function(e) { return !e._server_origin; });
     const prunedState = {
-      version: state.version, schema: state.schema, time: state.time,
+      version: state.version, schema: state.schema,
+      time_creation: state.time_creation, time_lastModified: state.time_lastModified,
       title: state.title, context: state.context, truth: _clientTruth,
+      user: state.user,
       selected_conversation: state.selected_conversation,
       conversations: buildAncestorSubtree(state.conversations, targetConvId),
       _path_only: true,
@@ -1188,13 +1190,18 @@ function bindEvents() {
     xml += '  <header>\n';
     xml += '    <version>2</version>\n';
     xml += '    <schema>' + esc(state.schema || 'https://wikioracle.org/schemas/state/v2') + '</schema>\n';
-    xml += '    <time>' + esc(now.toISOString()) + '</time>\n';
+    xml += '    <time_creation>' + esc(state.time_creation || now.toISOString()) + '</time_creation>\n';
+    xml += '    <time_lastModified>' + esc(now.toISOString()) + '</time_lastModified>\n';
     xml += '    <title>' + esc(state.title || 'WikiOracle') + '</title>\n';
     xml += '    <context>' + (state.context || '<div/>') + '</context>\n';
     if (state.selected_conversation)
       xml += '    <selected_conversation>' + esc(state.selected_conversation) + '</selected_conversation>\n';
-    if (state.user_guid)
-      xml += '    <user_guid>' + esc(state.user_guid) + '</user_guid>\n';
+    if (state.user) {
+      xml += '    <user>\n';
+      xml += '      <name>' + esc(state.user.name || 'User') + '</name>\n';
+      xml += '      <user_id>' + esc(state.user.user_id || '') + '</user_id>\n';
+      xml += '    </user>\n';
+    }
     if (state.output)
       xml += '    <output>' + (state.output || '') + '</output>\n';
     xml += '  </header>\n';
@@ -1308,15 +1315,30 @@ function bindEvents() {
         importState = {
           version: parseInt(hdr?.querySelector("version")?.textContent || "2"),
           schema: hdr?.querySelector("schema")?.textContent || "",
-          time: hdr?.querySelector("time")?.textContent || "",
+          time_creation: hdr?.querySelector("time_creation")?.textContent
+              || hdr?.querySelector("time")?.textContent || "",
+          time_lastModified: hdr?.querySelector("time_lastModified")?.textContent
+              || hdr?.querySelector("time_creation")?.textContent
+              || hdr?.querySelector("time")?.textContent || "",
           title: hdr?.querySelector("title")?.textContent || "",
           context: hdr?.querySelector("context")?.innerHTML || "<div/>",
           conversations: [],
           selected_conversation: hdr?.querySelector("selected_conversation")?.textContent || null,
           truth: [],
         };
-        if (hdr?.querySelector("user_guid"))
-          importState.user_guid = hdr.querySelector("user_guid").textContent;
+        // User block (with backward compat for <user_guid>)
+        var _userEl = hdr?.querySelector("user");
+        if (_userEl) {
+          importState.user = {
+            name: _userEl.querySelector("name")?.textContent || "User",
+            user_id: _userEl.querySelector("user_id")?.textContent || "",
+          };
+        } else if (hdr?.querySelector("user_guid")) {
+          importState.user = {
+            name: "User",
+            user_id: hdr.querySelector("user_guid").textContent,
+          };
+        }
         if (hdr?.querySelector("output"))
           importState.output = hdr.querySelector("output").innerHTML || "";
 
@@ -1677,6 +1699,29 @@ async function init() {
 // Stateless init: sessionStorage is authoritative.
 // If sessionStorage has data, use it directly — no server calls needed for
 // state or config.  If sessionStorage is empty, call /bootstrap once to seed.
+// One-time migration: move user identity from config/legacy fields to state header.
+function _migrateUserToState() {
+  // Migrate config.user.name → state.user.name (one-time)
+  if (config.user && config.user.name && config.user.name !== "User") {
+    if (!state.user) state.user = {};
+    if (!state.user.name || state.user.name === "User") {
+      state.user.name = config.user.name;
+    }
+  }
+  // Migrate state.user_guid → state.user.user_id
+  if (state.user_guid) {
+    if (!state.user) state.user = { name: "User" };
+    if (!state.user.user_id) state.user.user_id = state.user_guid;
+    delete state.user_guid;
+  }
+  // Migrate state.time → state.time_creation
+  if (state.time && !state.time_creation) {
+    state.time_creation = state.time;
+    state.time_lastModified = state.time;
+    delete state.time;
+  }
+}
+
 async function _initStateless() {
   // Migrate legacy config (one-time)
   await _migrateOldPrefs();
@@ -1726,6 +1771,7 @@ async function _initStateless() {
     // Provider metadata is already in config.server.providers
     _populateProviderDropdown();
   }
+  _migrateUserToState();
 }
 
 // Stateful init: server disk is authoritative.
@@ -1754,6 +1800,7 @@ async function _initStateful() {
   const data = await _fetchStateWithProgress(expectedSize);
   state = data.state || {};
   if (!Array.isArray(state.conversations)) state.conversations = [];
+  _migrateUserToState();
 }
 
 // Fetch /state using XHR so we can track download progress via onprogress.

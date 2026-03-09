@@ -81,25 +81,29 @@ class TestUserGuid(unittest.TestCase):
 class TestUserGuidInState(unittest.TestCase):
 
     def test_guid_round_trips_through_xml(self):
-        """user_guid stored at root level round-trips through XML."""
+        """user_id stored in user dict round-trips through XML."""
         state = ensure_minimal_state({})
-        state["user_guid"] = user_guid("Alec")
+        state.setdefault("user", {})["user_id"] = user_guid("Alec")
+        state["user"]["name"] = "Alec"
 
         xml = state_to_xml(state)
         restored = xml_to_state(xml)
 
-        assert restored.get("user_guid") == user_guid("Alec")
+        assert restored["user"]["user_id"] == user_guid("Alec")
+        assert restored["user"]["name"] == "Alec"
 
-    def test_guid_absent_if_not_set(self):
-        """State without user_guid set does not inject a fake one."""
+    def test_user_absent_if_not_set(self):
+        """State without user set does not inject a fake one."""
         state = ensure_minimal_state({})
         xml = state_to_xml(state)
         restored = xml_to_state(xml)
-        # user_guid should not be present or should be None/empty
-        assert not restored.get("user_guid")
+        # user should not be present or should have empty user_id
+        user = restored.get("user")
+        assert not user or not user.get("user_id")
 
-    def test_guid_preserved_on_normalize(self):
-        """ensure_minimal_state preserves an existing user_guid."""
+    def test_old_user_guid_migrated_on_normalize(self):
+        """ensure_minimal_state migrates user_guid to user.user_id."""
         raw = {"user_guid": "test-guid-123"}
         state = ensure_minimal_state(raw)
-        assert state.get("user_guid") == "test-guid-123"
+        assert state["user"]["user_id"] == "test-guid-123"
+        assert "user_guid" not in state

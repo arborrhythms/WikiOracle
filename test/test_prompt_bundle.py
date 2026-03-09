@@ -524,73 +524,78 @@ class TestBuildProviderQueryBundle(unittest.TestCase):
 class TestEvaluateProviders(unittest.TestCase):
     """Test evaluate_providers() HME evaluation."""
 
-    def _make_provider_entry(self, name, trust=0.8, entry_id="t1"):
+    def _make_provider_entry(self, name, trust=0.8, entry_id="t1",
+                              conversation=False):
         entry = {"id": entry_id, "title": name, "trust": trust,
                  "time": "2026-02-23T00:00:00Z"}
         config = {"api_url": "http://test", "api_key": "k",
-                  "model": "m", "timeout": 30, "max_tokens": 1024}
+                  "model": "m", "timeout": 30, "max_tokens": 1024,
+                  "conversation": conversation}
         return (entry, config)
 
     def test_single_provider_success(self):
         def mock_call(pconfig, messages):
             return f"Response from {pconfig['api_url']}"
-        pairs = [self._make_provider_entry("GPT-4")]
-        results = evaluate_providers(
+        pairs = [self._make_provider_entry("GPT-4", conversation=True)]
+        conv, truths = evaluate_providers(
             pairs, "system", [], "question", "output", mock_call,
         )
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].kind, "provider")
-        self.assertEqual(results[0].title, "GPT-4")
-        self.assertIn("Response from http://test", results[0].content)
-        self.assertIn('<div class="provider-response"', results[0].content)
-        self.assertIn('data-provider="t1"', results[0].content)
+        self.assertEqual(len(conv), 1)
+        self.assertEqual(conv[0].kind, "provider")
+        self.assertEqual(conv[0].title, "GPT-4")
+        self.assertIn("Response from http://test", conv[0].content)
+        self.assertIn('<div class="provider-response"', conv[0].content)
+        self.assertIn('data-provider="t1"', conv[0].content)
 
     def test_multiple_providers_parallel(self):
         def mock_call(pconfig, messages):
             return f"Answer from {pconfig['api_url']}"
         pairs = [
-            self._make_provider_entry("Claude", 0.9, "t1"),
-            self._make_provider_entry("GPT", 0.8, "t2"),
+            self._make_provider_entry("Claude", 0.9, "t1", conversation=True),
+            self._make_provider_entry("GPT", 0.8, "t2", conversation=True),
         ]
-        results = evaluate_providers(
+        conv, truths = evaluate_providers(
             pairs, "ctx", [], "q", "out", mock_call,
         )
-        self.assertEqual(len(results), 2)
-        names = {r.title for r in results}
+        self.assertEqual(len(conv), 2)
+        names = {r.title for r in conv}
         self.assertEqual(names, {"Claude", "GPT"})
 
     def test_error_response_excluded(self):
         def mock_call(pconfig, messages):
             return "[Error: HTTP 500] server error"
-        pairs = [self._make_provider_entry("GPT")]
-        results = evaluate_providers(
+        pairs = [self._make_provider_entry("GPT", conversation=True)]
+        conv, truths = evaluate_providers(
             pairs, "", [], "q", "", mock_call,
         )
-        self.assertEqual(len(results), 0)
+        self.assertEqual(len(conv), 0)
+        self.assertEqual(len(truths), 0)
 
     def test_exception_excluded(self):
         def mock_call(pconfig, messages):
             raise ConnectionError("timeout")
-        pairs = [self._make_provider_entry("GPT")]
-        results = evaluate_providers(
+        pairs = [self._make_provider_entry("GPT", conversation=True)]
+        conv, truths = evaluate_providers(
             pairs, "", [], "q", "", mock_call,
         )
-        self.assertEqual(len(results), 0)
+        self.assertEqual(len(conv), 0)
+        self.assertEqual(len(truths), 0)
 
     def test_empty_providers(self):
-        results = evaluate_providers(
+        conv, truths = evaluate_providers(
             [], "", [], "q", "", lambda p, m: "nope",
         )
-        self.assertEqual(results, [])
+        self.assertEqual(conv, [])
+        self.assertEqual(truths, [])
 
     def test_trust_preserved(self):
         def mock_call(pconfig, messages):
             return "ok"
-        pairs = [self._make_provider_entry("P", trust=0.95)]
-        results = evaluate_providers(
+        pairs = [self._make_provider_entry("P", trust=0.95, conversation=True)]
+        conv, truths = evaluate_providers(
             pairs, "", [], "q", "", mock_call,
         )
-        self.assertAlmostEqual(results[0].trust, 0.95)
+        self.assertAlmostEqual(conv[0].trust, 0.95)
 
     def test_rag_free_messages(self):
         """Verify the messages sent to providers contain no RAG sources."""
@@ -598,13 +603,12 @@ class TestEvaluateProviders(unittest.TestCase):
         def mock_call(pconfig, messages):
             captured["messages"] = messages
             return "ok"
-        pairs = [self._make_provider_entry("P")]
+        pairs = [self._make_provider_entry("P", conversation=True)]
         evaluate_providers(
             pairs, "system ctx", [], "my question", "output fmt", mock_call,
         )
         msgs = captured["messages"]
         full_text = " ".join(m["content"] for m in msgs)
-        self.assertIn("system ctx", full_text)
         self.assertIn("my question", full_text)
         self.assertNotIn("[Reference Documents]", full_text)
         self.assertNotIn("[Provider Consultations]", full_text)

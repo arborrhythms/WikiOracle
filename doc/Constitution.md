@@ -23,7 +23,7 @@ Answers must be conditioned on what each user chooses to trust and believe to be
 
 This constitution defines the non-negotiable invariants for WikiOracle's truth system and for changes to it. Implementation details and deeper theory live in the rest of the `doc/` directory.
 
-## 1. Core Commitments
+## Core Commitments
 
 WikiOracle is architected not merely as a system of prediction, but as a shared epistemic commons.
 It must:
@@ -40,7 +40,7 @@ Therefore:
 5. **Reversibility and accountability** High-impact changes must be attributable, testable, and reversible.
 6. **Public benefit and anti-capture** No single actor (company, state, foundation, or maintainer group) should be able to silently become the epistemic root for everyone else.
 
-## 2. Truth Primitives (What the System Is Allowed to Believe)
+## Truth Primitives (What the System Is Allowed to Believe)
 
 WikiOracle's truth layer is composed of explicit, user-visible primitives stored in state, all of which have some Degree of Trust (except for Feelings):
 
@@ -52,16 +52,16 @@ WikiOracle's truth layer is composed of explicit, user-visible primitives stored
 5. **Authorities**: pointers to external knowledge bases (remote `state.xml` files, ORCIDs, or DIDs): we trust what they trust, to some degree.
 6. **Providers**: external AIs used as tools ("other minds") whose outputs become evidence, not unquestionable authority.
 
-All truth computations must remain legible as operations over these primitives. If the system "knows" something, it should be possible to point to what it is grounded in; otherwise it is merely intuition. See [WhatIsTruth.md](WhatIsTruth)
+All truth computations must remain legible as operations over these primitives. If the system "knows" something, it should be possible to point to what it is grounded in; otherwise it is merely intuition. See [Truth.md](Truth)
 
-## 3. Plurality, Dispute, and Minority Preservation
+## Plurality, Dispute, and Minority Preservation
 
 1. **POV-conditioned conclusions** When different POVs trust different sources, the system should be able to present conclusions conditioned on the selected POV/trust map.
 2. **Overlaps are valuable** When independent POVs converge on the same claim, that agreement should be surfaced explicitly as a robustness signal.
 3. **Disputes stay visible** Where serious disagreement exists among credible sources or POVs, the system must represent the dispute rather than smoothing it away.
 4. **Minority protection** Evidence-supported minority viewpoints must not be excluded solely by majority preference, institutional pressure, or convenience.
 
-## 4. Independence From Any Single AI Vendor
+## Independence From Any Single AI Vendor
 
 WikiOracle may use proprietary or open models as providers, but:
 
@@ -69,7 +69,7 @@ WikiOracle may use proprietary or open models as providers, but:
 2. **Providers are evidence generators** Provider outputs should be treated as non-authoritative contributions with a trust value like any other entry.
 3. **Replaceability is required** The system must remain operable if any single provider becomes unavailable, hostile, or compromised.
 
-## 5. Authority Delegation Must Be Bounded and Secure
+## Authority Delegation Must Be Bounded and Secure
 
 Authority entries exist to enable decentralized truth (a network of trust) without collapsing into a single global oracle.
 
@@ -79,7 +79,7 @@ Authority entries exist to enable decentralized truth (a network of trust) witho
 4. **Explicit source selection** Users (or POV definitions) must explicitly choose which authorities to trust; there is no implicit global root.
 5. **Operational safety** Fetching and caching authorities must be rate-limited and size-limited, and restricted to safe URL schemes.
 
-## 6. Local-First Data and Auditability
+## Local-First Data and Auditability
 
 1. **Client-owned Particular State** The default posture is local-first: user conversation state and news lives on the user's machine and are portable.
 2. **Server-ovener Universal State** A shared hosted service accumulate only anonymized knowledge in a Truth Table which serves as a trusted source of facts.
@@ -95,5 +95,4 @@ WikiOracle's truthfulness effort must not trade away human welfare or agency:
 3. **Truth:** keep truth auditable and non-proprietary; do not convert epistemic advantage into coercive control. The truth is not a commodity: data formats, tests, and willingly shared truth must be open and reproducible. Make identification and surveillannce impossible. 
 
 
-See [FreedomEmpathyAndTruth.md](FreedomEmpathyAndTruth)
-
+See [Freedom.md](Freedom), [Empathy.md](Empathy), and [Truth.md](Truth).

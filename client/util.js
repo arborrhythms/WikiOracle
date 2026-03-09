@@ -496,7 +496,7 @@ function _toggleOutputEditor() {
 
 // ─── Settings panel ───
 function openSettings() {
-  document.getElementById("setUsername").value = config.user.name || "User";
+  document.getElementById("setUsername").value = (state.user && state.user.name) || "User";
   document.getElementById("setProvider").value = config.ui.default_provider || "wikioracle";
   _populateModelDropdown(config.ui.default_provider);
   var currentModel = config.ui.model || (config.server.providers[config.ui.default_provider] || {}).model || "";
@@ -533,7 +533,8 @@ async function saveSettings() {
 
   config.ui.default_provider = newProvider;
   config.ui.model = document.getElementById("setModel").value || "";
-  config.user.name = document.getElementById("setUsername").value.trim() || "User";
+  if (!state.user) state.user = {};
+  state.user.name = document.getElementById("setUsername").value.trim() || "User";
   config.ui.layout = document.getElementById("setLayout").value;
   config.ui.theme = document.getElementById("setTheme").value || "system";
 

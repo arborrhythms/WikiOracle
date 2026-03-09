@@ -351,8 +351,7 @@ class TestDiamondInTreeHierarchy(unittest.TestCase):
             parent_id="conv_root")
 
         root = _make_conversation("conv_root", "Vote root",
-            messages=[_make_message("user", "query"),
-                      _make_message("assistant", "alpha prelim")],
+            messages=[_make_message("user", "query")],
             children=[beta1, beta2])
 
         return root, beta1, beta2, final

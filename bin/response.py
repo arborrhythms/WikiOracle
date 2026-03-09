@@ -24,7 +24,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import requests
 
-from config import Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config, _PROVIDER_MODELS
+from config import (
+    Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config, _PROVIDER_MODELS,
+    DEFAULT_TRUTH_CONTEXT, DEFAULT_CONVERSATION_CONTEXT,
+)
 from sensation import preprocess_training_example
 from truth import (
     _fetch_authority,
@@ -132,6 +135,78 @@ def static_truth(
     return result
 
 
+def direct_truth_sources(
+    trust_entries: List[Dict[str, Any]],
+    strip_fn: Callable = strip_xhtml,
+) -> List[Source]:
+    """Build Source list of direct truths only (facts + feelings).
+
+    Unlike ``static_truth()`` which also includes references, this filters
+    to only ``<fact>`` and ``<feeling>`` entries — the direct propositional
+    content that beta providers receive as context.
+    """
+    sources: List[Source] = []
+    for entry in trust_entries:
+        content = entry.get("content", "")
+        if "<fact" in content:
+            kind = "fact"
+        elif "<feeling" in content:
+            kind = "feeling"
+        else:
+            continue
+        sources.append(Source(
+            source_id=entry.get("id", ""),
+            title=entry.get("title", ""),
+            trust=entry.get("trust", 0),
+            content=strip_fn(content),
+            kind=kind,
+            time=entry.get("time", ""),
+        ))
+    return sources
+
+
+def _extract_direct_truths(
+    response_text: str,
+    provider_id: str,
+    provider_trust: float,
+) -> tuple:
+    """Parse ``<fact>``, ``<feeling>``, ``<conversation>`` from a beta response.
+
+    Returns ``(conversation_text, truth_sources)`` where:
+      - *conversation_text* is the text inside ``<conversation>`` tags (or None)
+      - *truth_sources* is a list of Source objects for extracted facts/feelings
+    """
+    conversation_text = None
+    truth_sources: List[Source] = []
+
+    # Extract <conversation> content
+    conv_match = re.search(r"<conversation[^>]*>(.*?)</conversation>", response_text, re.DOTALL)
+    if conv_match:
+        conversation_text = conv_match.group(1).strip()
+
+    # Extract <fact> entries
+    for i, m in enumerate(re.finditer(r"<fact[^>]*>(.*?)</fact>", response_text, re.DOTALL)):
+        truth_sources.append(Source(
+            source_id=f"{provider_id}_fact_{i}",
+            title=f"{provider_id} fact",
+            trust=provider_trust,
+            content=m.group(1).strip(),
+            kind="fact",
+        ))
+
+    # Extract <feeling> entries
+    for i, m in enumerate(re.finditer(r"<feeling[^>]*>(.*?)</feeling>", response_text, re.DOTALL)):
+        truth_sources.append(Source(
+            source_id=f"{provider_id}_feeling_{i}",
+            title=f"{provider_id} feeling",
+            trust=provider_trust,
+            content=m.group(1).strip(),
+            kind="feeling",
+        ))
+
+    return conversation_text, truth_sources
+
+
 # ---------------------------------------------------------------------------
 # HME: evaluate <provider> entries
 # ---------------------------------------------------------------------------
@@ -144,14 +219,10 @@ def _build_provider_query_bundle(
 ) -> ProviderBundle:
     """Build a RAG-free bundle for a beta provider consultation.
 
-    The provider sees system context, history, the query, and the output
-    instructions — but NO sources (no RAG).  This keeps the beta
-    providers independent so the mastermind can weigh their opinions.
-
-    When *prelim_response* is provided (the alpha's preliminary response),
-    the beta sees the Q → R_alpha exchange in its history before being
-    asked the same question for its own assessment.  This is the steering
-    signal described in the voting protocol (doc/Voting.md).
+    .. deprecated::
+        Legacy interface kept for backward compatibility.
+        Use :func:`_build_truth_provider_bundle` or
+        :func:`_build_conversation_provider_bundle` instead.
     """
     hist = list(history)
     if prelim_response:
@@ -161,6 +232,51 @@ def _build_provider_query_bundle(
         system=system,
         history=hist,
         sources=[],
+        transient_sources=[],
+        query=query,
+        output=output,
+    )
+
+
+def _build_truth_provider_bundle(
+    system_context: str,
+    direct_sources: List[Source],
+    query: str,
+    output: str,
+) -> ProviderBundle:
+    """Build a bundle for a truth-only beta (conversation=false).
+
+    The beta sees the system context with direct truths (facts/feelings)
+    but no conversation history.  It is expected to return only ``<fact>``
+    and ``<feeling>`` elements.
+    """
+    return ProviderBundle(
+        system=system_context,
+        history=[],
+        sources=direct_sources,
+        transient_sources=[],
+        query=query,
+        output=output,
+    )
+
+
+def _build_conversation_provider_bundle(
+    system_context: str,
+    history: List[Dict[str, str]],
+    direct_sources: List[Source],
+    query: str,
+    output: str,
+) -> ProviderBundle:
+    """Build a bundle for a conversational beta (conversation=true).
+
+    The beta sees conversation history, direct truths, and the query.
+    It is expected to return a ``<conversation>`` answer plus optional
+    ``<fact>`` and ``<feeling>`` elements.
+    """
+    return ProviderBundle(
+        system=system_context,
+        history=list(history),
+        sources=direct_sources,
         transient_sources=[],
         query=query,
         output=output,
@@ -221,84 +337,98 @@ def evaluate_providers(
     *,
     timeout_s: int = 60,
     call_chain: Optional[List[str]] = None,
-    prelim_response: Optional[str] = None,
-) -> List[Source]:
-    """Evaluate <provider> trust entries by sending each a RAG-free bundle.
+    direct_sources: Optional[List[Source]] = None,
+) -> tuple:
+    """Evaluate <provider> trust entries as beta consultations.
+
+    Each provider's ``conversation`` flag determines its role:
+      - **conversation=false** (default): beta contributes only direct truths
+        (``<fact>`` and ``<feeling>``).  Invisible to conversation tree.
+      - **conversation=true**: beta participates in the conversation and may
+        return a ``<conversation>`` answer plus truths.
 
     Args:
-        provider_entries: list of (trust_entry, provider_config) pairs
-                          as returned by get_provider_entries().
+        provider_entries: list of (trust_entry, provider_config) pairs.
         system:   system context string (from state.context).
         history:  conversation history (ancestor chain).
         query:    the current user message.
         output:   structured output instructions.
-        call_fn:  callable(provider_config, messages) -> str
-                  Caller-supplied function that calls the provider API.
+        call_fn:  callable(provider_config, messages) -> str.
         timeout_s:  per-provider wall-clock timeout.
-        call_chain: ordered list of provider IDs that have acted as alpha
-                    in the current vote ancestry.  A provider whose ID
-                    appears in this chain stays silent (cycle prevention).
-        prelim_response: the alpha's preliminary response text.  When
-                    provided, each beta sees Q → R_alpha in its history
-                    before being asked the same question (voting protocol
-                    steering).  Only injected for providers whose config
-                    has prelim=True (the default).
+        call_chain: provider IDs in the call ancestry (cycle prevention).
+        direct_sources: pre-computed direct truth Sources (facts/feelings)
+                    to include in provider bundles.
 
     Returns:
-        List of Source objects with kind="provider", whose content is
-        a <div> wrapping the provider's response text.
+        ``(conversation_sources, truth_contributions)`` tuple:
+          - *conversation_sources*: list of Source objects (kind="provider")
+            from conversation=true betas — visible in the conversation tree.
+          - *truth_contributions*: list of Source objects (kind="fact"/"feeling")
+            extracted from all beta responses.
     """
     if not provider_entries:
-        return []
+        return [], []
 
     chain = set(call_chain) if call_chain else set()
+    dsources = direct_sources or []
 
-    # Base RAG-free bundle (shared when no per-provider truth and prelim enabled)
-    base_bundle = _build_provider_query_bundle(
-        system, history, query, output,
-        prelim_response=prelim_response,
-    )
-    base_messages = to_nanochat_messages(base_bundle)
-
-    # Cold bundle (no steering) for providers with prelim=False
-    cold_bundle = _build_provider_query_bundle(
-        system, history, query, output,
-        prelim_response=None,
-    )
-    cold_messages = to_nanochat_messages(cold_bundle)
-
-    results: List[Source] = []
+    conversation_sources: List[Source] = []
+    truth_contributions: List[Source] = []
 
     def _evaluate_one(pair):
-        """Evaluate one provider entry and convert output to a Source object."""
+        """Evaluate one provider entry.
+
+        Returns (conv_source_or_None, [truth_sources]).
+        """
         entry, pconfig = pair
 
         # Cycle prevention: if this provider is in the call chain, stay silent
         if entry.get("id", "") in chain:
-            return None
+            return None, []
 
-        # Per-provider prelim control: prelim defaults to True
-        wants_prelim = pconfig.get("prelim", True) and prelim_response
+        wants_conversation = pconfig.get("conversation", False)
 
-        # Per-provider truth: if authority_url, build custom messages with
-        # the provider's private facts; otherwise use shared RAG-free messages
-        prov_truth = resolve_provider_truth(pconfig, entry)
-        if prov_truth:
-            custom_bundle = _build_provider_query_bundle(
-                system, history, query, output,
-                prelim_response=prelim_response if wants_prelim else None,
-            )
-            custom_bundle.sources = prov_truth
-            messages = to_nanochat_messages(custom_bundle)
+        # Resolve per-provider context
+        if wants_conversation:
+            ctx = pconfig.get("conversation_context") or DEFAULT_CONVERSATION_CONTEXT
         else:
-            messages = base_messages if wants_prelim else cold_messages
+            ctx = pconfig.get("truth_context") or DEFAULT_TRUTH_CONTEXT
+
+        # Per-provider truth: authority_url provides private facts
+        prov_truth = resolve_provider_truth(pconfig, entry)
+        all_sources = list(dsources) + prov_truth
+
+        if wants_conversation:
+            bundle = _build_conversation_provider_bundle(
+                ctx, history, all_sources, query, output,
+            )
+        else:
+            bundle = _build_truth_provider_bundle(
+                ctx, all_sources, query, output,
+            )
+
+        messages = to_nanochat_messages(bundle)
 
         try:
             response = call_fn(pconfig, messages)
-            if response and not response.startswith("[Error"):
+            if not response or response.startswith("[Error"):
+                return None, []
+
+            # Extract structured truths from the beta's response
+            conv_text, extracted_truths = _extract_direct_truths(
+                response,
+                entry.get("id", ""),
+                entry.get("trust", 0),
+            )
+
+            conv_source = None
+            if wants_conversation:
+                # Build a conversation source for the tree
                 pname = html_mod.escape(entry.get("id", ""), quote=True)
-                safe_response = html_mod.escape(response[:4000])
-                return Source(
+                # Use conversation text if extracted, otherwise the full response
+                display_text = conv_text if conv_text else response
+                safe_response = html_mod.escape(display_text[:4000])
+                conv_source = Source(
                     source_id=entry.get("id", ""),
                     title=entry.get("title", ""),
                     trust=entry.get("trust", 0),
@@ -310,14 +440,16 @@ def evaluate_providers(
                     kind="provider",
                     time=entry.get("time", ""),
                 )
+
+            return conv_source, extracted_truths
         except Exception:
-            pass
-        return None
+            return None, []
 
     if len(provider_entries) == 1:
-        r = _evaluate_one(provider_entries[0])
-        if r:
-            results.append(r)
+        conv_src, truths = _evaluate_one(provider_entries[0])
+        if conv_src:
+            conversation_sources.append(conv_src)
+        truth_contributions.extend(truths)
     else:
         max_workers = min(len(provider_entries), 4)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -325,13 +457,14 @@ def evaluate_providers(
             done, _ = concurrent.futures.wait(futures, timeout=timeout_s)
             for fut in done:
                 try:
-                    r = fut.result(timeout=0)
-                    if r:
-                        results.append(r)
+                    conv_src, truths = fut.result(timeout=0)
+                    if conv_src:
+                        conversation_sources.append(conv_src)
+                    truth_contributions.extend(truths)
                 except Exception:
                     pass
 
-    return results
+    return conversation_sources, truth_contributions
 
 
 # ---------------------------------------------------------------------------
@@ -1238,11 +1371,10 @@ def _fan_out_and_aggregate(
     temperature: float = 0.7,
     call_chain: Optional[List[str]] = None,
 ) -> tuple:
-    """HME diamond vote: R_alpha_prelim → R_beta_* → R_alpha_final.
+    """HME diamond vote: beta fan-out → alpha final.
 
-    1. Call the alpha provider with Q → R_prelim (initial assessment)
-    2. Fan out to betas with Q + R_prelim (alpha steers the betas)
-    3. Call the alpha again with truth table + R_prelim + R_beta_* → R_final
+    1. Fan out to betas with Q + direct truths
+    2. Call the alpha with truth table + beta contributions → R_final
     """
     trust_entries = state.get("truth") or []
     provider_entries = get_provider_entries(trust_entries)
@@ -1256,21 +1388,10 @@ def _fan_out_and_aggregate(
 
     base_bundle = _build_bundle(state, user_message, query_config, conversation_id)
 
-    # ── Step 1: alpha preliminary response ──
-    # The alpha sees Q (with its truth table) and produces R_prelim.
-    prelim_messages = to_nanochat_messages(base_bundle)
-    prelim_response = _call_dynamic_provider(
-        primary_config, prelim_messages, temperature, cfg,
-    )
-    if prelim_response.startswith("[Error"):
-        prelim_response = None  # Fall back to single-shot if prelim fails
-
-    # ── Step 2: fan out to betas with Q + R_prelim ──
-    # Each beta sees the alpha's preliminary response as steering context
-    # (unless the beta's config has prelim="false").
-    # The call chain includes the alpha so it stays silent if a beta
-    # tries to call it back (cycle prevention).
-    provider_sources: List[Source] = []
+    # ── Step 1: fan out to betas ──
+    d_sources = direct_truth_sources(trust_entries)
+    conversation_sources: List[Source] = []
+    truth_contributions: List[Source] = []
     if secondaries:
         beta_chain = list(call_chain or [])
         if primary_id:
@@ -1279,7 +1400,7 @@ def _fan_out_and_aggregate(
         def _call_for_eval(pconfig, messages):
             return _call_dynamic_provider(pconfig, messages, temperature, cfg)
 
-        provider_sources = evaluate_providers(
+        conversation_sources, truth_contributions = evaluate_providers(
             secondaries,
             system=base_bundle.system,
             history=base_bundle.history,
@@ -1288,21 +1409,16 @@ def _fan_out_and_aggregate(
             call_fn=_call_for_eval,
             timeout_s=max(int(cfg.timeout_s), 60),
             call_chain=beta_chain,
-            prelim_response=prelim_response,
+            direct_sources=d_sources,
         )
 
-    # ── Step 3: alpha final response ──
-    # The alpha sees its full truth table + its own R_prelim + all R_beta_*.
+    # ── Step 2: alpha final response ──
+    all_provider_sources = conversation_sources + truth_contributions
     final_bundle = build_query(
         state, user_message, query_config,
         conversation_id=conversation_id,
-        provider_sources=provider_sources,
+        provider_sources=all_provider_sources,
     )
-    # Inject R_prelim into the alpha's history so it can see its own
-    # earlier thinking alongside the beta responses.
-    if prelim_response:
-        final_bundle.history.append({"role": "user", "content": user_message})
-        final_bundle.history.append({"role": "assistant", "content": prelim_response})
 
     api_url = primary_config.get("api_url", "")
     if "anthropic.com" in api_url:
@@ -1327,7 +1443,7 @@ def _fan_out_and_aggregate(
         final_messages = to_nanochat_messages(final_bundle)
         response_text = _call_dynamic_provider(primary_config, final_messages, temperature, cfg)
 
-    return response_text, provider_sources
+    return response_text, all_provider_sources
 
 
 # ---------------------------------------------------------------------------
@@ -1454,20 +1570,20 @@ def process_chat(
         if eid in derived and abs(derived[eid] - entry.get("trust", 0.0)) > 1e-9:
             entry["_derived_trust"] = derived[eid]
 
-    # ── Voting diamond: R_alpha_prelim → R_beta_* → R_alpha_final ──
+    # ── Voting: beta fan-out → alpha final ──
     #
     # When dynamic <provider> entries exist, the UI-selected provider
-    # acts as alpha and the dynamic providers act as betas:
-    #   1. Alpha preliminary: call the UI provider with Q → R_prelim
-    #   2. Beta fan-out: evaluate dynamic providers with Q + R_prelim
-    #   3. Alpha final: call the UI provider again with R_prelim + R_beta_*
+    # acts as alpha and the dynamic providers act as betas.
     #
-    # When there are no dynamic providers, this collapses to a single
-    # call (steps 1 and 3 merge into one).
+    # Betas with conversation=true participate in the conversation tree
+    # (creating a diamond).  Betas with conversation=false only contribute
+    # direct truths (facts/feelings) invisibly.
+    #
+    # When there are no dynamic providers, this collapses to a single call.
 
     dyn_providers = get_provider_entries(truth_list)
-    provider_sources: list = []
-    prelim_response: str | None = None
+    conversation_sources: list = []
+    truth_contributions: list = []
 
     context_text = strip_xhtml(state.get("context", ""))
     print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
@@ -1482,28 +1598,15 @@ def process_chat(
         rc_pcfg = rc_providers.get(provider, {})
         client_api_key = rc_pcfg.get("api_key", "")
 
-    # ── Step 1: alpha preliminary response ──
+    # ── Step 1: beta fan-out ──
     if dyn_providers:
-        print(f"[WikiOracle] Voting: {len(dyn_providers)} dynamic provider(s) — "
-              f"calling alpha (UI provider) for preliminary response")
-        prelim_bundle = build_query(state, user_msg, query_config,
-                                    conversation_id=context_conv_id)
-        prelim_response = _call_provider(
-            cfg, prelim_bundle, temperature, provider, client_api_key, client_model,
-            chat_settings=query_config.get("chat"),
-        )
-        if prelim_response.startswith("[Error"):
-            prelim_response = None  # Fall back to single-shot if prelim fails
-
-    # ── Step 2: beta fan-out with Q + R_prelim ──
-    if dyn_providers:
-        print(f"[WikiOracle] Voting: fan out to {len(dyn_providers)} beta(s) "
-              f"with preliminary {'(steering)' if prelim_response else '(no steering — prelim failed)'}")
+        print(f"[WikiOracle] Voting: fan out to {len(dyn_providers)} beta(s)")
         base_bundle = _build_bundle(state, user_msg, query_config, context_conv_id)
+        d_sources = direct_truth_sources(truth_list)
         call_chain: list = []
         def _call_for_eval(pconfig, messages):
             return _call_dynamic_provider(pconfig, messages, temperature, cfg)
-        provider_sources = evaluate_providers(
+        conversation_sources, truth_contributions = evaluate_providers(
             dyn_providers,
             system=base_bundle.system,
             history=base_bundle.history,
@@ -1512,17 +1615,14 @@ def process_chat(
             call_fn=_call_for_eval,
             timeout_s=max(int(cfg.timeout_s), 60),
             call_chain=call_chain,
-            prelim_response=prelim_response,
+            direct_sources=d_sources,
         )
 
-    # ── Step 3: alpha final response ──
+    # ── Step 2: alpha final response ──
+    all_provider_sources = conversation_sources + truth_contributions
     bundle = build_query(state, user_msg, query_config,
                          conversation_id=context_conv_id,
-                         provider_sources=provider_sources or None)
-    # Inject R_prelim so the alpha can see its earlier thinking
-    if prelim_response:
-        bundle.history.append({"role": "user", "content": user_msg})
-        bundle.history.append({"role": "assistant", "content": prelim_response})
+                         provider_sources=all_provider_sources or None)
     print(f"[WikiOracle] RAG: truth_weight={truth_weight_flag}, truth_entries={truth_count}, "
           f"bundle.sources={len(bundle.sources)}")
     if config_mod.DEBUG_MODE:
@@ -1545,7 +1645,7 @@ def process_chat(
     user_content = ensure_xhtml(user_msg) if user_msg else ""
     assistant_content = ensure_xhtml(response_text)
     assistant_timestamp = utc_now_iso()
-    user_display = runtime_cfg.get("user", {}).get("name", "User")
+    user_display = state.get("user", {}).get("name", "User")
     llm_display = llm_provider_name
 
     if user_msg:
@@ -1571,9 +1671,9 @@ def process_chat(
     client_owns_query = config_mod.STATELESS_MODE
 
     # ── Build conversation tree ──
-    # When a vote occurred (prelim + beta responses), build a diamond:
+    # When conversation=true betas participated, build a diamond:
     #
-    #        root (query + prelim)
+    #        root (query only)
     #       /    \
     #     beta1  beta2        ← children of root
     #       \    /
@@ -1584,22 +1684,13 @@ def process_chat(
     # that navigating down from *any* beta reaches it.  The XML
     # serializer deduplicates by ID.
     #
-    # Without voting, it's a simple linear conversation:
+    # Without conversation=true betas, it's a simple linear conversation:
     #   conv: [user_query, alpha_response]
 
-    has_vote = bool(prelim_response and provider_sources)
+    has_vote = bool(conversation_sources)
 
     if has_vote:
         first_words = strip_xhtml(user_content)[:50] if user_content else "(continue)"
-
-        # Root: user question + alpha preliminary
-        prelim_entry = {
-            "role": "assistant",
-            "username": f"{llm_display} (prelim)",
-            "time": user_timestamp,
-            "content": ensure_xhtml(prelim_response),
-        }
-        ensure_message_id(prelim_entry)
 
         # Final: alpha's final (synthesized) response
         # Two parents: all betas (true diamond)
@@ -1611,10 +1702,10 @@ def process_chat(
         ensure_conversation_id(final_conv)
         final_normalized = normalize_conversation(final_conv)
 
-        # Beta children: one conversation per beta provider response
+        # Beta children: one conversation per conversation=true beta response
         # Each beta gets final_conv as a child (shared object = diamond)
         beta_convs = []
-        for src in provider_sources:
+        for src in conversation_sources:
             beta_msg = {
                 "role": "assistant",
                 "username": src.title or src.source_id,
@@ -1635,8 +1726,8 @@ def process_chat(
         final_normalized["parentId"] = beta_ids
 
         # Assemble the root with betas as children
-        root_messages = ([query_entry, prelim_entry] if query_entry
-                         else [prelim_entry])
+        # Root has only the user query (no prelim)
+        root_messages = [query_entry] if query_entry else []
         vote_root = {
             "title": first_words,
             "messages": root_messages,
@@ -1726,14 +1817,14 @@ def process_chat(
     if ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE:
         try:
             client_truth = state.get("truth") or []
-            user_section = runtime_cfg.get("user", {})
+            user_section = state.get("user", {})
             author_guid = user_guid(
                 user_section.get("name", "User"),
-                uid=user_section.get("uid") or None,
+                uid=user_section.get("user_id") or None,
             )
 
-            # Ensure user GUID is stored at root level of state
-            state["user_guid"] = author_guid
+            # Ensure user ID is stored in state's user block
+            state.setdefault("user", {})["user_id"] = author_guid
 
             # Resolve references→facts, authorities→facts, providers→feelings
             # before DoT computation and merge.

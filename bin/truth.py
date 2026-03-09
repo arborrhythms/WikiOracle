@@ -829,13 +829,13 @@ def parse_provider_block(content: str) -> dict | None:
         else:
             authority_url = auth_el.get("url", "")
 
-    prelim_raw = _val("prelim", "true").lower()
+    conversation_raw = _val("conversation", "false").lower()
     result = {
         "api_url": _val("api_url"),
         "api_key": _val("api_key"),
         "model": _val("model"),
         "authority_url": authority_url,
-        "prelim": prelim_raw not in ("false", "0", "no"),
+        "conversation": conversation_raw in ("true", "1", "yes"),
         "timeout": 0,
         "max_tokens": 0,
     }

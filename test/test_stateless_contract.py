@@ -225,15 +225,15 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
             self.assertGreater(len(returned_state.get("conversations", [])), 0)
 
     def test_uses_runtime_config_user_name(self):
-        """The user display name in messages comes from runtime_config, not _CONFIG."""
-        rt = _make_runtime_config()
-        rt["user"]["name"] = "RuntimeUser"
+        """The user display name in messages comes from state, not _CONFIG."""
+        st = _make_state()
+        st["user"] = {"name": "RuntimeUser", "user_id": ""}
 
         with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hi",
-                "state": _make_state(),
-                "runtime_config": rt,
+                "state": st,
+                "runtime_config": _make_runtime_config(),
                 "config": {"provider": "wikioracle"},
             })
 
@@ -280,17 +280,17 @@ class TestBootstrapEndpoint(StatelessContractBase):
         resp = self.client.get("/bootstrap")
         data = resp.get_json()
         c = data["config"]
-        # Top-level sections
-        self.assertIn("user", c)
+        # Top-level sections (user no longer in config — lives in state)
+        self.assertNotIn("user", c)
         self.assertIn("ui", c)
         self.assertIn("chat", c)
         self.assertIn("server", c)
         # Nested sub-keys (not flat)
-        self.assertIn("name", c["user"])
         self.assertIn("default_provider", c["ui"])
         self.assertIn("layout", c["ui"])
         self.assertIn("stateless", c["server"])
         self.assertIn("url_prefix", c["server"])
+        self.assertIn("server_id", c["server"])
 
 
 class TestStatefulChatUnaffected(unittest.TestCase):

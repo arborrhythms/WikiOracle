@@ -1,10 +1,10 @@
-# Configuration
+# Config
 
 WikiOracle configuration lives in `config.xml` at the project root. The file is validated by `data/config.xsd` and loaded at server startup by `bin/config.py`. A template with sensible defaults ships as `data/config.xml` — copy it to the project root and fill in your values. `config.xml` is gitignored.
 
 The configuration has five top-level sections: [User](#1-user), [Providers](#2-providers), [Chat](#3-chat), [UI](#4-ui), and [Server](#5-server). Each section is described below with its fields, defaults, and design rationale.
 
-## 1. User
+## User
 
 Identity metadata attached to outgoing messages.
 
@@ -20,7 +20,7 @@ Identity metadata attached to outgoing messages.
 </user>
 ```
 
-## 2. Providers
+## Providers
 
 LLM provider definitions. Each `<provider name="key">` block configures an upstream API endpoint. The `name` attribute is the internal lookup key; `display_name` is the label shown in the chat UI on assistant messages.
 
@@ -54,7 +54,7 @@ Custom providers can be added by appending `<provider name="my_key">` blocks. An
 
 The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) — never the key itself. See [Security.md](./Security.md) §2 for details.
 
-## 3. Chat
+## Chat
 
 Chat behaviour settings controlling how the LLM produces responses and how the online training pipeline is tuned.
 
@@ -92,7 +92,7 @@ The `truth_weight` field (0.0–1.0) replaces the former boolean `rag` flag.  It
 
 **Legacy migration**: The former `rag` boolean is automatically migrated: `rag: true` → `truth_weight: 0.7`, `rag: false` → `truth_weight: 0.0`.  This migration runs in both the client (`client/config.js`) and server (`bin/response.py`).
 
-## 4. UI
+## UI
 
 Client-side defaults for the browser interface. These are persisted in `sessionStorage` and can be changed at runtime via the Settings panel.
 
@@ -116,7 +116,7 @@ Client-side defaults for the browser interface. These are persisted in `sessionS
 </ui>
 ```
 
-## 5. Server
+## Server
 
 Runtime parameters. These values serve as defaults and are typically overridden via CLI flags at startup.
 
@@ -128,7 +128,7 @@ Runtime parameters. These values serve as defaults and are typically overridden 
 | `online_training` | section | — | Online learning subsystem. See [§5a](#5a-online-training) below. |
 | `allowed_urls` | section | — | URL whitelist for authority/provider fetches. See [§5b](#5b-allowed-urls) below. |
 
-### 5a. Online training
+### Online training
 
 Controls the continuous learning pipeline (Stages 2–4). See [Training.md](./Training.md) for the full design.
 
@@ -181,7 +181,7 @@ When `enabled` is `false` (the default), the engine effectively treats all incom
 
 In this mode, facts carry no more lasting weight than feelings. They are tagged in the XML for display purposes, but they are ephemeral — they do not accumulate, persist, or influence future responses via RAG. This is the safe default: the system functions as a stateless chat proxy until the operator explicitly enables truth acquisition.
 
-### 5b. Allowed URLs
+### Allowed URLs
 
 URL prefixes permitted for outbound HTTP(S) requests made by the server during authority lookups and dynamic provider fetches. Only URLs whose prefix matches one of these entries are allowed. `file://` URLs are always blocked unless explicitly whitelisted.
 

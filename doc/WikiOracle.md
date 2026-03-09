@@ -1,134 +1,65 @@
-# OpenMind
+# WikiOracle
+Revision: 2026.02.27
 
-*A consistency-first large language model for conversational XAI,
-honesty, and robust public alignment*
+## Architectural Overview
 
-## Core Principle
+The system is governed by two file types:
 
-Consistency is treated as a first-class system property: the model
-should be of one mind across prompts, time, and conversational turns.
-High consistency supports honesty (stable commitments to truth) and
-transparency (stable explanations and reasons that can be interrogated
-and refined in dialogue).
+* **State files** (`.xml`): contains header information, conversations, and trust entries (validated by `data/state.xsd`).
+* **Config files** (`.xml`): contains provider credentials, chat and UI settings, and retrieval parameters (validated by `data/config.xsd`).
 
-## Systems Claim
+## The Client
 
-* Conversation is the runtime interface for explainability: XAI emerges
-  when a model can keep its commitments stable while answering follow-up
-  questions.
+The state of WikiOracle is maintained by the client.
+It has the following information:
 
-* Inconsistency is operational dissonance: it produces contradictory
-  answers, shifting rationales, and brittle safety behavior.
+* **Header**: has information about the user and the file itself
+* **Conversation**: consists of queries, responses, and sub-conversations
+  * **Query**: text from the user
+  * **Response**: text from the (main) provider or LLM
+* **Truth**: a set of beleiefs, each of which has a Degree of Truth
+  * **Direct Truth**: corresponds to things we experience directly
+    * **Fact**: concrete and abstract propositions about the world and language itself
+    * **Feeling**: statements which are beyond true or not true, like poetry
+  * **Indirect Truth**: inferences about truth that are based on direct truth
+    * **Reference**: a reference is basically a URL
+    * **Provider**: a provider is another oracle that can provide truth or even participate in the conversation.
+    * **Operator**: a set of logical operators (And, Or, Not, and Non)
+    * **Authority**: an authority is a reference to another set of conversations and truths
 
-* Dissonance must be detected and resolved prior to release (or
-  quarantined with explicit uncertainty), otherwise users cannot
-  reliably audit the model’s reasoning.
+## The Server
 
-## What “Consistency” Means (Operational)
+The server executes the client state, based on a configuration file and a corpus of truth that it maintains which is identical to the Truth section of a state file.
 
-* Semantic consistency: equivalent questions yield equivalent answers
-  (up to paraphrase), with stable definitions and scope.
 
-* Normative consistency: stable commitments about truth-telling,
-  uncertainty, and refusal conditions; no hidden policy shifts
-  mid-conversation.
+## Conversation 
 
-* Explanatory consistency: explanations remain compatible with prior
-  explanations; updates are explicitly flagged as revisions with
-  reasons.
+WikiOracle implements a **Hierarchical Mixture of Experts (HME)** architecture for evaluating claims.
 
-* Calibration consistency: confidence language tracks evidence;
-  uncertainty is stated when support is weak or absent.
+The WikiOracle logic is similar to a hierarchical mixture of experts, where trust is based on truth values with associated certainty values in the range [-1, 1]. Those propositions can be static facts, references to other bodies of knowledge, or computed by other minds that are trusted and/or distrusted. Finally, truth is computed by logical operators (and/or/not under Strong Kleene semantics) over that body of propositions; see [Logic.md](./Logic.md) (Operator documentation).
 
-## Why Consistency Enables Conversational XAI
+WikiOracle implements a Hierarchical Mixture of Experts (HME) architecture for evaluating truth. 
 
-* Auditability: users can probe, challenge, and refine the model’s
-  claims without the model “moving the goalposts.”
 
-* Traceability: the model can maintain a coherent chain of reasons
-  across turns, making disagreements diagnosable.
+## Truth
 
-* Error correction: stable commitments make it possible to localize a
-  mistake (data, inference, interpretation, policy) and correct it.
+* **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
+* **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the truth table.
+* **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
+* **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
+* **Feelings** are subjective statements (opinions, poetry, hedged claims) occupying the "neither" position in the tetralemma. They influence evaluation but are excluded from training and truth tables.
+* **References** are external source citations (Wikipedia, Snopes, etc.) that ground claims in verifiable sources, participating in the truth table alongside facts.
 
-## Guardrails and Consistency
+The UI-selected provider acts as the "mastermind," synthesizing all evidence — facts, references, operator-derived certainty, authority imports, and provider consultations — into a final response.
 
-* Safety constraints should be internally coherent and explicitly
-  expressed as principles and boundaries.
+## Example
 
-* If guardrails conflict with each other or with stated commitments,
-  they create dissonance that manifests as evasions or unstable
-  behavior.
+As a somewhat fun example, we consider how WikiOracle can be used to create a voting system that operates in real-time as a Hierarchical Mixture of Experts composed of multiple LLMS (or even a single LLM with mutliple truth sets).
 
-* Design goal: minimize inconsistency between (a) truth-seeking
-  behavior, (b) safety constraints, and (c) user-facing explanations.
+The "alpha" conducts the vote. So there is a conversation in which the user asks a question. The state file of the alpha contains, in addition to various facts, feelings, and other sources of truth, two providers which we will call the "betas". When the user directs a query to the alpha, the alpha first turns its indirect truth into direct truth: that means evlauating the providers. So, the Query from the user is passed to the Betas.
 
-Note: This does not mean removing safety constraints. It means making
-them consistent, legible, and reviewable so that the model’s behavior is
-predictable and explainable.
+Each of the Betas sees the query and is asked to respond with a Response to the Query, and optionally to provide its Facts and Feelings that are relevant to that Query. In a sense, they are voting on that query, and providing their own reasons for having done so.
 
-## Online Learning and “Capture”
+Finally, the Alpha see the query and the Responses (or votes) cast by the betas. It also sees the facts and feelings that they have returned, which are incorporated into the Truth Set. So it has this mixture of its own truth and truth provided by each of the Betas, and based on their advice and its trust of each Beta, it concludes with a Respons of its own. This construct is a bit non-traditional in terms of a linear conversation, and it fact it creates a diamond pattern in the tree view of the conversation.
 
-Hypothesis: attempts to “capture” a system often exploit ambiguity,
-hidden objectives, or inconsistencies between stated rules and actual
-behavior. A consistency-first model reduces the attack surface by
-requiring that new behaviors be reconciled with an explicit, stable set
-of commitments.
-
-* Public education loop: users can supply counterexamples and arguments;
-  the system must reconcile them transparently rather than silently
-  shifting.
-
-* Invariant commitments: the model maintains stable principles (e.g.,
-  evidence-first claims, explicit uncertainty, refusal rules) while
-  updating within those bounds.
-
-* Governance review: high-impact behavioral updates are reviewed against
-  the invariants before deployment.
-
-Caution: consistency is not a complete defense. Coordinated adversaries
-can still attempt to steer updates. Robustness requires rate limits,
-provenance tracking, anomaly detection, and multi-stakeholder oversight.
-
-## OpenMind as Public Epistemic Infrastructure
-
-* Goal: converge toward a shared, corrigible “oracle” that reflects the
-  best-supported claims of the population, not the loudest incentives.
-
-* Mechanism: evidence-weighted aggregation, transparent reasoning, and
-  explicit dispute handling (what is known, unknown, contested).
-
-* Output: a living map of public knowledge with calibrated confidence,
-  sources, and revision history.
-
-## Why Non-Profit Support Makes Sense
-
-* Truthfulness and transparency are public goods; incentives for them
-  are underprovided by purely competitive markets.
-
-* A non-profit structure can prioritize: open evaluation, public
-  accountability, and long-horizon trust over short-term persuasion.
-
-* Legitimacy: multi-stakeholder governance reduces the risk of
-  single-actor control.
-
-## Release Gate: Dissonance Resolution (Pre-Deployment)
-
-* Stress-test for contradictions across topics, personas, and
-  adversarial prompts.
-
-* Require the model to surface and resolve conflicts: either unify the
-  rationale or explicitly mark a boundary/uncertainty.
-
-* Publish a “consistency report” and changelog for major releases.
-
----
-
-## See also
-
-* [Constitution.md](./Constitution.md) — invariant commitments that consistency-first reasoning implements.
-* [Training.md](./Training.md) — DegreeOfTruth and anti-capture mechanisms for online learning.
-* [FreedomEmpathyTruth.md](./FreedomEmpathyTruth.md) — public epistemic infrastructure and safety framework.
-* [Ethics.md](./Ethics.md) — consistency-first design as an ethical principle.
-* [WhatIsTruth.md](./WhatIsTruth.md) — plural truth and explicit dispute handling.
-* [Entanglement.md](./Entanglement.md) — capture resistance through entanglement avoidance.
+For more information, see [Voting](./Voting.md).

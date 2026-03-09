@@ -29,7 +29,8 @@ def _make_state_with_conversations():
     return {
         "version": STATE_VERSION,
         "schema": SCHEMA_URL,
-        "time": "2026-03-05T12:00:00Z",
+        "time_creation": "2026-03-05T12:00:00Z",
+        "time_lastModified": "2026-03-05T12:00:00Z",
         "title": "XML Test State",
         "context": "<div><p>Test context</p></div>",
         "selected_conversation": "c_root",
@@ -103,7 +104,8 @@ def _make_state_with_operators():
     return {
         "version": STATE_VERSION,
         "schema": SCHEMA_URL,
-        "time": "2026-03-05T12:00:00Z",
+        "time_creation": "2026-03-05T12:00:00Z",
+        "time_lastModified": "2026-03-05T12:00:00Z",
         "title": "Operator Test",
         "context": "<div/>",
         "conversations": [],
@@ -215,7 +217,7 @@ class TestStateToXml(unittest.TestCase):
         state = ensure_minimal_state({
             "version": STATE_VERSION,
             "schema": SCHEMA_URL,
-            "time": "2026-03-05T12:00:00Z",
+            "time_creation": "2026-03-05T12:00:00Z",
             "title": "Selection Test",
             "context": "<div/>",
             "selected_conversation": "c_child",
@@ -245,7 +247,7 @@ class TestStateToXml(unittest.TestCase):
         state = ensure_minimal_state({
             "version": STATE_VERSION,
             "schema": SCHEMA_URL,
-            "time": "2026-03-05T12:00:00Z",
+            "time_creation": "2026-03-05T12:00:00Z",
             "title": "Selection Test",
             "context": "<div/>",
             "selected_conversation": "c_root",
@@ -287,7 +289,8 @@ class TestXmlToState(unittest.TestCase):
         xml_str = state_to_xml(original)
         restored = xml_to_state(xml_str)
         self.assertEqual(restored["title"], "XML Test State")
-        self.assertEqual(restored["time"], "2026-03-05T12:00:00Z")
+        self.assertEqual(restored["time_creation"], "2026-03-05T12:00:00Z")
+        self.assertIn("time_lastModified", restored)
         self.assertEqual(restored["selected_conversation"], "c_root")
 
     def test_roundtrip_preserves_conversations(self):
@@ -399,6 +402,59 @@ class TestXmlToState(unittest.TestCase):
     def test_empty_string_returns_empty_state(self):
         restored = xml_to_state("")
         self.assertEqual(restored["conversations"], [])
+
+    def test_backward_compat_old_time_field(self):
+        """Old <time> element maps to time_creation."""
+        xml_text = """<?xml version="1.0" encoding="UTF-8"?>
+<state>
+  <header>
+    <version>2</version>
+    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
+    <time>2026-03-05T12:00:00Z</time>
+    <title>Old Format</title>
+    <context><div /></context>
+  </header>
+</state>
+"""
+        restored = xml_to_state(xml_text)
+        self.assertEqual(restored["time_creation"], "2026-03-05T12:00:00Z")
+        self.assertEqual(restored["time_lastModified"], "2026-03-05T12:00:00Z")
+
+    def test_backward_compat_old_user_guid(self):
+        """Old <user_guid> element maps to user.user_id."""
+        xml_text = """<?xml version="1.0" encoding="UTF-8"?>
+<state>
+  <header>
+    <version>2</version>
+    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
+    <time_creation>2026-03-05T12:00:00Z</time_creation>
+    <time_lastModified>2026-03-05T12:00:00Z</time_lastModified>
+    <title>Old GUID Format</title>
+    <context><div /></context>
+    <user_guid>abc-123-def</user_guid>
+  </header>
+</state>
+"""
+        restored = xml_to_state(xml_text)
+        self.assertEqual(restored["user"]["user_id"], "abc-123-def")
+        self.assertEqual(restored["user"]["name"], "User")
+
+    def test_new_user_block_roundtrips(self):
+        """New <user> block with name and user_id roundtrips."""
+        state = ensure_minimal_state({
+            "time_creation": "2026-03-05T12:00:00Z",
+            "title": "User Block Test",
+            "user": {"name": "Alice", "user_id": "alice-uuid-123"},
+            "conversations": [],
+            "truth": [],
+        }, strict=False)
+        xml_str = state_to_xml(state)
+        self.assertIn("<user>", xml_str)
+        self.assertIn("<name>Alice</name>", xml_str)
+        self.assertIn("<user_id>alice-uuid-123</user_id>", xml_str)
+        restored = xml_to_state(xml_str)
+        self.assertEqual(restored["user"]["name"], "Alice")
+        self.assertEqual(restored["user"]["user_id"], "alice-uuid-123")
 
 
 # =====================================================================

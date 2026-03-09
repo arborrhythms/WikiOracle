@@ -113,12 +113,11 @@ PDF_CHAPTERS := README.md \
   doc/WikiOracle.md \
   doc/Constitution.md \
   doc/Installation.md \
-  doc/WhatIsTruth.md \
+  doc/Truth.md \
   doc/Ethics.md \
-  doc/FreedomEmpathyTruth.md \
   doc/PrivacyAndSecurity.md \
-  doc/Entanglement.md \
-  doc/HierarchicalMixtureOfExperts.md \
+  doc/Freedom.md \
+  doc/Voting.md \
   doc/Logic.md \
   doc/Training.md \
   doc/Implementation.md \
@@ -724,9 +723,9 @@ build_sft:
 # --- PDF generation -----------------------------------------------------------
 # Generate a single PDF from all doc/*.md files with README as index.
 
-doc_pdf : doc/WikiOracle.pdf
+doc_pdf : WikiOracle.pdf
 
-doc/WikiOracle.pdf : doc/*.md
+WikiOracle.pdf : doc/*.md
 	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
 	mkdir -p output
 	pandoc $(PDFOPTS) \

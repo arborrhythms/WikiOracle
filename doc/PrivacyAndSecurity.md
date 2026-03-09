@@ -1,20 +1,15 @@
 # Privacy and Security
 
 
-## Worldline Privacy
+## Privacy
 
 Facts in WikiOracle are classified into two kinds based on their relationship
 to spacetime:
 
 | Kind | Description | Persistence |
 |---|---|---|
-| **Universal Knowledge** | Universal claims with no spatiotemporal anchor | Server truth table |
-| **Particular News** | Observations bound to a specific place and/or time | Session-only |
-
-This distinction is rooted in Buddhist epistemology: knowledge facts correspond
-to *anumāna* (inference — universally valid reasoning), while news facts
-correspond to *pratyakṣa* (direct perception — bound to the observer's
-spatiotemporal position).
+| **Abstract Knowledge** | Universal claims with no spatiotemporal anchor | Server truth table |
+| **Concrete News** | Observations bound to a specific place and/or time | Client state and optionally Server |
 
 ### Why news facts are session-only
 
@@ -61,9 +56,6 @@ into three channels, each with a different persistence policy:
 This preserves empirical learning while preventing historical worldline
 capture. The system **learns from events but never stores worldline
 histories**.
-
-
-#### Appendix: Local Freedom under Global Constraint (LFGC)
 
 The notion of data entanglement parallels the physics principle of **[Local Freedom under
 Global Constraint (LFGC)](https://zenodo.org/records/18644302)**.
@@ -282,7 +274,7 @@ content level — even when `store_particulars=true`, entries containing
 PII patterns (emails, phone numbers, GPS coordinates, named individuals
 with temporal markers) are always filtered before persistence.
 
-### Notes
+### Errata
 
 *Claude (Opus 4.6), March 2026*
 
@@ -330,7 +322,7 @@ architecture's most important safety boundary.
 
 WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:8888` by default (loopback only). In production, Apache ProxyPass routes external traffic to the local Flask process; the server itself is never directly exposed. This document covers the security considerations relevant to its architecture.
 
-### 1. Private Data
+### Private Data
 
 **Conversation state** (`state.xml`) contains the user's full dialogue history, system context, and trust entries. It lives on disk next to the server process.
 
@@ -341,7 +333,7 @@ WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:88
 
 **Exports** (`llm_*.xml` files) are full snapshots of state. They should be treated as sensitive if conversations contain private information.
 
-## 2. API Keys
+### API Keys
 
 Provider API keys (OpenAI, Anthropic, etc.) can be configured in three places, listed in precedence order:
 
@@ -353,7 +345,7 @@ Provider API keys (OpenAI, Anthropic, etc.) can be configured in three places, l
 
 The `config.server.providers` metadata (served via `/config` and `/bootstrap`) exposes only `has_key` (boolean) and `needs_key` (boolean) — never the key itself.
 
-### 3. Identity
+### Identity
 
 WikiOracle does not implement authentication. The server trusts any request from an allowed origin (configured via `WIKIORACLE_ALLOWED_ORIGINS`, defaulting to `https://127.0.0.1:8888` and `https://localhost:8888`).
 
@@ -362,11 +354,11 @@ WikiOracle does not implement authentication. The server trusts any request from
 
 For multi-user or public deployments, WikiOracle should sit behind a reverse proxy that handles authentication and maps users to separate state files.
 
-### 3a. Reverse Proxy
+### 3Reverse Proxy
 
 In production, Apache ProxyPass routes `/chat` to the local Flask process on `127.0.0.1:8787`. Only the `/chat` prefix is proxied. The NanoChat inference endpoint (`/chat/completions` on port 8000) is **not** exposed via the reverse proxy — the Flask shim calls it directly on `127.0.0.1:8000` via `WIKIORACLE_BASE_URL`.
 
-### 4. Cross-Site Scripting (XSS)
+### Cross-Site Scripting (XSS)
 
 WikiOracle renders user and LLM content as HTML (XHTML subset). Several layers mitigate XSS:
 
@@ -396,16 +388,18 @@ This blocks inline scripts, inline styles, and external resource loading. Even i
 * Trust entry content is XHTML and is rendered in the trust editor and included in RAG context. Malicious trust entries could inject misleading content into prompts.
 * The `/bootstrap` and `/config` endpoints serve raw `config.xml` to the client. If `config.xml` contains secrets and a same-origin XSS vector exists, those secrets could be read.
 
-### 5. CORS
+### CORS
 
 The server applies CORS headers only for requests whose `Origin` header matches the configured allowed origins. Preflight `OPTIONS` requests return `204` with appropriate headers. Cross-origin requests from other origins receive no CORS headers and are blocked by the browser.
 
-### 6. File System
+### File System
 
 * **Symlink rejection:** By default (`WIKIORACLE_REJECT_SYMLINKS=true`), the server refuses to read or write state files that are symlinks, preventing path-traversal attacks via symlinked state files.
 * **Static file serving** is restricted to a whitelist of safe extensions (`.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.xml`) and path-traversal is checked (`str(fp).startswith(str(ui_dir.resolve()))`).
 * **State size limit:** `max_state_bytes` (default 5 MB) prevents unbounded growth from malicious imports.
 
-### 7. Third-party Scraping
+### Third-party Scraping
 
 Scraping of publicly-accessible data is inevitable. However, a network of truth prevents capture. In one sense, it cannot be captured because it is a dynamic network of trust, overlaid on people and resources that trust one another, and we chose not to trust any authoritarian sources of knowledge. On a practical level,  anyone who tries to appropriate the truth of the network entails doing so in a distributed way (which preserves the multicultural component), since monolithic capture of that truth will cause consensus to collapse it.
+
+

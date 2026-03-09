@@ -15,7 +15,6 @@
 
 // ─── Config global (owned here, used everywhere) ───
 let config = {
-  user: { name: "User" },
   chat: { temperature: 0.7, max_tokens: 128, timeout: 120,
           truth_weight: 0.7, truth_max_entries: 1000,
           store_particulars: false,
@@ -62,8 +61,6 @@ function _saveLocalConfig(cfg) {
 // Fill defaults in a config dict — mirrors server's _normalize_config().
 function _normalizeConfig(cfg) {
   cfg = cfg || {};
-  if (!cfg.user) cfg.user = {};
-  if (!cfg.user.name) cfg.user.name = "User";
   if (!cfg.ui) cfg.ui = {};
   if (!cfg.ui.default_provider) cfg.ui.default_provider = "wikioracle";
   if (!cfg.ui.layout) cfg.ui.layout = "flat";
@@ -133,9 +130,6 @@ function configToXml(obj) {
     }
     lines.push("  </" + tag + ">");
   }
-
-  // user
-  addSimpleSection("user", obj.user);
 
   // providers — <provider name="key"> with display_name mapping
   var provs = obj.providers;
@@ -214,10 +208,6 @@ function xmlToConfig(text) {
       return obj;
     }
 
-    // user
-    var userEl = root.querySelector("user");
-    if (userEl) data.user = readSimple(userEl);
-
     // providers
     var provsEl = root.querySelector("providers");
     if (provsEl) {
@@ -292,9 +282,8 @@ async function _migrateOldPrefs() {
     return;
   }
 
-  // Build XML-shaped config from old prefs
+  // Build XML-shaped config from old prefs (user name migrates to state, not config)
   const migrated = _normalizeConfig({
-    user: { name: oldPrefs.username || "User" },
     ui: {
       default_provider: oldPrefs.provider || "wikioracle",
       layout: oldPrefs.layout || "flat",
@@ -302,6 +291,11 @@ async function _migrateOldPrefs() {
     },
     chat: { ...(oldPrefs.chat || {}) },
   });
+  // Store old username in state (will be picked up by _initStateful/_initStateless)
+  if (oldPrefs.username && typeof state !== "undefined" && state) {
+    if (!state.user) state.user = {};
+    state.user.name = oldPrefs.username;
+  }
 
   _saveLocalConfig(migrated);
   sessionStorage.removeItem(_OLD_PREFS_KEY);

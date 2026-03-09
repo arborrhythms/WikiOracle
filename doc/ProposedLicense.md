@@ -28,24 +28,13 @@ This layered separation mirrors successful open knowledge systems while
 extending them for AI systems.
 
 
-## #License Comparison Table
+### License Comparison Table
 
-  -------------------------------------------------------------------------
-  License      Domain       Key Features            Typical Use
-  ------------ ------------ ----------------------- -----------------------
-  GPL-3.0      Software     Strong copyleft, patent Infrastructure software
-                            protection, source      
-                            distribution            
-                            requirement             
-
-  CC BY-SA 4.0 Creative     Attribution required,   Wikipedia articles
-               works        derivatives must remain 
-                            under same license      
-
-  Apache-2.0   Software /   Permissive reuse with   AI models and developer
-               model        patent grant            tools
-               artifacts                            
-  -------------------------------------------------------------------------
+| License | Domain | Key Features | Typical Use |
+|---|---|---|---|
+| GPL-3.0 | Software | Strong copyleft, patent protection, source distribution requirement | Infrastructure software |
+| CC BY-SA 4.0 | Creative works | Attribution required, derivatives must remain under same license | Wikipedia articles |
+| Apache-2.0 | Software / model artifacts | Permissive reuse with patent grant | AI models and developer tools |
 
 ### GPL-3.0
 

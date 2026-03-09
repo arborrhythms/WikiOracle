@@ -19,10 +19,6 @@ from config import _load_config_xml, config_to_xml, _normalize_config
 SAMPLE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <config>
-  <user>
-    <name>TestUser</name>
-    <uid></uid>
-  </user>
   <providers>
     <provider name="wikioracle">
       <display_name>wikiOracle</display_name>
@@ -52,6 +48,7 @@ SAMPLE_XML = """\
     <swipe_nav_vertical>false</swipe_nav_vertical>
   </ui>
   <server>
+    <server_id>test-server-id-1234</server_id>
     <stateless>false</stateless>
     <url_prefix></url_prefix>
     <online_training>
@@ -88,10 +85,9 @@ class TestLoadConfigXml(unittest.TestCase):
     def tearDown(self):
         self.tmp_path.unlink(missing_ok=True)
 
-    def test_loads_user(self):
+    def test_loads_server_id(self):
         data = _load_config_xml(self.tmp_path)
-        self.assertEqual(data["user"]["name"], "TestUser")
-        self.assertEqual(data["user"]["uid"], "")
+        self.assertEqual(data["server"]["server_id"], "test-server-id-1234")
 
     def test_loads_providers(self):
         data = _load_config_xml(self.tmp_path)
@@ -156,7 +152,6 @@ class TestConfigToXml(unittest.TestCase):
 
     def _make_minimal_config(self):
         return {
-            "user": {"name": "Alice", "uid": ""},
             "providers": {
                 "wikioracle": {
                     "name": "wikiOracle",
@@ -174,6 +169,7 @@ class TestConfigToXml(unittest.TestCase):
                 "swipe_nav_vertical": False,
             },
             "server": {
+                "server_id": "test-server-id-5678",
                 "stateless": False,
                 "url_prefix": "",
                 "online_training": {
@@ -201,10 +197,10 @@ class TestConfigToXml(unittest.TestCase):
         # Should parse without error
         ET.fromstring(xml_str.split("\n", 1)[1] if xml_str.startswith("<?xml") else xml_str)
 
-    def test_contains_user_name(self):
+    def test_contains_server_id(self):
         data = self._make_minimal_config()
         xml_str = config_to_xml(data)
-        self.assertIn("<name>Alice</name>", xml_str)
+        self.assertIn("<server_id>test-server-id-5678</server_id>", xml_str)
 
     def test_contains_display_name(self):
         """The 'name' dict key should map to <display_name> in XML."""
@@ -230,7 +226,7 @@ class TestConfigToXml(unittest.TestCase):
         tmp.close()
         try:
             reloaded = _load_config_xml(Path(tmp.name))
-            self.assertEqual(reloaded["user"]["name"], "Alice")
+            self.assertEqual(reloaded["server"]["server_id"], "test-server-id-5678")
             self.assertEqual(reloaded["providers"]["wikioracle"]["name"], "wikiOracle")
             self.assertIs(reloaded["chat"]["rag"], True)
             self.assertAlmostEqual(reloaded["chat"]["temperature"], 0.7)

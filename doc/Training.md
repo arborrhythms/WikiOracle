@@ -692,17 +692,3 @@ truth back to the server.
 The `server_id` field in `config.xml` under `<server>` provides a
 stable identifier for this server instance (default: `"wikioracle"`).
 
----
-
-## See also
-
-* [Entanglement.md](./Entanglement.md) — the entanglement policy governing what persists.
-* [Logic.md](./Logic.md) — operators stored alongside facts in the truth table.
-* [Architecture.md](./Architecture.md) — the response pipeline integrating training stages.
-* [Constitution.md](./Constitution.md) — anti-capture as a constitutional commitment.
-* [HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) — DegreeOfTruth operates over the HME truth table.
-* [Config.md](./Config.md) — online training configuration settings and behavior when disabled.
-* [UserInterface.md](./UserInterface.md) — the Settings dialog (truth_weight slider, store_particulars, truth_max_entries).
-* [Ethics.md](./Ethics.md) — entanglement-resistant training as an ethical design choice.
-* [BuddhistLogic.md](./BuddhistLogic.md) — the Sensation pipeline follows Buddhist epistemology.
-* [FutureWork.md](./FutureWork.md) — dissonance detection and pluralistic truth.

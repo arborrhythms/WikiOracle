@@ -255,11 +255,21 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raise StateValidationError(f"Unsupported schema URL: {schema}")
     state["schema"] = str(schema) if isinstance(schema, str) and schema else SCHEMA_URL
 
-    time_val = state.get("time") or state.get("date")  # compat: accept "date" from old files
-    if strict and not _is_iso8601_utc(time_val):
-        raise StateValidationError("State.time must be ISO8601 UTC")
-    state["time"] = _coerce_timestamp(time_val)
-    state.pop("date", None)  # clean up legacy key
+    # Backward compat: old "time" / "date" fields map to time_creation
+    if "time_creation" not in state:
+        old_time = state.get("time") or state.get("date")
+        if old_time:
+            state["time_creation"] = _coerce_timestamp(old_time)
+    state.pop("time", None)
+    state.pop("date", None)
+
+    tc = state.get("time_creation")
+    if strict and tc and not _is_iso8601_utc(tc):
+        raise StateValidationError("State.time_creation must be ISO8601 UTC")
+    state["time_creation"] = _coerce_timestamp(tc) if tc else utc_now_iso()
+
+    tm = state.get("time_lastModified")
+    state["time_lastModified"] = _coerce_timestamp(tm) if tm else state["time_creation"]
 
     context = state.get("context", "<div/>")
     if strict and not isinstance(context, str):
@@ -305,14 +315,17 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raw_truth = []
     state["truth"] = [_normalize_trust_entry(v) for v in raw_truth]
 
-    # User GUID — deterministic pseudonymous identity stored at root level.
-    # Derived from user.name in config.xml when available; preserved if
-    # already present in the state (e.g. round-tripping through XML).
-    if not state.get("user_guid"):
-        # We can't access config.xml here (truth.py has no config dep),
-        # so user_guid is populated later by the pipeline (response.py).
-        # If already set on the raw input, preserve it.
-        pass
+    # User identity — name + user_id stored in state header.
+    # Backward compat: old root-level "user_guid" maps to user.user_id.
+    if "user_guid" in state and "user" not in state:
+        state["user"] = {"name": "User", "user_id": state["user_guid"]}
+    state.pop("user_guid", None)
+
+    user = state.get("user")
+    if isinstance(user, dict):
+        user.setdefault("name", "User")
+        user.setdefault("user_id", "")
+    # If no user block, leave absent — populated later by the pipeline.
 
     # Clean up legacy fields
     state.pop("messages", None)
@@ -505,8 +518,8 @@ def _truth_entry_to_xml_element(entry: dict) -> ET.Element:
         if provider_cfg.get("authority_url"):
             authority_el = ET.SubElement(root_el, "authority")
             _append_text_child(authority_el, "url", provider_cfg.get("authority_url"))
-        if provider_cfg.get("prelim") is False or _element_has_explicit_config(source, "prelim"):
-            _append_text_child(root_el, "prelim", "true" if provider_cfg.get("prelim", True) else "false")
+        if provider_cfg.get("conversation") is True or _element_has_explicit_config(source, "conversation"):
+            _append_text_child(root_el, "conversation", "true" if provider_cfg.get("conversation", False) else "false")
         if provider_cfg.get("timeout") or _element_has_explicit_config(source, "timeout"):
             _append_text_child(root_el, "timeout", provider_cfg.get("timeout", 0))
         if provider_cfg.get("max_tokens") or _element_has_explicit_config(source, "max_tokens"):
@@ -685,18 +698,24 @@ def state_to_xml(state: dict) -> str:
     schema_el = ET.SubElement(header_el, "schema")
     schema_el.text = state.get("schema", SCHEMA_URL)
 
-    time_el = ET.SubElement(header_el, "time")
-    time_el.text = state.get("time", utc_now_iso())
+    tc_el = ET.SubElement(header_el, "time_creation")
+    tc_el.text = state.get("time_creation", utc_now_iso())
+
+    tm_el = ET.SubElement(header_el, "time_lastModified")
+    tm_el.text = utc_now_iso()
 
     title_el = ET.SubElement(header_el, "title")
     title_el.text = state.get("title", "WikiOracle")
 
     _set_xhtml_content(header_el, "context", state.get("context", "<div/>"))
 
-    uguid = state.get("user_guid")
-    if uguid:
-        guid_el = ET.SubElement(header_el, "user_guid")
-        guid_el.text = str(uguid)
+    user_data = state.get("user")
+    if isinstance(user_data, dict) and (user_data.get("name") or user_data.get("user_id")):
+        user_el = ET.SubElement(header_el, "user")
+        name_el = ET.SubElement(user_el, "name")
+        name_el.text = user_data.get("name", "User")
+        uid_el = ET.SubElement(user_el, "user_id")
+        uid_el.text = str(user_data.get("user_id", ""))
 
     output = state.get("output")
     if output:
@@ -724,7 +743,8 @@ def xml_to_state(text: str) -> dict:
     state = {
         "version": STATE_VERSION,
         "schema": SCHEMA_URL,
-        "time": utc_now_iso(),
+        "time_creation": utc_now_iso(),
+        "time_lastModified": utc_now_iso(),
         "title": "WikiOracle",
         "context": "<div/>",
         "conversations": [],
@@ -753,9 +773,19 @@ def xml_to_state(text: str) -> dict:
         schema_el = header_el.find("schema")
         if schema_el is not None and schema_el.text:
             state["schema"] = schema_el.text
-        time_el = header_el.find("time")
-        if time_el is not None and time_el.text:
-            state["time"] = time_el.text
+        tc_el = header_el.find("time_creation")
+        if tc_el is not None and tc_el.text:
+            state["time_creation"] = tc_el.text
+        tm_el = header_el.find("time_lastModified")
+        if tm_el is not None and tm_el.text:
+            state["time_lastModified"] = tm_el.text
+        # Backward compat: old <time> maps to time_creation
+        if tc_el is None:
+            old_time_el = header_el.find("time")
+            if old_time_el is not None and old_time_el.text:
+                state["time_creation"] = old_time_el.text
+                if tm_el is None:
+                    state["time_lastModified"] = old_time_el.text
         title_el = header_el.find("title")
         if title_el is not None and title_el.text:
             state["title"] = title_el.text
@@ -765,9 +795,20 @@ def xml_to_state(text: str) -> dict:
         sel_el = header_el.find("selected_conversation")
         if sel_el is not None and sel_el.text:
             state["selected_conversation"] = sel_el.text
-        guid_el = header_el.find("user_guid")
-        if guid_el is not None and guid_el.text:
-            state["user_guid"] = guid_el.text
+        # New format: <user><name>...</name><user_id>...</user_id></user>
+        user_el = header_el.find("user")
+        if user_el is not None:
+            user_name_el = user_el.find("name")
+            user_id_el = user_el.find("user_id")
+            state["user"] = {
+                "name": user_name_el.text if user_name_el is not None and user_name_el.text else "User",
+                "user_id": user_id_el.text if user_id_el is not None and user_id_el.text else "",
+            }
+        else:
+            # Backward compat: old <user_guid> maps to user.user_id
+            guid_el = header_el.find("user_guid")
+            if guid_el is not None and guid_el.text:
+                state["user"] = {"name": "User", "user_id": guid_el.text}
         output_el = header_el.find("output")
         if output_el is not None and output_el.text:
             state["output"] = output_el.text.strip()
@@ -973,7 +1014,7 @@ def merge_llm_states(
     # Title: incoming wins if base is default
     if incoming.get("title") and (not out.get("title") or out["title"] == "WikiOracle"):
         out["title"] = incoming["title"]
-    out["time"] = utc_now_iso()
+    out["time_lastModified"] = utc_now_iso()
 
     merge_meta = {
         "conversations_added": len(new_convs),

@@ -120,7 +120,7 @@ knowledge, and dynamic providers act as expert consultants while the
 UI-selected provider synthesizes the final answer. Provider credentials remain
 separate: each provider uses its own key, whether configured in `config.xml`
 or embedded in the truth entry. See
-[HierarchicalMixtureOfExperts.md](./HierarchicalMixtureOfExperts.md) for the
+[Voting.md](./Voting.md) for the
 theoretical foundation.
 
 ## State library (`bin/state.py`)
@@ -140,18 +140,3 @@ Key functions:
 | `add_child_conversation(convs, parent_id, child)` | Insert a new branch |
 | `remove_conversation(convs, id)` | Delete a subtree |
 | `ensure_minimal_state(state)` | Fill in missing fields with defaults |
-
----
-
-## See also
-
-* [Constitution.md](./Constitution.md) — the invariants this architecture implements.
-* [Security.md](./Security.md) — CSP, CORS, API keys, and file system safety.
-* [Training.md](./Training.md) — the online training pipeline (Stages 2–4) in `response.py`.
-* [Logic.md](./Logic.md) — operators evaluated in the dynamic truth phase.
-* [Authority.md](./Authority.md) — authority resolution in the HME pipeline.
-* [Voting.md](./Voting.md) — voting protocol extending the chat pipeline.
-* [Entanglement.md](./Entanglement.md) — client-owned state and data persistence policies.
-* [Config.md](./Config.md) — configuration format and settings reference.
-* [State.md](./State.md) — state file format, conversation tree, truth table.
-* [Installation.md](./Installation.md) — deployment and runtime configuration.

@@ -354,6 +354,7 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
         "wikioracle": {
             "name": "WikiOracle NanoChat",
             "streaming": True,
+            "sequence_len": 2048,
         },
         "openai": {
             "name": "OpenAI",
@@ -405,6 +406,8 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             pcfg["api_key"] = ycfg["api_key"]
         if ycfg.get("timeout"):
             pcfg["timeout"] = ycfg["timeout"]
+        if ycfg.get("sequence_len"):
+            pcfg["sequence_len"] = int(ycfg["sequence_len"])
 
     return providers
 

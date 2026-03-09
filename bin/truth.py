@@ -218,13 +218,16 @@ def ensure_authority_id(entry: dict) -> str:
 # Trust entry normalization
 # ---------------------------------------------------------------------------
 def _has_operator_tag(content: str) -> bool:
-    """Check whether content contains an operator tag (<and>, <or>, <not>, <non>)."""
-    return ("<and" in content or "<or" in content or "<not" in content
-            or "<non" in content)
+    """Check whether content contains a logic/operator block.
+
+    Matches both the new ``<logic>`` wrapper and legacy bare operator tags.
+    """
+    return ("<logic" in content or "<and" in content or "<or" in content
+            or "<not" in content or "<non" in content)
 
 
 # Recognized XHTML root tags for trust entries.
-_RECOGNIZED_TAGS = frozenset({"fact", "feeling", "reference", "and", "or", "not", "non", "provider", "authority"})
+_RECOGNIZED_TAGS = frozenset({"fact", "feeling", "reference", "logic", "and", "or", "not", "non", "provider", "authority"})
 
 
 def _parse_root_attrs(content: str) -> dict | None:
@@ -897,16 +900,15 @@ _OPERATOR_TAGS = ("and", "or", "not", "non")
 def parse_operator_block(content: str, entry: dict | None = None) -> dict | None:
     """Parse the first <and>, <or>, <not>, or <non> operator block from trust-entry content.
 
-    Returns { operator: "and"|"or"|"not"|"non", refs: [id, ...] } or None.
-    - <and> and <or> require 2+ <child> elements.
-    - <not> and <non> require exactly 1 <child> element.
+    Returns ``{ operator, refs, inline_entries }`` or None.
 
-    Operator references come from (in priority order):
-    1. entry.arg1 and entry.arg2 (if entry is provided)
-    2. <child id="..."/> elements in XHTML (new format)
-    3. Legacy <ref>id</ref> elements in XHTML (legacy format)
+    - ``operator``: ``"and"|"or"|"not"|"non"``
+    - ``refs``: list of referenced entry IDs (strings)
+    - ``inline_entries``: list of ``{id, trust, content}`` dicts for inline
+      ``<fact>``/``<feeling>`` operands embedded directly in the operator
 
-    Each reference points to an existing trust entry by ID.
+    Handles the new ``<logic>`` wrapper format, inline operands, and
+    legacy formats (``<child id="..."/>``, ``<ref>text</ref>``, ``arg1``/``arg2``).
     """
     if not isinstance(content, str) or not _has_operator_tag(content):
         return None
@@ -917,9 +919,10 @@ def parse_operator_block(content: str, entry: dict | None = None) -> dict | None
     for tag in _OPERATOR_TAGS:
         el = root.find(f".//{tag}")
         if el is not None:
-            refs = []
+            refs: list[str] = []
+            inline_entries: list[dict] = []
 
-            # Priority 1: arg1/arg2 from JSON entry
+            # Priority 1: arg1/arg2 from JSON entry (legacy envelope)
             if entry is not None:
                 arg1 = entry.get("arg1", "")
                 if isinstance(arg1, str) and arg1.strip():
@@ -928,17 +931,53 @@ def parse_operator_block(content: str, entry: dict | None = None) -> dict | None
                 if isinstance(arg2, str) and arg2.strip():
                     refs.append(arg2.strip())
 
-            # Fallback to XHTML format if no args from entry
+            # Priority 2: iterate operator children (new format)
             if not refs:
-                # New format: <child id="..."/>
-                for child_el in el.findall("child"):
-                    ref_id = (child_el.get("id") or "").strip()
-                    if ref_id:
-                        refs.append(ref_id)
-                # Legacy fallback: <ref>id</ref>
-                if not refs:
-                    for ref_el in el.findall("ref"):
-                        ref_id = (ref_el.text or "").strip()
+                for child_el in el:
+                    if child_el.tag == "ref":
+                        # <ref id="..."/> — reference to existing entry
+                        ref_id = (child_el.get("id") or "").strip()
+                        if ref_id:
+                            refs.append(ref_id)
+                        else:
+                            # Legacy: <ref>text</ref>
+                            ref_text = (child_el.text or "").strip()
+                            if ref_text:
+                                refs.append(ref_text)
+                    elif child_el.tag == "fact":
+                        # Inline <fact> operand
+                        inline_id = (child_el.get("id") or "").strip()
+                        dot = child_el.get("DoT") or child_el.get("trust")
+                        inline_trust = 0.0
+                        if dot:
+                            try:
+                                inline_trust = float(dot)
+                            except ValueError:
+                                pass
+                        inline_content = ET.tostring(child_el, encoding="unicode", method="xml").strip()
+                        if inline_id:
+                            refs.append(inline_id)
+                            inline_entries.append({
+                                "id": inline_id,
+                                "trust": inline_trust,
+                                "content": inline_content,
+                                "title": child_el.get("title", ""),
+                            })
+                    elif child_el.tag == "feeling":
+                        # Inline <feeling> operand
+                        inline_id = (child_el.get("id") or "").strip()
+                        inline_content = ET.tostring(child_el, encoding="unicode", method="xml").strip()
+                        if inline_id:
+                            refs.append(inline_id)
+                            inline_entries.append({
+                                "id": inline_id,
+                                "trust": 0.0,
+                                "content": inline_content,
+                                "title": child_el.get("title", ""),
+                            })
+                    elif child_el.tag == "child":
+                        # Legacy <child id="..."/> format
+                        ref_id = (child_el.get("id") or "").strip()
                         if ref_id:
                             refs.append(ref_id)
 
@@ -948,7 +987,7 @@ def parse_operator_block(content: str, entry: dict | None = None) -> dict | None
             else:
                 if len(refs) < 2:
                     return None
-            return {"operator": tag, "refs": refs}
+            return {"operator": tag, "refs": refs, "inline_entries": inline_entries}
     return None
 
 
@@ -1238,11 +1277,17 @@ def compute_derived_truth(trust_entries: list) -> dict:
         if eid:
             trust_map[eid] = entry.get("trust", 0.0)
 
-    # Extract operators and map each to its parent entry ID
+    # Extract operators and map each to its parent entry ID.
+    # Inject any inline operands (fact/feeling) into the trust map.
     operators = []
     for entry in trust_entries:
         op = parse_operator_block(entry.get("content", ""), entry=entry)
         if op is not None:
+            # Register inline entries in the trust map
+            for inline in op.get("inline_entries", []):
+                iid = inline.get("id", "")
+                if iid and iid not in trust_map:
+                    trust_map[iid] = inline.get("trust", 0.0)
             operators.append((entry.get("id", ""), op))
 
     if not operators:
@@ -1456,57 +1501,12 @@ def resolve_entries(
 
 
 def validate_operator_operands(entries: list) -> list:
-    """Filter out operators whose leaf operands include feelings.
+    """Validate operator operands.
 
-    Operators must compose only allowable facts (or other operators
-    over allowable facts).  Any operator whose operand chain reaches
-    a ``<feeling>`` is excluded from the returned list.
-
-    Non-operator entries pass through unchanged.
+    Operators may compose facts, feelings, and other operators.
+    All entry types are now allowed as operands — this is a passthrough.
     """
-    by_id = {e.get("id", ""): e for e in entries if e.get("id")}
-
-    def _has_feeling_leaf(entry_id: str, visited: set | None = None) -> bool:
-        """Recursively check if any leaf operand is a feeling."""
-        if visited is None:
-            visited = set()
-        if entry_id in visited:
-            return False  # cycle — treat as non-feeling
-        visited.add(entry_id)
-
-        target = by_id.get(entry_id)
-        if target is None:
-            return False  # missing ref — conservative: allow
-        content = target.get("content", "")
-
-        if "<feeling" in content:
-            return True
-        if not _has_operator_tag(content):
-            return False  # leaf fact — not a feeling
-
-        # It's an operator — check its children
-        op = parse_operator_block(content)
-        if op is None:
-            return False
-        for ref_id in op.get("refs", []):
-            if _has_feeling_leaf(ref_id, visited):
-                return True
-        # Also check arg1/arg2 on the entry envelope
-        for arg_key in ("arg1", "arg2"):
-            arg_id = target.get(arg_key, "")
-            if arg_id and _has_feeling_leaf(arg_id, visited):
-                return True
-        return False
-
-    result = []
-    for entry in entries:
-        content = entry.get("content", "")
-        if _has_operator_tag(content):
-            eid = entry.get("id", "")
-            if _has_feeling_leaf(eid):
-                continue  # reject: operator over feelings
-        result.append(entry)
-    return result
+    return list(entries)
 
 
 # ---------------------------------------------------------------------------
@@ -1515,7 +1515,7 @@ def validate_operator_operands(entries: list) -> list:
 # Tags that are stored in the server truth table.
 # Only resolved facts and operators are retained.  References, authorities,
 # providers, and feelings must be resolved or excluded before reaching here.
-_SERVER_TRUTH_TAGS = frozenset({"fact", "and", "or", "not", "non"})
+_SERVER_TRUTH_TAGS = frozenset({"fact", "logic", "and", "or", "not", "non"})
 
 
 def _is_server_storable(entry: dict) -> bool:

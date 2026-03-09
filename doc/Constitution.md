@@ -86,7 +86,7 @@ Authority entries exist to enable decentralized truth (a network of trust) witho
 
 See [DataPrivacy.md](DataPrivacy)
 
-## 7. Safety as Freedom, Empathy, and Truth
+## Safety as Freedom, Empathy, and Truth
 
 WikiOracle's truthfulness effort must not trade away human welfare or agency:
 

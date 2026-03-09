@@ -139,7 +139,7 @@ class TestBuildProviderBundle(unittest.TestCase):
             {"title": "LLM Provider", "trust": 0.95, "id": "t2",
              "content": "<provider><api_url>https://api.openai.com</api_url></provider>"},
             {"title": "Op", "trust": 0.8, "id": "t3",
-             "content": '<and><child id="t1"/></and>'},
+             "content": '<logic><and><ref id="t1"/><ref id="t1"/></and></logic>'},
         ]
         state = _make_state(truth=trust)
         bundle = build_query(state, "q", {"truthset": {"truth_weight": 0.7}})
@@ -148,9 +148,9 @@ class TestBuildProviderBundle(unittest.TestCase):
         self.assertIn("LLM Provider", titles)
         self.assertIn("Op", titles)
         kinds = {s.kind for s in bundle.sources}
-        # Provider is resolved to feeling; operator and fact pass through
+        # Provider is resolved to feeling; logic and fact pass through
         self.assertIn("fact", kinds)
-        self.assertIn("operator", kinds)
+        self.assertIn("logic", kinds)
         self.assertIn("feeling", kinds)
 
     def test_no_entries_when_rag_false(self):
@@ -199,7 +199,7 @@ class TestStaticTruth(unittest.TestCase):
         entries = [
             _make_trust_entry("Fact", 0.9, "plain", "e1"),
             {"title": "Op", "trust": 0.95, "id": "e2",
-             "content": '<and><child id="e1"/><child id="e1"/></and>'},
+             "content": '<logic><and><ref id="e1"/><ref id="e1"/></and></logic>'},
         ]
         st = static_truth(entries)
         self.assertEqual(len(st), 1)

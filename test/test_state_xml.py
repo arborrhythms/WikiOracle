@@ -128,9 +128,7 @@ def _make_state_with_operators():
                 "id": "op_and",
                 "title": "Socrates is mortal (AND)",
                 "trust": 0.0,
-                "arg1": "axiom_01",
-                "arg2": "axiom_02",
-                "content": "<and/>",
+                "content": '<logic><and><ref id="axiom_01"/><ref id="axiom_02"/></and></logic>',
                 "time": "2026-03-05T00:00:03Z",
             },
             {
@@ -194,11 +192,13 @@ class TestStateToXml(unittest.TestCase):
         self.assertIn('role="user"', xml_str)
         self.assertIn('username="Alice"', xml_str)
 
-    def test_operator_entry_has_arg_attrs(self):
+    def test_operator_entry_serializes_as_logic(self):
         state = _make_state_with_operators()
         xml_str = state_to_xml(state)
-        self.assertIn('arg1="axiom_01"', xml_str)
-        self.assertIn('arg2="axiom_02"', xml_str)
+        self.assertIn('<logic ', xml_str)
+        self.assertIn('<and>', xml_str)
+        self.assertIn('<ref id="axiom_01"', xml_str)
+        self.assertIn('<ref id="axiom_02"', xml_str)
 
     def test_reference_serializes_as_anchor(self):
         state = ensure_minimal_state({
@@ -339,8 +339,11 @@ class TestXmlToState(unittest.TestCase):
         xml_str = state_to_xml(original)
         restored = xml_to_state(xml_str)
         op = [e for e in restored["truth"] if e["id"] == "op_and"][0]
-        self.assertEqual(op["arg1"], "axiom_01")
-        self.assertEqual(op["arg2"], "axiom_02")
+        # Operators now use <logic><and><ref id="..."/></and></logic>
+        self.assertIn("<logic>", op["content"])
+        self.assertIn("<and>", op["content"])
+        self.assertIn('id="axiom_01"', op["content"])
+        self.assertIn('id="axiom_02"', op["content"])
 
     def test_roundtrip_preserves_provider_content(self):
         original = _make_state_with_operators()

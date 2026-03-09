@@ -188,8 +188,6 @@ When a message is sent, `get_context_messages()` walks the ancestor chain from t
 | `place` | all truth kinds | Optional place label for envelope-level location metadata. |
 | `DoT` | all truth kinds except `feeling` | Degree of Truth on [-1, +1]. |
 
-Operator elements may also carry `arg1` and `arg2`.
-
 ### Truth kinds
 
 | Element | Meaning |
@@ -197,7 +195,7 @@ Operator elements may also carry `arg1` and `arg2`.
 | `<fact>` | Knowledge claim or observation. |
 | `<feeling>` | Subjective, non-truth-evaluable statement. No `DoT` attribute. |
 | `<reference>` | External citation wrapping an `<a href="...">...</a>` link record. |
-| `<and>`, `<or>`, `<not>`, `<non>` | Strong Kleene operators over other truth IDs. |
+| `<logic>` | Strong Kleene operator (`<and>`, `<or>`, `<not>`, `<non>`) over other truth entries. Wraps one operator child with `<ref>` or inline `<fact>`/`<feeling>` operands. |
 | `<provider>` | External LLM provider definition. |
 | `<authority>` | Pointer to a remote TruthSet. |
 
@@ -214,7 +212,9 @@ Operator elements may also carry `arg1` and `arg2`.
   <reference id="t_003" title="Wikipedia: Dog" DoT="0.8">
     <a href="https://en.wikipedia.org/wiki/Dog">Wikipedia: Dog</a>
   </reference>
-  <and id="t_op1" title="Both mammals" DoT="0.0" arg1="t_001" arg2="t_003" />
+  <logic id="t_op1" title="Both mammals" DoT="0.0">
+    <and><ref id="t_001"/><ref id="t_003"/></and>
+  </logic>
   <provider id="p_claude" title="Claude" DoT="0.8">
     <api_url>https://api.anthropic.com/v1/messages</api_url>
     <model>claude-sonnet-4-6</model>
@@ -382,7 +382,7 @@ Each **message** has: `id`, `role` (user | assistant | system), `username`, `tim
 State        → Client + Conversation* + Truth?
 Conversation → title + (Message | Conversation)*
 Message      → <message id="" role="" username="" time=""><content>...</content></message>
-Truth        → Fact | Feeling | Reference | Operator | Provider | Authority
+Truth        → Fact | Feeling | Reference | Logic | Provider | Authority
 ```
 
 In memory, `bin/state.py` still normalizes conversations into `messages[]` and `children[]`.

@@ -267,10 +267,10 @@ strings hard-coded in `client/util.js` match the tables below.
 | `feeling` | `<feeling>Subjective statement here.</feeling>` |
 | `fact` | `<fact DoT="0.0">Assertion text here.</fact>` |
 | `reference` | `<reference DoT="0.0"><a href="https://example.com">Link text</a></reference>` |
-| `and` | `<and DoT="0.0" arg1="" arg2=""/>` |
-| `or` | `<or DoT="0.0" arg1="" arg2=""/>` |
-| `not` | `<not DoT="0.0" arg1=""/>` |
-| `non` | `<non DoT="0.0" arg1=""/>` |
+| `and` | `<logic><and><ref id=""/><ref id=""/></and></logic>` |
+| `or` | `<logic><or><ref id=""/><ref id=""/></or></logic>` |
+| `not` | `<logic><not><ref id=""/></not></logic>` |
+| `non` | `<logic><non><ref id=""/></non></logic>` |
 | `provider` | `<provider DoT="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>` |
 | `authority` | `<authority DoT="0.0"><url>https://example.com/kb.xml</url></authority>` |
 

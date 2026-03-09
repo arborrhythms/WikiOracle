@@ -262,23 +262,76 @@
     <xs:attribute name="DoT" type="DoTType" use="required"/>
   </xs:complexType>
 
-  <xs:complexType name="BinaryOperatorTruthType" mixed="true">
-    <xs:sequence>
-      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
-    </xs:sequence>
-    <xs:attributeGroup ref="TruthCommonAttributes"/>
-    <xs:attribute name="DoT" type="DoTType" use="required"/>
-    <xs:attribute name="arg1" type="xs:string" use="optional"/>
-    <xs:attribute name="arg2" type="xs:string" use="optional"/>
+  <!-- ── Logic operators ─────────────────────────────────────────────── -->
+
+  <xs:complexType name="OperatorRefType">
+    <xs:annotation>
+      <xs:documentation>
+        Reference to an existing truth entry by ID.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
 
-  <xs:complexType name="UnaryOperatorTruthType" mixed="true">
+  <xs:group name="OperatorOperandGroup">
+    <xs:annotation>
+      <xs:documentation>
+        An operator operand: either a reference to an existing entry,
+        or an inline fact or feeling element.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:choice>
+      <xs:element name="ref" type="OperatorRefType"/>
+      <xs:element ref="fact"/>
+      <xs:element ref="feeling"/>
+    </xs:choice>
+  </xs:group>
+
+  <xs:complexType name="BinaryOperatorContentType">
+    <xs:annotation>
+      <xs:documentation>
+        Content of a binary operator (and, or). Requires 2 or more operands.
+      </xs:documentation>
+    </xs:annotation>
     <xs:sequence>
-      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
+      <xs:group ref="OperatorOperandGroup" minOccurs="2" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="UnaryOperatorContentType">
+    <xs:annotation>
+      <xs:documentation>
+        Content of a unary operator (not, non). Requires exactly 1 operand.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="OperatorOperandGroup" minOccurs="1" maxOccurs="1"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="LogicType">
+    <xs:annotation>
+      <xs:documentation>
+        A logic entry wraps a single Strong Kleene operator (and, or, not, non)
+        with truth metadata. The operator's children are operand references or
+        inline fact/feeling entries.
+        Strong Kleene semantics on [-1, +1]:
+          and(a, b, ...) = min(a, b, ...)
+          or(a, b, ...)  = max(a, b, ...)
+          not(a)         = -a
+          non(a)         = 1 - 2|a| (non-affirming negation)
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:choice>
+        <xs:element name="and" type="BinaryOperatorContentType"/>
+        <xs:element name="or" type="BinaryOperatorContentType"/>
+        <xs:element name="not" type="UnaryOperatorContentType"/>
+        <xs:element name="non" type="UnaryOperatorContentType"/>
+      </xs:choice>
     </xs:sequence>
     <xs:attributeGroup ref="TruthCommonAttributes"/>
     <xs:attribute name="DoT" type="DoTType" use="required"/>
-    <xs:attribute name="arg1" type="xs:string" use="optional"/>
   </xs:complexType>
 
   <xs:complexType name="AuthorityLinkType">
@@ -315,10 +368,7 @@
   <xs:element name="fact" type="FactTruthType"/>
   <xs:element name="feeling" type="FeelingTruthType"/>
   <xs:element name="reference" type="ReferenceTruthType"/>
-  <xs:element name="and" type="BinaryOperatorTruthType"/>
-  <xs:element name="or" type="BinaryOperatorTruthType"/>
-  <xs:element name="not" type="UnaryOperatorTruthType"/>
-  <xs:element name="non" type="UnaryOperatorTruthType"/>
+  <xs:element name="logic" type="LogicType"/>
   <xs:element name="provider" type="ProviderTruthType"/>
   <xs:element name="authority" type="AuthorityTruthType"/>
 
@@ -328,10 +378,7 @@
         <xs:element ref="fact"/>
         <xs:element ref="feeling"/>
         <xs:element ref="reference"/>
-        <xs:element ref="and"/>
-        <xs:element ref="or"/>
-        <xs:element ref="not"/>
-        <xs:element ref="non"/>
+        <xs:element ref="logic"/>
         <xs:element ref="provider"/>
         <xs:element ref="authority"/>
       </xs:choice>

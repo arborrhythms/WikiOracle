@@ -257,7 +257,7 @@ class TestIsServerStorable(unittest.TestCase):
     def test_operator_is_storable(self):
         """Operators (and, or, not, non) are storable."""
         entry = {"id": "op1", "trust": 0.5,
-                 "content": '<and><child id="a"/><child id="b"/></and>',
+                 "content": '<logic><and><ref id="a"/><ref id="b"/></and></logic>',
                  "time": "2025-01-01T00:00:00Z"}
         assert _is_server_storable(entry) is True
 
@@ -387,7 +387,7 @@ class TestValidateOperatorOperands(unittest.TestCase):
             _fact("a", 0.8),
             _fact("b", 0.6),
             {"id": "op1", "trust": 0.7,
-             "content": '<and><child id="a"/><child id="b"/></and>',
+             "content": '<logic><and><ref id="a"/><ref id="b"/></and></logic>',
              "time": "2025-01-01T00:00:00Z"},
         ]
         result = validate_operator_operands(entries)
@@ -396,19 +396,18 @@ class TestValidateOperatorOperands(unittest.TestCase):
         assert "a" in ids
         assert "b" in ids
 
-    def test_operator_over_feeling_rejected(self):
-        """Operator with a feeling operand is excluded."""
+    def test_operator_over_feeling_accepted(self):
+        """Operators may now compose feelings — all entries pass through."""
         entries = [
             _fact("a", 0.8),
             _feeling("f1", 0.5),
             {"id": "op1", "trust": 0.7,
-             "content": '<and><child id="a"/><child id="f1"/></and>',
+             "content": '<logic><and><ref id="a"/><ref id="f1"/></and></logic>',
              "time": "2025-01-01T00:00:00Z"},
         ]
         result = validate_operator_operands(entries)
         ids = {e["id"] for e in result}
-        assert "op1" not in ids
-        # Non-operator entries still pass through
+        assert "op1" in ids
         assert "a" in ids
         assert "f1" in ids
 

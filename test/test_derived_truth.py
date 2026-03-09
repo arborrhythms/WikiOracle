@@ -27,41 +27,45 @@ def _make_trust(id, trust, content=None, title=""):
 
 def _make_and(entry_id, refs, trust=0.0):
     title = f"and({', '.join(refs)})"
-    content = '<and/>'
-    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": refs[0] if refs else "", "arg2": refs[1] if len(refs) > 1 else ""}
+    ref_xml = "".join(f'<ref id="{r}"/>' for r in refs)
+    content = f'<logic><and>{ref_xml}</and></logic>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title}
 
 
 def _make_or(entry_id, refs, trust=0.0):
     title = f"or({', '.join(refs)})"
-    content = '<or/>'
-    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": refs[0] if refs else "", "arg2": refs[1] if len(refs) > 1 else ""}
+    ref_xml = "".join(f'<ref id="{r}"/>' for r in refs)
+    content = f'<logic><or>{ref_xml}</or></logic>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title}
 
 
 def _make_not(entry_id, ref, trust=0.0):
     title = f"not({ref})"
-    content = '<not/>'
-    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": ref}
+    content = f'<logic><not><ref id="{ref}"/></not></logic>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title}
 
 
 def _make_non(entry_id, ref, trust=0.0):
     title = f"non({ref})"
-    content = '<non/>'
-    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title, "arg1": ref}
+    content = f'<logic><non><ref id="{ref}"/></non></logic>'
+    return {"type": "truth", "id": entry_id, "trust": trust, "content": content, "title": title}
 
 
 # ─── parse_operator_block tests ───
 
 
 def test_parse_operator_block_and():
-    content = '<and><child id="a"/><child id="b"/></and>'
+    """New format: <logic><and><ref id="..."/>...</and></logic>."""
+    content = '<logic><and><ref id="a"/><ref id="b"/></and></logic>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "and"
     assert result["refs"] == ["a", "b"]
+    assert result["inline_entries"] == []
 
 
 def test_parse_operator_block_or():
-    content = '<or><child id="x"/><child id="y"/><child id="z"/></or>'
+    content = '<logic><or><ref id="x"/><ref id="y"/><ref id="z"/></or></logic>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "or"
@@ -69,7 +73,7 @@ def test_parse_operator_block_or():
 
 
 def test_parse_operator_block_not():
-    content = '<not><child id="a"/></not>'
+    content = '<logic><not><ref id="a"/></not></logic>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "not"
@@ -77,7 +81,7 @@ def test_parse_operator_block_not():
 
 
 def test_parse_operator_block_non():
-    content = '<non><child id="a"/></non>'
+    content = '<logic><non><ref id="a"/></non></logic>'
     result = parse_operator_block(content)
     assert result is not None
     assert result["operator"] == "non"
@@ -86,19 +90,19 @@ def test_parse_operator_block_non():
 
 def test_parse_operator_block_non_rejects_multiple():
     """NON with more than 1 child should return None."""
-    content = '<non><child id="a"/><child id="b"/></non>'
+    content = '<logic><non><ref id="a"/><ref id="b"/></non></logic>'
     assert parse_operator_block(content) is None
 
 
 def test_parse_operator_block_not_rejects_multiple():
     """NOT with more than 1 child should return None."""
-    content = '<not><child id="a"/><child id="b"/></not>'
+    content = '<logic><not><ref id="a"/><ref id="b"/></not></logic>'
     assert parse_operator_block(content) is None
 
 
 def test_parse_operator_block_and_rejects_single():
     """AND with fewer than 2 children should return None."""
-    content = '<and><child id="a"/></and>'
+    content = '<logic><and><ref id="a"/></and></logic>'
     assert parse_operator_block(content) is None
 
 
@@ -117,16 +121,58 @@ def test_parse_operator_block_legacy_ref():
     assert result["refs"] == ["a", "b"]
 
 
+def test_parse_operator_block_legacy_child():
+    """Legacy <child id="..."/> format should still be parsed."""
+    content = '<and><child id="a"/><child id="b"/></and>'
+    result = parse_operator_block(content)
+    assert result is not None
+    assert result["operator"] == "and"
+    assert result["refs"] == ["a", "b"]
+
+
+def test_parse_operator_block_inline_facts():
+    """Inline <fact> operands should be extracted."""
+    content = '<logic><and><fact id="f1" DoT="0.8">Sky is blue.</fact><fact id="f2" DoT="0.6">Grass is green.</fact></and></logic>'
+    result = parse_operator_block(content)
+    assert result is not None
+    assert result["operator"] == "and"
+    assert result["refs"] == ["f1", "f2"]
+    assert len(result["inline_entries"]) == 2
+    assert result["inline_entries"][0]["id"] == "f1"
+    assert abs(result["inline_entries"][0]["trust"] - 0.8) < 1e-9
+
+
+def test_parse_operator_block_inline_feeling():
+    """Inline <feeling> operands should be extracted."""
+    content = '<logic><not><feeling id="g1">I like cats.</feeling></not></logic>'
+    result = parse_operator_block(content)
+    assert result is not None
+    assert result["operator"] == "not"
+    assert result["refs"] == ["g1"]
+    assert len(result["inline_entries"]) == 1
+    assert result["inline_entries"][0]["id"] == "g1"
+
+
+def test_parse_operator_block_mixed_operands():
+    """Mixed refs and inline operands."""
+    content = '<logic><or><ref id="existing"/><fact id="inline_f" DoT="0.5">Inline fact.</fact></or></logic>'
+    result = parse_operator_block(content)
+    assert result is not None
+    assert result["operator"] == "or"
+    assert result["refs"] == ["existing", "inline_f"]
+    assert len(result["inline_entries"]) == 1
+
+
 # ─── ensure_operator_id tests ───
 
 
 def test_ensure_operator_id_preserves_existing():
-    entry = {"id": "existing_01", "content": '<and><child id="a"/><child id="b"/></and>'}
+    entry = {"id": "existing_01", "content": '<logic><and><ref id="a"/><ref id="b"/></and></logic>'}
     assert ensure_operator_id(entry) == "existing_01"
 
 
 def test_ensure_operator_id_generates():
-    entry = {"content": '<and><child id="a"/><child id="b"/></and>'}
+    entry = {"content": '<logic><and><ref id="a"/><ref id="b"/></and></logic>'}
     oid = ensure_operator_id(entry)
     # Generated IDs are deterministic UUIDs (36 chars with dashes).
     assert len(oid) == 36 and oid.count("-") == 4

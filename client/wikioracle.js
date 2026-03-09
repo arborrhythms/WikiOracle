@@ -1249,8 +1249,7 @@ function bindEvents() {
       if (t.title) attrs += ' title="' + escAttr(t.title) + '"';
       if (t.trust !== undefined && t.trust !== null) attrs += ' trust="' + t.trust + '"';
       if (t.time) attrs += ' time="' + escAttr(t.time) + '"';
-      if (t.arg1) attrs += ' arg1="' + escAttr(t.arg1) + '"';
-      if (t.arg2) attrs += ' arg2="' + escAttr(t.arg2) + '"';
+      // arg1/arg2 removed: operator refs now live inside <logic> content
       xml += '    <entry' + attrs + '>\n';
       xml += '      <content>' + (t.content || '') + '</content>\n';
       xml += '    </entry>\n';

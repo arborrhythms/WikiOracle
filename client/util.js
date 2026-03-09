@@ -728,10 +728,10 @@ function _openTruthEditor() {
       feeling: '<feeling>Subjective statement here.</feeling>',
       fact: '<fact DoT="0.0">Assertion text here.</fact>',
       reference: '<reference DoT="0.0"><a href="https://example.com">Link text</a></reference>',
-      and: '<and DoT="0.0" arg1="" arg2=""/>',
-      or: '<or DoT="0.0" arg1="" arg2=""/>',
-      not: '<not DoT="0.0" arg1=""/>',
-      non: '<non DoT="0.0" arg1=""/>',
+      and: '<logic><and><ref id=""/><ref id=""/></and></logic>',
+      or: '<logic><or><ref id=""/><ref id=""/></or></logic>',
+      not: '<logic><not><ref id=""/></not></logic>',
+      non: '<logic><non><ref id=""/></non></logic>',
       provider: '<provider DoT="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>',
       authority: '<authority DoT="0.0"><url>https://example.com/kb.xml</url></authority>'
     };
@@ -831,23 +831,35 @@ function _truthShowEditView() {
 }
 
 function _parseXhtmlContent(content) {
-  /** Parse XHTML content and extract root tag, id, trust, title. */
+  /** Parse XHTML content and extract root tag, id, trust, title.
+   *  For <logic> entries, also extracts the operator subtype (and/or/not/non). */
   try {
     var parser = new DOMParser();
     var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
     if (doc.querySelector("parsererror")) return null;
     var root = doc.documentElement;
-    var recognized = ["feeling", "fact", "reference", "authority", "provider", "not", "non", "or", "and"];
+    var recognized = ["feeling", "fact", "reference", "authority", "provider", "logic", "not", "non", "or", "and"];
     for (var i = 0; i < recognized.length; i++) {
       var el = root.querySelector(recognized[i]);
       if (el) {
         var c = parseFloat(el.getAttribute("trust"));
-        return {
+        var result = {
           tag: recognized[i],
           id: el.getAttribute("id") || "",
           trust: isNaN(c) ? null : c,
           title: el.getAttribute("title") || ""
         };
+        // For <logic>, extract operator subtype
+        if (recognized[i] === "logic") {
+          var operators = ["and", "or", "not", "non"];
+          for (var oi = 0; oi < operators.length; oi++) {
+            if (el.querySelector(operators[oi])) {
+              result.operatorType = operators[oi];
+              break;
+            }
+          }
+        }
+        return result;
       }
     }
     return null;
@@ -857,7 +869,7 @@ function _parseXhtmlContent(content) {
 function _isOperator(entry) {
   if (!entry || typeof entry.content !== "string") return false;
   var c = entry.content;
-  return c.indexOf("<and") !== -1 || c.indexOf("<or") !== -1 || c.indexOf("<not") !== -1 || c.indexOf("<non") !== -1;
+  return c.indexOf("<logic") !== -1 || c.indexOf("<and") !== -1 || c.indexOf("<or") !== -1 || c.indexOf("<not") !== -1 || c.indexOf("<non") !== -1;
 }
 
 function _isAuthority(entry) {
@@ -896,18 +908,28 @@ function _parseOperatorContent(content) {
       var el = doc.querySelector(operators[oi]);
       if (el) {
         var refs = [];
-        // New format: <child id="..."/>
-        var childEls = el.querySelectorAll("child");
-        for (var ci = 0; ci < childEls.length; ci++) {
-          var cid = (childEls[ci].getAttribute("id") || "").trim();
-          if (cid) refs.push(cid);
-        }
-        // Legacy fallback: <ref>text</ref>
-        if (refs.length === 0) {
-          var refEls = el.querySelectorAll("ref");
-          for (var ri = 0; ri < refEls.length; ri++) {
-            var txt = refEls[ri].textContent.trim();
-            if (txt) refs.push(txt);
+        // Iterate children: <ref id="..."/>, inline <fact>, inline <feeling>,
+        // legacy <child id="..."/>, legacy <ref>text</ref>
+        var children = el.children;
+        for (var ci = 0; ci < children.length; ci++) {
+          var child = children[ci];
+          if (child.tagName === "ref") {
+            var refId = (child.getAttribute("id") || "").trim();
+            if (refId) {
+              refs.push(refId);
+            } else {
+              // Legacy: <ref>text</ref>
+              var txt = child.textContent.trim();
+              if (txt) refs.push(txt);
+            }
+          } else if (child.tagName === "fact" || child.tagName === "feeling") {
+            // Inline operand
+            var inlineId = (child.getAttribute("id") || "").trim();
+            if (inlineId) refs.push(inlineId);
+          } else if (child.tagName === "child") {
+            // Legacy <child id="..."/>
+            var cid = (child.getAttribute("id") || "").trim();
+            if (cid) refs.push(cid);
           }
         }
         return { operator: operators[oi], refs: refs };
@@ -934,10 +956,22 @@ function _parseRefContent(content) {
 /* _populateOperandCheckboxes removed — XHTML editor handles operator children directly */
 
 function _truthEntryTag(entry) {
-  /** Return the XHTML root tag name for a truth entry (e.g. "fact", "and", "provider"). */
+  /** Return the XHTML root tag name for a truth entry (e.g. "fact", "logic", "provider"). */
   if (!entry || typeof entry.content !== "string") return "fact";
   var parsed = _parseXhtmlContent(entry.content);
   return parsed ? parsed.tag : "fact";
+}
+
+function _truthEntryIcon(entry) {
+  /** Return the display icon for a truth entry.
+   *  For <logic> entries, returns the specific operator icon (∧, ∨, ¬, ¿). */
+  if (!entry || typeof entry.content !== "string") return TRUTH_ICONS["fact"] || "";
+  var parsed = _parseXhtmlContent(entry.content);
+  if (!parsed) return TRUTH_ICONS["fact"] || "";
+  if (parsed.tag === "logic" && parsed.operatorType) {
+    return TRUTH_ICONS[parsed.operatorType] || TRUTH_ICONS["logic"] || "";
+  }
+  return TRUTH_ICONS[parsed.tag] || "";
 }
 
 function _truthRenderList() {
@@ -969,7 +1003,7 @@ function _truthRenderList() {
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     const tag = _truthEntryTag(entry);
-    const icon = (typeof TRUTH_ICONS !== "undefined" && TRUTH_ICONS[tag]) || TRUTH_ICONS.fact;
+    const icon = _truthEntryIcon(entry);
     const row = document.createElement("tr");
     row.style.cssText = "border-bottom:1px solid var(--border);";
 

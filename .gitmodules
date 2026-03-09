@@ -1,7 +1,8 @@
 [submodule "nanochat"]
 	path = nanochat
 	url = https://github.com/arborrhythms/nanochat.git
+	branch = main
 [submodule "openclaw"]
 	path = openclaw
 	url = https://github.com/arborrhythms/openclaw.git
-	branch = wikioracle-extension
+	branch = main

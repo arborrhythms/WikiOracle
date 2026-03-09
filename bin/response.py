@@ -78,7 +78,7 @@ class Source:
     title: str  # Human-readable source label shown to the model/user.
     trust: float  # Confidence score used in ranking/display.
     content: str  # Plaintext/XHTML snippet injected into prompts.
-    kind: str = "fact"          # "fact" | "feeling" | "reference" | "provider" | "operator" | "authority" | "transient"
+    kind: str = "fact"          # "fact" | "feeling" | "reference" | "provider" | "logic" | "authority" | "transient"
     time: str = ""
 
 
@@ -115,7 +115,7 @@ def static_truth(
 
     Structural entries are excluded from this subset:
       - ``<provider>``  — evaluated separately as dynamic expert consultations
-      - ``<operator>``  — evaluated by ``compute_derived_truth`` (Strong Kleene)
+      - ``<logic>``     — evaluated by ``compute_derived_truth`` (Strong Kleene)
       - ``<authority>``  — resolved separately via ``resolve_authority_entries``
 
     Note: ``static_truth`` controls what the dynamic evaluation steps see
@@ -582,8 +582,8 @@ def build_query(
                 kind = "authority"
             elif "<reference" in content:
                 kind = "reference"
-            elif _has_operator_tag(content):
-                kind = "operator"
+            elif "<logic" in content or _has_operator_tag(content):
+                kind = "logic"
             elif "<feeling" in content:
                 kind = "feeling"
             else:
@@ -880,9 +880,69 @@ def _bundle_to_messages(bundle: ProviderBundle, provider: str) -> List[Dict[str,
 # ---------------------------------------------------------------------------
 # Provider call functions
 # ---------------------------------------------------------------------------
+def _trim_nanochat_messages(
+    messages: List[Dict],
+    max_tokens: int,
+    sequence_len: int = 2048,
+    chars_per_token: int = 4,
+) -> List[Dict]:
+    """Trim conversation history so the prompt fits within *sequence_len* tokens.
+
+    Uses a conservative character-based estimate (server-side doesn't have the
+    tokenizer).  Keeps the preamble (context + ack, first two messages) and the
+    current query (last message), trimming the oldest history turns first.
+    """
+    token_budget = sequence_len - min(max_tokens, sequence_len // 2)
+    char_budget = token_budget * chars_per_token
+
+    total_chars = sum(len(m.get("content", "")) for m in messages)
+    if total_chars <= char_budget:
+        return messages
+
+    # Preamble = context injection + ack (first 2 msgs when present)
+    # Query   = current user message (last msg)
+    if len(messages) <= 3:
+        # Nothing useful to trim — preamble + query is all there is
+        print(f"[WikiOracle] Warning: prompt ({total_chars} chars) exceeds budget "
+              f"({char_budget} chars) but no history to trim")
+        return messages
+
+    preamble = messages[:2]
+    query = messages[-1:]
+    history = messages[2:-1]
+
+    fixed_chars = sum(len(m.get("content", "")) for m in preamble + query)
+    history_budget = char_budget - fixed_chars
+
+    if history_budget <= 0:
+        print(f"[WikiOracle] Warning: preamble+query alone ({fixed_chars} chars) "
+              f"exceeds budget ({char_budget} chars); dropping all history")
+        return preamble + query
+
+    # Keep most-recent history turns that fit within budget
+    kept: list[Dict] = []
+    running = 0
+    for msg in reversed(history):
+        msg_chars = len(msg.get("content", ""))
+        if running + msg_chars > history_budget:
+            break
+        kept.append(msg)
+        running += msg_chars
+    kept.reverse()
+
+    dropped = len(history) - len(kept)
+    print(f"[WikiOracle] Trimmed {dropped} history message(s) to fit context window "
+          f"(sequence_len={sequence_len}, reserved {sequence_len - token_budget} tokens "
+          f"for generation)")
+
+    return preamble + kept + query
+
+
 def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
                    max_tokens: int = 128, timeout: int = 120) -> str:
     """Call NanoChat /chat/completions (SSE streaming, buffered)."""
+    seq_len = PROVIDERS.get("wikioracle", {}).get("sequence_len", 2048)
+    messages = _trim_nanochat_messages(messages, max_tokens, seq_len)
     url = PROVIDERS.get("wikioracle", {}).get("url") or (cfg.base_url + cfg.api_path)
     if DEBUG_MODE:
         print(f"[DEBUG] NanoChat → {url}")

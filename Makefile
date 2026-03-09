@@ -118,6 +118,7 @@ PDF_CHAPTERS := README.md \
   doc/Freedom.md \
   doc/Voting.md \
   doc/Logic.md \
+  doc/Grammar.md \
   doc/Training.md \
   doc/Implementation.md \
   doc/Config.md \

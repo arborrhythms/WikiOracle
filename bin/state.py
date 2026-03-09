@@ -66,9 +66,12 @@ STATE_VERSION = 2  # Current state grammar version.
 
 # DEFAULT_OUTPUT removed — output now lives in config.providers.output.
 
-TRUTH_TAGS = ("fact", "feeling", "reference", "and", "or", "not", "non", "provider", "authority")
+TRUTH_TAGS = ("fact", "feeling", "reference", "logic", "and", "or", "not", "non", "provider", "authority")
 _TRUTH_TAG_SET = frozenset(TRUTH_TAGS)
-_TRUTH_METADATA_ATTRS = frozenset({"id", "title", "DoT", "trust", "time", "place", "arg1", "arg2"})
+_TRUTH_METADATA_ATTRS = frozenset({"id", "title", "DoT", "trust", "time", "place"})
+# Operator children (and, or, not, non) kept in TRUTH_TAGS for backward-compat
+# parsing of legacy XML.  New format uses <logic> wrapper.
+_OPERATOR_CHILD_TAGS = frozenset({"and", "or", "not", "non"})
 
 
 # ---------------------------------------------------------------------------
@@ -555,16 +558,61 @@ def _truth_entry_to_xml_element(entry: dict) -> ET.Element:
     if tag != "feeling":
         trust_val = norm.get("trust", 0.0)
         root_el.set("DoT", str(trust_val))
-    if norm.get("arg1"):
+    # arg1/arg2 only for legacy non-logic entries that still carry them
+    if tag != "logic" and norm.get("arg1"):
         root_el.set("arg1", str(norm["arg1"]))
-    if norm.get("arg2"):
+    if tag != "logic" and norm.get("arg2"):
         root_el.set("arg2", str(norm["arg2"]))
     return root_el
 
 
 def _truth_entry_from_xml_element(el: ET.Element) -> dict:
-    """Parse one typed truth XML element into the internal dict shape."""
-    entry: dict = {"id": el.get("id", "")}
+    """Parse one typed truth XML element into the internal dict shape.
+
+    Handles both the new ``<logic>`` wrapper format and legacy bare
+    operator elements (``<and>``, ``<or>``, ``<not>``, ``<non>``).
+    Legacy operators are migrated to the ``<logic>`` internal format.
+    """
+    # -- Legacy migration: bare <and>/<or>/<not>/<non> → <logic> wrapper --
+    if el.tag in _OPERATOR_CHILD_TAGS:
+        entry: dict = {"id": el.get("id", "")}
+        if el.get("title"):
+            entry["title"] = el.get("title")
+        if el.get("time"):
+            entry["time"] = el.get("time")
+        if el.get("place"):
+            entry["place"] = el.get("place")
+        dot_str = el.get("DoT") or el.get("trust")
+        if dot_str is not None:
+            try:
+                entry["trust"] = float(dot_str)
+            except ValueError:
+                entry["trust"] = None
+        # Build <logic><op><ref id="..."/>...</op></logic> from arg1/arg2
+        refs: list[str] = []
+        arg1 = (el.get("arg1") or "").strip()
+        arg2 = (el.get("arg2") or "").strip()
+        if arg1:
+            refs.append(arg1)
+        if arg2:
+            refs.append(arg2)
+        # Also check child/ref sub-elements in old XHTML formats
+        if not refs:
+            for child_el in el.findall("child"):
+                ref_id = (child_el.get("id") or "").strip()
+                if ref_id:
+                    refs.append(ref_id)
+        if not refs:
+            for ref_el in el.findall("ref"):
+                ref_id = (ref_el.text or "").strip()
+                if ref_id:
+                    refs.append(ref_id)
+        ref_xml = "".join(f'<ref id="{r}"/>' for r in refs)
+        entry["content"] = f"<logic><{el.tag}>{ref_xml}</{el.tag}></logic>"
+        return _normalize_trust_entry(entry)
+
+    # -- Standard path for all other truth types (including <logic>) --
+    entry = {"id": el.get("id", "")}
     if el.get("title"):
         entry["title"] = el.get("title")
     if el.get("time"):
@@ -579,6 +627,7 @@ def _truth_entry_from_xml_element(el: ET.Element) -> dict:
             entry["trust"] = float(dot_str)
         except ValueError:
             entry["trust"] = None
+    # Legacy arg1/arg2 on non-operator elements (e.g. migrating data)
     if el.get("arg1"):
         entry["arg1"] = el.get("arg1")
     if el.get("arg2"):

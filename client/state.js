@@ -15,6 +15,7 @@ const TRUTH_ICONS = {
   feeling:   "\u2661",   // ♡ white heart suit
   fact:      "\u25cf",   // ● solid circle
   reference: "\ud83d\udd17", // 🔗 link
+  logic:     "\u22a2",   // ⊢ logic (generic; renderer inspects operator child)
   and:       "\u2227",   // ∧ logical and
   or:        "\u2228",   // ∨ logical or
   not:       "\u00ac",   // ¬ logical not

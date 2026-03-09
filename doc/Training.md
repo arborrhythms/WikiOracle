@@ -244,8 +244,7 @@ and training happen after the response is delivered.
    * Entries with identifiable content are always filtered regardless
      of `store_concrete` (`detect_identifiability()`).
    * Feelings never reach the merge (`_is_server_storable()` rejects them).
-   * Operators whose leaf operands include feelings are rejected
-     (`validate_operator_operands()`).
+   * Operators may compose facts or feelings as operands.
    * Feelings are also stripped from training messages
      (`strip_feelings_from_training()` in `bin/sensation.py`).
 6. Merge the surviving truth entries into the server TruthSet
@@ -509,10 +508,10 @@ resolved by `resolve_entries()` in `bin/truth.py`:
 * `<fact>`, `<feeling>`, operators → pass through unchanged
 
 Entry types stored after resolution: `<fact>` (knowledge — no `<place>`/`<time>` children)
-and operators (`<and>`, `<or>`, `<not>`, `<non>`) whose leaf operands are all allowable facts.
+and `<logic>` entries (operators wrapped in `<logic><and|or|not|non>...</logic>`).
 
 Entry types **not** stored: `<feeling>`, `<provider>`, unresolved `<reference>`,
-unresolved `<authority>`, operators over feelings, and (when
+unresolved `<authority>`, and (when
 `store_concrete` is false) news facts with `<place>` or `<time>`
 child elements.  Content matching identifiability patterns (PII) is
 always excluded.

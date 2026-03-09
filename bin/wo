@@ -244,9 +244,9 @@ def _run_stateless(args: argparse.Namespace) -> int:
 
     # Apply overrides
     if args.provider:
-        runtime_cfg.setdefault("ui", {})["default_provider"] = args.provider
+        runtime_cfg.setdefault("providers", {})["default"] = args.provider
     if args.model:
-        runtime_cfg.setdefault("ui", {})["model"] = args.model
+        runtime_cfg.setdefault("providers", {})["model"] = args.model
 
     body = {
         "message": args.message,

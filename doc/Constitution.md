@@ -82,7 +82,7 @@ Authority entries exist to enable decentralized truth (a network of trust) witho
 ## Local-First Data and Auditability
 
 1. **Client-owned Particular State** The default posture is local-first: user conversation state and news lives on the user's machine and are portable.
-2. **Server-ovener Universal State** A shared hosted service accumulate only anonymized knowledge in a Truth Table which serves as a trusted source of facts.
+2. **Server-ovener Universal State** A shared hosted service accumulate only anonymized knowledge in a TruthSet which serves as a trusted source of facts.
 
 See [DataPrivacy.md](DataPrivacy)
 

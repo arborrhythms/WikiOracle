@@ -13,11 +13,6 @@
 * Use MCP servers as authority-adjacent inputs: convert MCP resource/tool outputs into `<reference>`/`<fact>` entries with explicit certainty and scope, replacing per-source custom integrations.
 * Multi-channel front-end via OpenClaw: route messages from Slack/Discord/Telegram to WikiOracle's `/chat` endpoint, preserving local-first truth ownership.
 
-## Output Certainty
-* the Oracle should respond to the user using Facts and Feelings; right now even its responses are just feelings (without an accurate or attempted Degree of Truth).
-* Other LLM providers are not sophisticated enough to report truth claims wrapped in <fact> with a DoT baseed on output, so maybe we can map to that format using their citations as facts with DoT and and the rest as feeling.
-* Until we do so, we cannot end up training on the results of other LLMs (which is probably a good thing anyway).
-
 ## Sentence-Level Prediction
 * Change the next-step prediction model to a syntactically structured derivation of sentence meaning, so that token prediction becomes prediction of the sentence (as a token), of the NP+VP (as two tokens), ... until the full sentence has been specified. This would take the same number of production steps as a current LLM, but the iterative refinement of the next-sentence production is conceptually much different, and closer to human reasoning and refinement where there is a core truth (S) and spatial NP and temporal VP which are successively refined by adjectives and adverbs that scope the conceptual space of that kernel sentence.
 * A training and testing dataset for the network consisting of truth statements and implications with associated truth values.
@@ -28,7 +23,7 @@
 * See [`Socrates.pdf`](./Socrates.pdf): Venn diagram as a model of luminousity. 
 
 ## Truth2vec
-* The server's Truth Table forms a second embedding space similar to the first. This design is called Truth2vec, which orthogonalizes a sentential embedding space that influences the original embedding space in virtue of higher-order concepts.
+* The server's TruthSet forms a second embedding space similar to the first. This design is called Truth2vec, which orthogonalizes a sentential embedding space that influences the original embedding space in virtue of higher-order concepts.
 * Contrastive learning algorithm for Truth2vec? No, use the embedding space, but the embedding space will be determined by bottom-up and top-down constraints. 
 * In fact, all it needs is vedana, a +- weighting over the truth space of HOC that alters the categories that are formed as would desires expressed within a belief system.
 * All words have a projection in 5-space, which is called the Where pathway
@@ -46,4 +41,3 @@
 * Simplicity is developing ND awareness within space.
 * One taste is about letting our attachment to feelings within that space be 1 everwhere.
 * Buddhahood is the perfection of these three.
-* 

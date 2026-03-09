@@ -33,8 +33,8 @@ def _make_state(**overrides):
     base = {
         "version": STATE_VERSION,
         "schema": SCHEMA_URL,
-        "time": "2026-02-24T00:00:00Z",
-        "context": "<div>Test</div>",
+        "time_creation": "2026-02-24T00:00:00Z",
+        "time_lastModified": "2026-02-24T00:00:00Z",
         "conversations": [],
         "selected_conversation": None,
         "truth": [],
@@ -46,13 +46,18 @@ def _make_state(**overrides):
 def _make_runtime_config(**overrides):
     """Create a runtime_config dict (parsed config)."""
     base = {
-        "user": {"name": "TestUser"},
-        "chat": {
-            "temperature": 0.7,
-            "rag": True,
-            "url_fetch": False,
+        "server": {
+            "evaluation": {
+                "temperature": 0.7,
+                "url_fetch": False,
+            },
+            "truthset": {
+                "truth_symmetry": True,
+                "store_concrete": False,
+                "truth_weight": 0.7,
+            },
         },
-        "ui": {"default_provider": "wikioracle"},
+        "providers": {"default": "wikioracle"},
     }
     base.update(overrides)
     return base
@@ -206,7 +211,7 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
 
     def test_uses_request_state(self):
         """The returned state reflects client-supplied state, not server memory."""
-        client_state = _make_state(context="<div>From Client</div>")
+        client_state = _make_state(title="From Client")
 
         with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
@@ -219,15 +224,13 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
         if resp.status_code == 200:
             data = resp.get_json()
             returned_state = data.get("state", {})
-            # The context should still be the client-supplied value
-            self.assertEqual(returned_state.get("context"), "<div>From Client</div>")
             # A new conversation should have been created
             self.assertGreater(len(returned_state.get("conversations", [])), 0)
 
-    def test_uses_runtime_config_user_name(self):
+    def test_uses_state_client_name(self):
         """The user display name in messages comes from state, not _CONFIG."""
         st = _make_state()
-        st["user"] = {"name": "RuntimeUser", "user_id": ""}
+        st["client_name"] = "RuntimeUser"
 
         with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
@@ -280,14 +283,14 @@ class TestBootstrapEndpoint(StatelessContractBase):
         resp = self.client.get("/bootstrap")
         data = resp.get_json()
         c = data["config"]
-        # Top-level sections (user no longer in config — lives in state)
+        # Top-level sections: server + providers only
         self.assertNotIn("user", c)
-        self.assertIn("ui", c)
-        self.assertIn("chat", c)
+        self.assertNotIn("ui", c)       # UI now lives in state
+        self.assertNotIn("chat", c)     # split into server.evaluation + server.truthset
         self.assertIn("server", c)
-        # Nested sub-keys (not flat)
-        self.assertIn("default_provider", c["ui"])
-        self.assertIn("layout", c["ui"])
+        self.assertIn("providers", c)
+        # Nested sub-keys
+        self.assertIn("default", c["providers"])
         self.assertIn("stateless", c["server"])
         self.assertIn("url_prefix", c["server"])
         self.assertIn("server_id", c["server"])

@@ -1000,9 +1000,8 @@ class TestDiamondConversationTree(unittest.TestCase):
                     "default_model": "test",
                 },
             },
-            "chat": {"rag": True},
-            "ui": {"default_provider": "gemini"},
-            "user": {"name": "Tester"},
+            "server": {"evaluation": {}, "truthset": {"truth_weight": 0.7}},
+            "providers": {"default": "gemini"},
         }
 
         call_count = {"n": 0}
@@ -1125,9 +1124,8 @@ class TestDiamondConversationTree(unittest.TestCase):
                     "default_model": "test",
                 },
             },
-            "chat": {"rag": True},
-            "ui": {"default_provider": "gemini"},
-            "user": {"name": "Tester"},
+            "server": {"evaluation": {}, "truthset": {"truth_weight": 0.7}},
+            "providers": {"default": "gemini"},
         }
 
         def mock_call(url, **kwargs):
@@ -1193,9 +1191,8 @@ class TestDiamondConversationTree(unittest.TestCase):
                     "default_model": "test",
                 },
             },
-            "chat": {"rag": True},
-            "ui": {"default_provider": "gemini"},
-            "user": {"name": "Tester"},
+            "server": {"evaluation": {}, "truthset": {"truth_weight": 0.7}},
+            "providers": {"default": "gemini"},
         }
 
         def mock_call(url, **kwargs):

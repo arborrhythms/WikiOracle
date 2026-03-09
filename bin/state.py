@@ -64,7 +64,7 @@ SCHEMA_URL = "https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/dat
 SCHEMA_BASENAME = "state.xsd"  # Basename accepted when URL host/path vary.
 STATE_VERSION = 2  # Current state grammar version.
 
-DEFAULT_OUTPUT = ""  # Default output-format instruction when none is configured.
+# DEFAULT_OUTPUT removed — output now lives in config.providers.output.
 
 TRUTH_TAGS = ("fact", "feeling", "reference", "and", "or", "not", "non", "provider", "authority")
 _TRUTH_TAG_SET = frozenset(TRUTH_TAGS)
@@ -271,11 +271,6 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
     tm = state.get("time_lastModified")
     state["time_lastModified"] = _coerce_timestamp(tm) if tm else state["time_creation"]
 
-    context = state.get("context", "<div/>")
-    if strict and not isinstance(context, str):
-        raise StateValidationError("State.context must be an XHTML string")
-    state["context"] = ensure_xhtml(context)
-
     # Title (human-readable document name; defaults to "WikiOracle")
     title = state.get("title")
     state["title"] = title.strip() if isinstance(title, str) and title.strip() else "WikiOracle"
@@ -297,13 +292,6 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
     state["selected_message"] = selected_message
     _apply_selection_flags(state["conversations"], selected_conversation, selected_message)
 
-    # Output format instructions (always present; defaults like context)
-    output = state.get("output")
-    if isinstance(output, str) and output.strip():
-        state["output"] = output.strip()
-    else:
-        state["output"] = DEFAULT_OUTPUT
-
     # Truth — flat array of truth entries
     # Legacy compat: accept old {"truth": {"trust": [...]}} or new {"truth": [...]}
     raw_truth = state.get("truth", [])
@@ -315,17 +303,20 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raw_truth = []
     state["truth"] = [_normalize_trust_entry(v) for v in raw_truth]
 
-    # User identity — name + user_id stored in state header.
-    # Backward compat: old root-level "user_guid" maps to user.user_id.
-    if "user_guid" in state and "user" not in state:
-        state["user"] = {"name": "User", "user_id": state["user_guid"]}
+    # Client identity — flat client_name/client_id in state.
+    # Backward compat: old nested user block → flat fields.
+    if "user_guid" in state:
+        state.setdefault("client_id", state["user_guid"])
     state.pop("user_guid", None)
 
-    user = state.get("user")
+    user = state.pop("user", None)
     if isinstance(user, dict):
-        user.setdefault("name", "User")
-        user.setdefault("user_id", "")
-    # If no user block, leave absent — populated later by the pipeline.
+        state.setdefault("client_name", user.get("name", "User"))
+        state.setdefault("client_id", user.get("user_id", ""))
+
+    # Remove legacy context/output (now in config.providers)
+    state.pop("context", None)
+    state.pop("output", None)
 
     # Clean up legacy fields
     state.pop("messages", None)
@@ -336,7 +327,7 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
 
 
 
-def load_state_file(path: Path, *, strict: bool = True, max_bytes: int | None = None,
+def load_state_file(path, *, strict: bool = True, max_bytes: int | None = None,
                     reject_symlinks: bool = False) -> dict:
     """Load state from an ``.xml`` or legacy ``.json`` file.
 
@@ -346,6 +337,8 @@ def load_state_file(path: Path, *, strict: bool = True, max_bytes: int | None = 
       - Content starting with ``<?xml`` or ``<state`` → XML
       - Content starting with ``{`` → legacy JSON
     """
+    if not isinstance(path, Path):
+        path = Path(path)
     if reject_symlinks and path.is_symlink():
         raise StateValidationError("State file cannot be a symlink")
 
@@ -689,38 +682,44 @@ def state_to_xml(state: dict) -> str:
     state = ensure_minimal_state(state, strict=False)
     root = ET.Element("state")
 
-    # -- Header --
-    header_el = ET.SubElement(root, "header")
+    # -- Client --
+    client_el = ET.SubElement(root, "client")
 
-    ver_el = ET.SubElement(header_el, "version")
+    ver_el = ET.SubElement(client_el, "version")
     ver_el.text = str(state.get("version", STATE_VERSION))
 
-    schema_el = ET.SubElement(header_el, "schema")
+    schema_el = ET.SubElement(client_el, "schema")
     schema_el.text = state.get("schema", SCHEMA_URL)
 
-    tc_el = ET.SubElement(header_el, "time_creation")
+    tc_el = ET.SubElement(client_el, "time_creation")
     tc_el.text = state.get("time_creation", utc_now_iso())
 
-    tm_el = ET.SubElement(header_el, "time_lastModified")
+    tm_el = ET.SubElement(client_el, "time_lastModified")
     tm_el.text = utc_now_iso()
 
-    title_el = ET.SubElement(header_el, "title")
+    title_el = ET.SubElement(client_el, "title")
     title_el.text = state.get("title", "WikiOracle")
 
-    _set_xhtml_content(header_el, "context", state.get("context", "<div/>"))
+    client_name = state.get("client_name")
+    if client_name:
+        cn_el = ET.SubElement(client_el, "client_name")
+        cn_el.text = str(client_name)
 
-    user_data = state.get("user")
-    if isinstance(user_data, dict) and (user_data.get("name") or user_data.get("user_id")):
-        user_el = ET.SubElement(header_el, "user")
-        name_el = ET.SubElement(user_el, "name")
-        name_el.text = user_data.get("name", "User")
-        uid_el = ET.SubElement(user_el, "user_id")
-        uid_el.text = str(user_data.get("user_id", ""))
+    client_id = state.get("client_id")
+    if client_id:
+        ci_el = ET.SubElement(client_el, "client_id")
+        ci_el.text = str(client_id)
 
-    output = state.get("output")
-    if output:
-        output_el = ET.SubElement(header_el, "output")
-        output_el.text = str(output)
+    # UI preferences
+    ui_data = state.get("ui")
+    if isinstance(ui_data, dict) and ui_data:
+        ui_el = ET.SubElement(client_el, "ui")
+        for ui_key, ui_val in ui_data.items():
+            ui_child = ET.SubElement(ui_el, ui_key)
+            if isinstance(ui_val, bool):
+                ui_child.text = "true" if ui_val else "false"
+            else:
+                ui_child.text = str(ui_val)
 
     # -- Conversations --
     for conv in state.get("conversations", []):
@@ -746,7 +745,6 @@ def xml_to_state(text: str) -> dict:
         "time_creation": utc_now_iso(),
         "time_lastModified": utc_now_iso(),
         "title": "WikiOracle",
-        "context": "<div/>",
         "conversations": [],
         "truth": [],
         "selected_conversation": None,
@@ -761,57 +759,66 @@ def xml_to_state(text: str) -> dict:
     if root.tag != "state":
         return state
 
-    # -- Header --
-    header_el = root.find("header")
-    if header_el is not None:
-        ver_el = header_el.find("version")
+    # -- Client (backward compat: also accept <header>) --
+    client_el = root.find("client")
+    if client_el is None:
+        client_el = root.find("header")  # backward compat
+    if client_el is not None:
+        ver_el = client_el.find("version")
         if ver_el is not None and ver_el.text:
             try:
                 state["version"] = int(ver_el.text)
             except ValueError:
                 pass
-        schema_el = header_el.find("schema")
+        schema_el = client_el.find("schema")
         if schema_el is not None and schema_el.text:
             state["schema"] = schema_el.text
-        tc_el = header_el.find("time_creation")
+        tc_el = client_el.find("time_creation")
         if tc_el is not None and tc_el.text:
             state["time_creation"] = tc_el.text
-        tm_el = header_el.find("time_lastModified")
+        else:
+            # Backward compat: old <time> element
+            old_t = client_el.find("time")
+            if old_t is not None and old_t.text:
+                state["time_creation"] = old_t.text
+                state["time_lastModified"] = old_t.text
+        tm_el = client_el.find("time_lastModified")
         if tm_el is not None and tm_el.text:
             state["time_lastModified"] = tm_el.text
-        # Backward compat: old <time> maps to time_creation
-        if tc_el is None:
-            old_time_el = header_el.find("time")
-            if old_time_el is not None and old_time_el.text:
-                state["time_creation"] = old_time_el.text
-                if tm_el is None:
-                    state["time_lastModified"] = old_time_el.text
-        title_el = header_el.find("title")
+        title_el = client_el.find("title")
         if title_el is not None and title_el.text:
             state["title"] = title_el.text
-        context_el = header_el.find("context")
-        if context_el is not None:
-            state["context"] = _get_xhtml_content(context_el) or "<div/>"
-        sel_el = header_el.find("selected_conversation")
+        sel_el = client_el.find("selected_conversation")
         if sel_el is not None and sel_el.text:
             state["selected_conversation"] = sel_el.text
-        # New format: <user><name>...</name><user_id>...</user_id></user>
-        user_el = header_el.find("user")
+        # Flat client identity fields
+        cn_el = client_el.find("client_name")
+        if cn_el is not None and cn_el.text:
+            state["client_name"] = cn_el.text
+        ci_el = client_el.find("client_id")
+        if ci_el is not None and ci_el.text:
+            state["client_id"] = ci_el.text
+        # Backward compat: nested <user> block → flat client fields
+        user_el = client_el.find("user")
         if user_el is not None:
-            user_name_el = user_el.find("name")
-            user_id_el = user_el.find("user_id")
-            state["user"] = {
-                "name": user_name_el.text if user_name_el is not None and user_name_el.text else "User",
-                "user_id": user_id_el.text if user_id_el is not None and user_id_el.text else "",
-            }
-        else:
-            # Backward compat: old <user_guid> maps to user.user_id
-            guid_el = header_el.find("user_guid")
-            if guid_el is not None and guid_el.text:
-                state["user"] = {"name": "User", "user_id": guid_el.text}
-        output_el = header_el.find("output")
-        if output_el is not None and output_el.text:
-            state["output"] = output_el.text.strip()
+            name_el = user_el.find("name")
+            if name_el is not None and name_el.text and "client_name" not in state:
+                state["client_name"] = name_el.text
+            uid_el = user_el.find("user_id")
+            if uid_el is not None and uid_el.text and "client_id" not in state:
+                state["client_id"] = uid_el.text
+        # Backward compat: <user_guid> → client_id
+        ug_el = client_el.find("user_guid")
+        if ug_el is not None and ug_el.text and "client_id" not in state:
+            state["client_id"] = ug_el.text
+        # UI preferences
+        ui_el = client_el.find("ui")
+        if ui_el is not None:
+            from config import _xml_coerce
+            ui_data = {}
+            for child in ui_el:
+                ui_data[child.tag] = _xml_coerce((child.text or "").strip())
+            state["ui"] = ui_data
 
     # -- Conversations --
     for conv_el in root.findall("conversation"):
@@ -999,18 +1006,7 @@ def merge_llm_states(
     out = copy.deepcopy(base)
     out["truth"] = _sort_by_timestamp(list(existing_trust.values()))
 
-    if keep_base_context:
-        new_context = out["context"]
-    else:
-        new_context = incoming["context"]
-
-    if context_rewriter is not None and new_convs:
-        try:
-            deltas = extract_context_deltas(new_convs)
-            new_context = context_rewriter(new_context, deltas)
-        except Exception:
-            pass
-    out["context"] = ensure_xhtml(new_context)
+    # Context/output moved to config.providers — no longer merged in state.
     # Title: incoming wins if base is default
     if incoming.get("title") and (not out.get("title") or out["title"] == "WikiOracle"):
         out["title"] = incoming["title"]

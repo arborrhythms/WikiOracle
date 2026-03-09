@@ -12,7 +12,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 from state import (
-    DEFAULT_OUTPUT,
     SCHEMA_URL,
     STATE_VERSION,
     add_child_conversation,
@@ -48,8 +47,8 @@ def _make_state(**overrides):
     base = {
         "version": 2,
         "schema": SCHEMA_URL,
-        "time": "2026-02-23T00:00:00Z",
-        "context": "<div>Test</div>",
+        "time_creation": "2026-02-23T00:00:00Z",
+        "time_lastModified": "2026-02-23T00:00:00Z",
         "conversations": [],
         "selected_conversation": None,
         "truth": [],
@@ -85,7 +84,7 @@ class TestEnsureMinimalState(unittest.TestCase):
         state = ensure_minimal_state({}, strict=False)
         self.assertEqual(state["version"], 2)
         self.assertEqual(state["schema"], SCHEMA_URL)
-        self.assertIn("context", state)
+        self.assertNotIn("context", state)  # context now in config.providers
         self.assertEqual(state["conversations"], [])
         self.assertIn("truth", state)
         self.assertIsNone(state["selected_conversation"])
@@ -93,8 +92,8 @@ class TestEnsureMinimalState(unittest.TestCase):
 
     def test_strict_rejects_bad_schema(self):
         with self.assertRaises(StateValidationError):
-            ensure_minimal_state({"version": 2, "schema": "bad", "time": "2026-01-01T00:00:00Z",
-                                  "context": "<div/>", "conversations": [], "truth": []}, strict=True)
+            ensure_minimal_state({"version": 2, "schema": "bad", "time_creation": "2026-01-01T00:00:00Z",
+                                  "conversations": [], "truth": []}, strict=True)
 
     def test_conversations_normalized(self):
         state = ensure_minimal_state(_make_state(conversations=[
@@ -120,7 +119,7 @@ class TestEnsureMinimalState(unittest.TestCase):
     def test_removes_legacy_fields(self):
         state = ensure_minimal_state({
             "version": 2, "schema": SCHEMA_URL, "time": "2026-02-23T00:00:00Z",
-            "context": "<div/>", "conversations": [],
+            "conversations": [],
             "messages": [{"id": "m_1"}],  # legacy
             "active_path": ["m_1"],  # legacy
             "truth": [],
@@ -218,8 +217,7 @@ class TestXMLRoundTrip(unittest.TestCase):
         self.assertIn("false_01", ids_orig)
         self.assertIn("provider_claude", ids_orig)
 
-        # Context should describe Kleene ternary logic
-        self.assertIn("Kleene", original.get("context", ""))
+        # Context was moved to config.providers — old files may still have it in state
 
         # Round-trip: serialize -> parse -> normalize
         xml_text = state_to_xml(original)
@@ -237,8 +235,7 @@ class TestXMLRoundTrip(unittest.TestCase):
         self.assertEqual(by_id["false_01"]["trust"], -0.9)
         self.assertEqual(by_id["soft_01"]["trust"], 0.8)
 
-        # Context preserved
-        self.assertIn("Kleene", restored.get("context", ""))
+        # Context was moved to config.providers — skip context check
 
         # Write to disk and reload (full disk round-trip)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -255,7 +252,6 @@ class TestXMLRoundTrip(unittest.TestCase):
             "version": 1,
             "schema": SCHEMA_URL,
             "time": "2026-02-23T00:00:00Z",
-            "context": "<div/>",
             "conversations": [],
             "truth": [],
         }
@@ -410,8 +406,6 @@ class TestMerge(unittest.TestCase):
         merged, meta = merge_llm_states(base, incoming, keep_base_context=True)
         self.assertEqual(len(merged["conversations"]), 2)
         self.assertEqual(meta["conversations_added"], 1)
-        # Base context preserved
-        self.assertEqual(merged["context"], "<div>Test</div>")
 
     def test_merge_deduplicates_by_id(self):
         base = ensure_minimal_state(_make_state(conversations=[
@@ -652,27 +646,17 @@ class TestSelectedConversationRoundtrip(unittest.TestCase):
 
 
 class TestOutputField(unittest.TestCase):
-    """Test state.output persistence and defaults."""
+    """Test that output is no longer in state (moved to config.providers)."""
 
-    def test_output_preserved_in_ensure_minimal_state(self):
-        """Non-empty output string survives normalization."""
+    def test_output_removed_from_state(self):
+        """Output is removed from state by ensure_minimal_state."""
         state = ensure_minimal_state({"output": "Custom format."})
-        self.assertEqual(state["output"], "Custom format.")
+        self.assertNotIn("output", state)
 
-    def test_output_defaults_when_whitespace(self):
-        """Whitespace-only output gets the default."""
-        state = ensure_minimal_state({"output": "  \n  "})
-        self.assertEqual(state["output"], DEFAULT_OUTPUT)
-
-    def test_output_defaults_when_missing(self):
-        """Missing output gets the default."""
+    def test_output_absent_in_empty_state(self):
+        """Missing output stays absent (no longer defaulted in state)."""
         state = ensure_minimal_state({})
-        self.assertEqual(state["output"], DEFAULT_OUTPUT)
-
-    def test_default_output_roundtrip(self):
-        """Default output persists through ensure_minimal_state."""
-        state = ensure_minimal_state({})
-        self.assertEqual(state["output"], DEFAULT_OUTPUT)
+        self.assertNotIn("output", state)
 
 
 class TestTitleField(unittest.TestCase):

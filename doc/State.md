@@ -8,20 +8,20 @@ WikiOracle conversation state is persisted as XML, validated by `data/state.xsd`
 A state file has three top-level parts in order:
 
 ```
-State → Header + Conversation* + Truth?
+State → Client + Conversation* + Truth?
 ```
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <state>
-  <header>...</header>
+  <client>...</client>
   <conversation>...</conversation>
   <conversation>...</conversation>
   <truth>...</truth>
 </state>
 ```
 
-`header` is required. Top-level `conversation` elements may repeat. `truth` is optional.
+`client` is required. Top-level `conversation` elements may repeat. `truth` is optional.
 
 
 ## Default state format
@@ -41,7 +41,7 @@ The state file is an XML document containing a `<truth>` section. It may be a fu
 ```
 
 ## Server State
-* The server persists only the Truth section of the State, not any conversations.
+* The server persists only the TruthSet of the State, not any conversations.
 * The server is stateless with respect to conversations, which means that state is always passed from (and owned by) the client.
 * State files are read from `file://` within the data directory.
 
@@ -54,33 +54,59 @@ The state file is an XML document containing a `<truth>` section. It may be a fu
 * **No recursive authorities**: If a remote state file contains `<authority>` entries, they are skipped. There is no transitive fetch chain — only one level of authority delegation is supported.
 * **Rate limiting**: The in-memory cache prevents excessive re-fetching within the refresh interval
 
-## Header
+## Client
 
-Session metadata. All fields except `user_guid` and `output` are required.
+Client metadata. All fields except `client_name`, `client_id`, and `ui` are required.
 
 | Field | Type | Description |
 |---|---|---|
 | `version` | positive integer | State grammar version (currently `2`). |
 | `schema` | string | Schema URL, normally `https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd`. |
-| `time` | string (ISO 8601) | Timestamp of last state write. |
+| `time_creation` | string (ISO 8601) | Timestamp of initial state creation. |
+| `time_lastModified` | string (ISO 8601) | Timestamp of last state write. |
 | `title` | string | Document or project title. |
-| `context` | XHTML | Persistent context block sent with every request. |
-| `user_guid` | string (optional) | Persistent user GUID. |
-| `output` | string (optional) | Output-format instruction block. |
+| `client_name` | string (optional) | Display name of the client user. |
+| `client_id` | string (optional) | Persistent client identifier (UUID). |
+| `ui` | element (optional) | UI preferences block (see below). |
+
+### UI preferences
+
+The `<ui>` block inside `<client>` stores client-owned UI preferences.
+
+| Field | Type | Description |
+|---|---|---|
+| `layout` | string | Layout mode (e.g. `horizontal`). |
+| `theme` | string | Color theme (`system`, `light`, `dark`). |
+| `model` | string | Preferred model identifier (may be empty). |
+| `splitter_pct` | integer | Splitter position as a percentage (`0`--`100`). |
+| `swipe_nav_horizontal` | boolean | Enable horizontal swipe navigation. |
+| `swipe_nav_vertical` | boolean | Enable vertical swipe navigation. |
+| `confirm_actions` | boolean | Whether to prompt before destructive actions. |
 
 ```xml
-<header>
+<client>
   <version>2</version>
   <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
-  <time>2026-03-07T12:00:00Z</time>
+  <time_creation>2026-03-07T12:00:00Z</time_creation>
+  <time_lastModified>2026-03-07T12:00:00Z</time_lastModified>
   <title>My Project</title>
-  <context><div><p>Project context goes here.</p></div></context>
-  <user_guid>a1b2c3d4-...</user_guid>
-  <output></output>
-</header>
+  <client_name>Alice</client_name>
+  <client_id>a1b2c3d4-...</client_id>
+  <ui>
+    <layout>horizontal</layout>
+    <theme>system</theme>
+    <model></model>
+    <splitter_pct>0</splitter_pct>
+    <swipe_nav_horizontal>true</swipe_nav_horizontal>
+    <swipe_nav_vertical>false</swipe_nav_vertical>
+    <confirm_actions>false</confirm_actions>
+  </ui>
+</client>
 ```
 
-Context, truth, and output are client-owned. The server persists them in stateful mode but does not originate them.
+Context and output format instructions have moved to `config.providers`. See [Config.md](./Config.md).
+
+Truth is client-owned. The server persists it in stateful mode but does not originate it.
 
 ---
 
@@ -148,7 +174,7 @@ The XML file persists selection through `selected="true"` attributes on conversa
 
 When a message is sent, `get_context_messages()` walks the ancestor chain from the active conversation to the root and concatenates each conversation's `messages[]` list in order.
 
-## Truth
+## TruthSet
 
 `truth` is an optional container whose children are typed truth elements. The element name is the truth kind, and metadata lives on the element itself.
 
@@ -173,7 +199,7 @@ Operator elements may also carry `arg1` and `arg2`.
 | `<reference>` | External citation wrapping an `<a href="...">...</a>` link record. |
 | `<and>`, `<or>`, `<not>`, `<non>` | Strong Kleene operators over other truth IDs. |
 | `<provider>` | External LLM provider definition. |
-| `<authority>` | Pointer to a remote truth table. |
+| `<authority>` | Pointer to a remote TruthSet. |
 
 ### Example
 
@@ -213,7 +239,7 @@ That keeps the rest of the pipeline stable while the XML surface stays typed.
 
 ### Static vs dynamic truth
 
-When RAG is enabled, the truth table is processed in two phases:
+When RAG is enabled, the TruthSet is processed in two phases:
 
 1. `static_truth` extracts evaluable content such as facts, feelings, and references.
 2. `dynamic_truth` evaluates operators, providers, and authorities against that static set.
@@ -237,15 +263,24 @@ per-node `selected` flags and also derives helper fields such as
 
 ```xml
 <state>
-  <header>
+  <client>
     <version>2</version>
     <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
-    <time>2026-03-07T12:00:00Z</time>
+    <time_creation>2026-03-07T12:00:00Z</time_creation>
+    <time_lastModified>2026-03-07T12:00:00Z</time_lastModified>
     <title>My Project</title>
-    <context><div><p>...</p></div></context>
-    <user_guid>a1b2c3d4-...</user_guid>
-    <output></output>
-  </header>
+    <client_name>Alice</client_name>
+    <client_id>a1b2c3d4-...</client_id>
+    <ui>
+      <layout>horizontal</layout>
+      <theme>system</theme>
+      <model></model>
+      <splitter_pct>0</splitter_pct>
+      <swipe_nav_horizontal>true</swipe_nav_horizontal>
+      <swipe_nav_vertical>false</swipe_nav_vertical>
+      <confirm_actions>false</confirm_actions>
+    </ui>
+  </client>
   <conversation id="c_root" selected="true">
     <title>Animals</title>
     <message id="m1" role="user" username="Alice" time="..." selected="true">
@@ -281,13 +316,15 @@ State is persisted as XML (WikiOracle State format, validated by `data/state.xsd
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <state>
-  <header>
+  <client>
     <version>2</version>
     <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
-    <time>2026-03-05T12:00:00Z</time>
+    <time_creation>2026-03-05T12:00:00Z</time_creation>
+    <time_lastModified>2026-03-05T12:00:00Z</time_lastModified>
     <title>My Project</title>
-    <context><div><p>Project context</p></div></context>
-  </header>
+    <client_name>Alice</client_name>
+    <client_id>a1b2c3d4-...</client_id>
+  </client>
   <conversation id="c_abc">
     <title>Animals</title>
     <message id="m1" role="user" username="Alice" time="...">
@@ -342,7 +379,7 @@ Each **message** has: `id`, `role` (user | assistant | system), `username`, `tim
 ### Grammar
 
 ```
-State        → Header + Conversation* + Truth?
+State        → Client + Conversation* + Truth?
 Conversation → title + (Message | Conversation)*
 Message      → <message id="" role="" username="" time=""><content>...</content></message>
 Truth        → Fact | Feeling | Reference | Operator | Provider | Authority

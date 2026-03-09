@@ -5,8 +5,11 @@
   <xs:annotation>
     <xs:documentation>
       WikiOracle Config — XML configuration schema.
-      All fields are required. Defines the structure for WikiOracle
-      XML configuration files.
+      Defines the structure for WikiOracle XML configuration files.
+      The config is server-owned and contains provider definitions,
+      server runtime parameters (evaluation, training, TruthSet policy),
+      and shared provider context. User identity and UI preferences
+      are stored in the state file, not here.
     </xs:documentation>
   </xs:annotation>
 
@@ -17,48 +20,382 @@
   <xs:element name="config">
     <xs:annotation>
       <xs:documentation>
-        Root configuration element for WikiOracle. Contains user identity,
-        LLM provider definitions, chat behaviour, UI defaults, and server
-        runtime parameters.
+        Root configuration element for WikiOracle. Contains server runtime
+        parameters (with evaluation, TruthSet, and training subsections)
+        and LLM provider definitions (with shared context and output).
       </xs:documentation>
     </xs:annotation>
     <xs:complexType>
       <xs:all>
-        <xs:element name="user"    type="UserType"/>
+        <xs:element name="server"    type="ServerType"/>
         <xs:element name="providers" type="ProvidersType"/>
-        <xs:element name="chat"    type="ChatType"/>
-        <xs:element name="ui"      type="UIType"/>
-        <xs:element name="server"  type="ServerType"/>
       </xs:all>
     </xs:complexType>
   </xs:element>
 
   <!-- ======================================================================
-       Section 1 — User
+       Section 1 — Server
        ====================================================================== -->
 
-  <xs:complexType name="UserType">
+  <xs:complexType name="ServerType">
     <xs:annotation>
       <xs:documentation>
-        User identity. The display name shown in chat messages and an
-        optional persistent GUID (auto-generated from the name when blank).
+        Server runtime parameters. Contains identity, mode flags, and
+        subsections for TruthSet policy, evaluation defaults, training
+        configuration, and URL allow-listing.
       </xs:documentation>
     </xs:annotation>
     <xs:all>
-      <xs:element name="name" type="xs:string">
-        <xs:annotation>
-          <xs:documentation>Display name shown in chat messages.</xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="uid" type="xs:string">
+      <xs:element name="server_name" type="xs:string" minOccurs="0">
         <xs:annotation>
           <xs:documentation>
-            Persistent user GUID. Leave empty or omit to auto-generate
-            from the user name.
+            Human-readable server display name.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="server_id" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>
+            Persistent server identity (UUID4). Auto-generated on first
+            run and written back to the config file.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="stateless" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            Stateless mode — when true the server performs no disk writes.
+            Equivalent to the --stateless CLI flag.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="url_prefix" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>
+            URL path prefix prepended to all routes, e.g. "/chat".
+            Equivalent to the --url-prefix CLI flag.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="truthset" type="TruthSetConfigType">
+        <xs:annotation>
+          <xs:documentation>
+            TruthSet policy settings controlling storage scope, symmetry
+            enforcement, and truth weighting in provider prompts.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="evaluation" type="EvaluationType">
+        <xs:annotation>
+          <xs:documentation>
+            Default evaluation parameters for LLM inference: sampling
+            temperature, token limits, timeouts, and URL fetching.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="training" type="TrainingType">
+        <xs:annotation>
+          <xs:documentation>
+            Online (continuous) learning configuration. Controls how the
+            model updates its truth corpus from user interactions.
+            See doc/Training.md for details.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="allowed_urls" type="AllowedUrlsType">
+        <xs:annotation>
+          <xs:documentation>
+            URL prefixes permitted for authority lookups and dynamic
+            provider fetches. Only https:// URLs matching one of these
+            prefixes are allowed; file:// URLs are always blocked.
           </xs:documentation>
         </xs:annotation>
       </xs:element>
     </xs:all>
+  </xs:complexType>
+
+  <!-- ── TruthSet Config ───────────────────────────────────────────────── -->
+
+  <xs:complexType name="TruthSetConfigType">
+    <xs:annotation>
+      <xs:documentation>
+        Policy settings governing the TruthSet: what gets stored,
+        symmetry enforcement, and how heavily truth entries are
+        weighted in provider system prompts.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:all>
+      <xs:element name="truth_symmetry" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            Enforce Truth Symmetry.  When true (default), truth claims
+            involving value judgements are checked for asymmetric harm
+            under identity exchange before admission to the
+            TruthSet.  Claims that fail the symmetry test are rejected
+            with a dialog offering to record them as feelings instead.
+            See doc/Ethics.md.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="store_concrete" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            When true, concrete facts (narrow spatiotemporal extent)
+            are stored in the TruthSet alongside universal facts
+            (broad extent).  When false (default), only universal facts
+            persist — consistent with Zero-Knowledge / Selective
+            Disclosure principles.  Concrete facts always train
+            weights regardless of this setting; the fact/feeling
+            distinction (not universal/concrete) is the privacy
+            boundary.  See doc/Ethics.md and doc/Entanglement.md.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="truth_weight" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Weight factor (0.0–1.0) controlling how heavily TruthSet
+            entries influence provider system prompts. 0 disables
+            truth injection; 1 applies full weight. Client-overridable.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="1"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- ── Evaluation ────────────────────────────────────────────────────── -->
+
+  <xs:complexType name="EvaluationType">
+    <xs:annotation>
+      <xs:documentation>
+        Default inference parameters applied to all LLM evaluation
+        requests unless overridden per-provider.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:all>
+      <xs:element name="temperature">
+        <xs:annotation>
+          <xs:documentation>
+            Sampling temperature for LLM responses. Valid range is
+            0.0 (deterministic) to 2.0 (maximum randomness).
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:minInclusive value="0.0"/>
+            <xs:maxInclusive value="2.0"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="max_tokens" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Maximum number of tokens in a single LLM response.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:positiveInteger"/>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="timeout" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Request timeout in seconds for LLM evaluation calls.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:positiveInteger"/>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="url_fetch" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            Allow the assistant to fetch and incorporate content from
+            URLs referenced in the conversation.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- ── Training ──────────────────────────────────────────────────────── -->
+
+  <xs:complexType name="TrainingType">
+    <xs:annotation>
+      <xs:documentation>
+        Configuration for the continuous online learning subsystem.
+        Controls learning rates, truth corpus location, device selection,
+        and optional dissonance detection.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:all>
+      <xs:element name="enabled" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            Master switch for continuous truth corpus updates from user
+            interactions. Defaults to false.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="truth_corpus_path" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>
+            Filesystem path to the append-only truth log (JSONL format).
+            Relative paths are resolved from the project root.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="truth_max_entries" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Maximum number of entries in the server TruthSet.
+            When exceeded during the merge step, entries with |trust|
+            closest to 0 are trimmed (weakest signal removed first).
+            Default: 1000.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:positiveInteger"/>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="alpha_base" type="xs:decimal">
+        <xs:annotation>
+          <xs:documentation>
+            Base learning rate for online training weight updates.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="alpha_min" type="xs:decimal">
+        <xs:annotation>
+          <xs:documentation>
+            Minimum learning rate floor. The adaptive scheduler will
+            never reduce the rate below this value.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="alpha_max" type="xs:decimal">
+        <xs:annotation>
+          <xs:documentation>
+            Maximum learning rate ceiling. The adaptive scheduler will
+            never increase the rate above this value.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="merge_rate" type="xs:decimal">
+        <xs:annotation>
+          <xs:documentation>
+            Slow-moving exponential average rate used when merging newly
+            learned truth entries into the canonical corpus.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="device">
+        <xs:annotation>
+          <xs:documentation>
+            Compute device for training operations.
+            - auto: automatically select the best available device
+            - cpu:  force CPU execution
+            - cuda: use an NVIDIA CUDA GPU
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="auto"/>
+            <xs:enumeration value="cpu"/>
+            <xs:enumeration value="cuda"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="dissonance_enabled" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            Enable cognitive dissonance detection. When true the trainer
+            identifies and penalises contradictions between new inputs
+            and established truth entries.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="operators_dynamic_enabled" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+            Enable dynamic operator loading.  Custom operators
+            extend the training pipeline with user-defined
+            transformations.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="warmup_steps" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Sigmoid warmup midpoint for training annealing.  Training
+            ramps from 0 to full strength over approximately 2xN steps.
+            Default: 50.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:positiveInteger"/>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="grad_clip" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Maximum gradient norm for clipping.  Prevents catastrophic
+            single-step weight changes during online training.
+            Default: 1.0.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:minExclusive value="0"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="anchor_decay" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            EMA blend-back rate toward checkpoint weights (anti-capture).
+            After each online training step, model weights are blended
+            back toward the original checkpoint by this factor x truth_weight.
+            Default: 0.001.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="1"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- ── Allowed URLs ──────────────────────────────────────────────────── -->
+
+  <xs:complexType name="AllowedUrlsType">
+    <xs:annotation>
+      <xs:documentation>
+        A list of URL prefix strings. Each entry defines a permitted
+        prefix for outbound HTTP(S) requests made by the server for
+        authority checks and provider API calls.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="url" type="xs:string" minOccurs="0" maxOccurs="unbounded">
+        <xs:annotation>
+          <xs:documentation>
+            A single allowed URL prefix (e.g. "https://api.openai.com/").
+            The server permits outbound requests only to URLs that begin
+            with one of these prefixes.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
   </xs:complexType>
 
   <!-- ======================================================================
@@ -68,13 +405,57 @@
   <xs:complexType name="ProvidersType">
     <xs:annotation>
       <xs:documentation>
-        Container for one or more LLM provider definitions. Each provider
-        element carries a required "name" attribute used as its lookup key
-        (e.g. "wikioracle", "openai", "anthropic").
+        Container for LLM provider definitions and shared context.
+        Section-level elements (default, context, output, truth_context,
+        conversation_context) apply to all providers. Individual provider
+        elements carry per-provider configuration.
       </xs:documentation>
     </xs:annotation>
     <xs:sequence>
-      <xs:element name="provider" type="ProviderType" maxOccurs="unbounded">
+      <xs:element name="default" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Provider key selected by default on application startup
+            (must match a provider name attribute).
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="context" type="XHTMLContentType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Shared XHTML context injected into all provider system
+            prompts. Provides background knowledge and framing for
+            the conversation.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="output" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Output format instructions injected into all provider
+            system prompts. Defines the expected response structure.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="truth_context" type="XHTMLContentType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            System prompt context for truth-only providers (those with
+            conversation=false). Typically instructs the provider to
+            respond exclusively with truth tags.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="conversation_context" type="XHTMLContentType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            System prompt context for conversational providers (those
+            with conversation=true). Typically provides instructions
+            for producing both truth tags and a conversational response.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="provider" type="ProviderType" minOccurs="0" maxOccurs="unbounded">
         <xs:annotation>
           <xs:documentation>A single LLM provider configuration.</xs:documentation>
         </xs:annotation>
@@ -159,393 +540,12 @@
   </xs:complexType>
 
   <!-- ======================================================================
-       Section 3 — Chat
+       XHTML content
        ====================================================================== -->
 
-  <xs:complexType name="ChatType">
-    <xs:annotation>
-      <xs:documentation>
-        Chat behaviour settings controlling sampling temperature,
-        retrieval-augmented generation, URL fetching, and action
-        confirmation prompts.
-      </xs:documentation>
-    </xs:annotation>
-    <xs:all>
-      <xs:element name="temperature">
-        <xs:annotation>
-          <xs:documentation>
-            Sampling temperature for LLM responses. Valid range is
-            0.0 (deterministic) to 2.0 (maximum randomness).
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:decimal">
-            <xs:minInclusive value="0.0"/>
-            <xs:maxInclusive value="2.0"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="rag" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Enable retrieval-augmented generation using the truth corpus
-            to ground responses in verified knowledge.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="url_fetch" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Allow the assistant to fetch and incorporate content from
-            URLs referenced in the conversation.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="confirm_actions" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            When true, the UI prompts the user for confirmation before
-            destructive operations such as deletes and merges.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-    </xs:all>
-  </xs:complexType>
-
-  <!-- ======================================================================
-       Section 4 — UI
-       ====================================================================== -->
-
-  <xs:complexType name="UIType">
-    <xs:annotation>
-      <xs:documentation>
-        User interface defaults including provider selection, layout mode,
-        colour theme, splitter position, and swipe navigation toggles.
-      </xs:documentation>
-    </xs:annotation>
-    <xs:all>
-      <xs:element name="default_provider" type="xs:string">
-        <xs:annotation>
-          <xs:documentation>
-            Provider key selected by default on application startup
-            (must match a key in the providers section).
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="layout">
-        <xs:annotation>
-          <xs:documentation>
-            Layout mode for the chat interface.
-            - horizontal: side-by-side tree and chat panels
-            - vertical:   stacked tree and chat panels
-            - flat:       single-panel chat only
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:string">
-            <xs:enumeration value="horizontal"/>
-            <xs:enumeration value="vertical"/>
-            <xs:enumeration value="flat"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="theme">
-        <xs:annotation>
-          <xs:documentation>
-            Colour theme for the UI.
-            - system: follow the operating system preference
-            - light:  light background theme
-            - dark:   dark background theme
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:string">
-            <xs:enumeration value="system"/>
-            <xs:enumeration value="light"/>
-            <xs:enumeration value="dark"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="splitter_pct">
-        <xs:annotation>
-          <xs:documentation>
-            Conversation-tree / chat panel splitter position expressed as
-            a percentage (0-100). A value of 0 collapses the tree panel.
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:integer">
-            <xs:minInclusive value="0"/>
-            <xs:maxInclusive value="100"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="swipe_nav_horizontal" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Enable horizontal swipe gestures (left/right) to navigate
-            between sibling conversation branches.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="swipe_nav_vertical" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Enable vertical swipe gestures (up/down) to navigate between
-            sibling conversation branches.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-    </xs:all>
-  </xs:complexType>
-
-  <!-- ======================================================================
-       Section 5 — Server
-       ====================================================================== -->
-
-  <xs:complexType name="ServerType">
-    <xs:annotation>
-      <xs:documentation>
-        Server runtime parameters. These values serve as defaults and are
-        typically overridden via CLI flags at startup.
-      </xs:documentation>
-    </xs:annotation>
-    <xs:all>
-      <xs:element name="stateless" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Stateless mode — when true the server performs no disk writes.
-            Equivalent to the --stateless CLI flag.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="url_prefix" type="xs:string">
-        <xs:annotation>
-          <xs:documentation>
-            URL path prefix prepended to all routes, e.g. "/chat".
-            Equivalent to the --url-prefix CLI flag.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="online_training" type="OnlineTrainingType">
-        <xs:annotation>
-          <xs:documentation>
-            Online (continuous) learning configuration. Controls how the
-            model updates its truth corpus from user interactions.
-            See doc/Training.md for details.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="allowed_urls" type="AllowedUrlsType">
-        <xs:annotation>
-          <xs:documentation>
-            URL prefixes permitted for authority lookups and dynamic
-            provider fetches. Only https:// URLs matching one of these
-            prefixes are allowed; file:// URLs are always blocked.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-    </xs:all>
-  </xs:complexType>
-
-  <!-- ── Online Training ─────────────────────────────────────────────────── -->
-
-  <xs:complexType name="OnlineTrainingType">
-    <xs:annotation>
-      <xs:documentation>
-        Configuration for the continuous online learning subsystem.
-        Controls learning rates, truth corpus location, device selection,
-        and optional dissonance detection.
-      </xs:documentation>
-    </xs:annotation>
-    <xs:all>
-      <xs:element name="enabled" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Master switch for continuous truth corpus updates from user
-            interactions. Defaults to false.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="truth_corpus_path" type="xs:string">
-        <xs:annotation>
-          <xs:documentation>
-            Filesystem path to the append-only truth log (JSONL format).
-            Relative paths are resolved from the project root.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="alpha_base" type="xs:decimal">
-        <xs:annotation>
-          <xs:documentation>
-            Base learning rate for online training weight updates.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="alpha_min" type="xs:decimal">
-        <xs:annotation>
-          <xs:documentation>
-            Minimum learning rate floor. The adaptive scheduler will
-            never reduce the rate below this value.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="alpha_max" type="xs:decimal">
-        <xs:annotation>
-          <xs:documentation>
-            Maximum learning rate ceiling. The adaptive scheduler will
-            never increase the rate above this value.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="merge_rate" type="xs:decimal">
-        <xs:annotation>
-          <xs:documentation>
-            Slow-moving exponential average rate used when merging newly
-            learned truth entries into the canonical corpus.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="device">
-        <xs:annotation>
-          <xs:documentation>
-            Compute device for training operations.
-            - auto: automatically select the best available device
-            - cpu:  force CPU execution
-            - cuda: use an NVIDIA CUDA GPU
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:string">
-            <xs:enumeration value="auto"/>
-            <xs:enumeration value="cpu"/>
-            <xs:enumeration value="cuda"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="dissonance_enabled" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Enable cognitive dissonance detection. When true the trainer
-            identifies and penalises contradictions between new inputs
-            and established truth entries.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="operators_dynamic_enabled" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Enable dynamic operator loading.  Custom operators
-            extend the training pipeline with user-defined
-            transformations.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="store_particulars" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            When true, particular facts (narrow spatiotemporal extent)
-            are stored in the truth table alongside universal facts
-            (broad extent).  When false (default), only universal facts
-            persist — consistent with Zero-Knowledge / Selective
-            Disclosure principles.  Particular facts always train
-            weights regardless of this setting; the fact/feeling
-            distinction (not universal/particular) is the privacy
-            boundary.  See doc/Ethics.md §Entanglement Policy and
-            doc/Entanglement.md.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="truth_symmetry" type="xs:boolean">
-        <xs:annotation>
-          <xs:documentation>
-            Enforce Truth Symmetry.  When true (default), truth claims
-            involving value judgements are checked for asymmetric harm
-            under identity exchange before admission to the truth
-            table.  Claims that fail the symmetry test are rejected
-            with a dialog offering to record them as feelings instead.
-            See doc/Ethics.md §5-8.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="warmup_steps" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Sigmoid warmup midpoint for training annealing.  Training
-            ramps from 0 to full strength over approximately 2×N steps.
-            Default: 50.
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:positiveInteger"/>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="grad_clip" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Maximum gradient norm for clipping.  Prevents catastrophic
-            single-step weight changes during online training.
-            Default: 1.0.
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:decimal">
-            <xs:minExclusive value="0"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="anchor_decay" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            EMA blend-back rate toward checkpoint weights (anti-capture).
-            After each online training step, model weights are blended
-            back toward the original checkpoint by this factor × truth_weight.
-            Default: 0.001.
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:decimal">
-            <xs:minInclusive value="0"/>
-            <xs:maxInclusive value="1"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="truth_max_entries" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Maximum number of entries in the server truth table.
-            When exceeded during the merge step, entries with |trust|
-            closest to 0 are trimmed (weakest signal removed first).
-            Default: 1000.
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:positiveInteger"/>
-        </xs:simpleType>
-      </xs:element>
-    </xs:all>
-  </xs:complexType>
-
-  <!-- ── Allowed URLs ────────────────────────────────────────────────────── -->
-
-  <xs:complexType name="AllowedUrlsType">
-    <xs:annotation>
-      <xs:documentation>
-        A list of URL prefix strings. Each entry defines a permitted
-        prefix for outbound HTTP(S) requests made by the server for
-        authority checks and provider API calls.
-      </xs:documentation>
-    </xs:annotation>
+  <xs:complexType name="XHTMLContentType" mixed="true">
     <xs:sequence>
-      <xs:element name="url" type="xs:string" minOccurs="0" maxOccurs="unbounded">
-        <xs:annotation>
-          <xs:documentation>
-            A single allowed URL prefix (e.g. "https://api.openai.com/").
-            The server permits outbound requests only to URLs that begin
-            with one of these prefixes.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
+      <xs:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/>
     </xs:sequence>
   </xs:complexType>
 

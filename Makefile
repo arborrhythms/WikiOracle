@@ -109,7 +109,6 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
 
 # Ordered list of doc chapters for PDF generation
 PDF_CHAPTERS := README.md \
-  doc/README.md \
   doc/WikiOracle.md \
   doc/Constitution.md \
   doc/Installation.md \
@@ -125,6 +124,7 @@ PDF_CHAPTERS := README.md \
   doc/State.md \
   doc/UserInterface.md \
   doc/FutureWork.md \
+  doc/BuddhistParallels.md \
   doc/ProposedLicense.md
 
 
@@ -725,16 +725,16 @@ build_sft:
 
 doc_pdf : WikiOracle.pdf
 
-WikiOracle.pdf : doc/*.md
+WikiOracle.pdf : $(PDF_CHAPTERS)
 	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
 	mkdir -p output
 	pandoc $(PDFOPTS) \
 		--from=gfm \
 		--metadata title="WikiOracle Documentation" \
-		--toc --toc-depth=2 \
+		--toc --toc-depth=3 \
 		--resource-path=doc \
 		-o $@ \
-		$(PDF_CHAPTERS)
+		$^
 	@echo "Done: output/WikiOracle.pdf"
 
 # --- Cleanup ------------------------------------------------------------------

@@ -18,7 +18,7 @@ Facts are classified into two kinds based on spatiotemporal binding:
 
 | Kind | Binding | Persistence | Buddhist Equivalent |
 |---|---|---|---|
-| **knowledge** | universal / no spacetime anchor | server truth table | *anumāna* (inference) |
+| **knowledge** | universal / no spacetime anchor | server TruthSet | *anumāna* (inference) |
 | **news** | bound to a specific place and/or time | session-only | *pratyakṣa* (direct perception) |
 
 The classification is stored in the `kind` attribute of `<fact>` tags:
@@ -28,7 +28,7 @@ The classification is stored in the `kind` attribute of `<fact>` tags:
 <fact trust="0.7" kind="news" spacetime="Paris, 2026-03-05">The Eiffel Tower is lit up tonight.</fact>
 ```
 
-Knowledge facts are persisted to the server truth table (`truth.xml`) because they represent universal claims.  News facts are session-only because they are spatiotemporally bound — persisting them risks "worldline capture" where an observer could reconstruct a user's physical trajectory through time and space.
+Knowledge facts are persisted to the server TruthSet (`truth.xml`) because they represent universal claims.  News facts are session-only because they are spatiotemporally bound — persisting them risks "worldline capture" where an observer could reconstruct a user's physical trajectory through time and space.
 
 The `detect_identifiability()` function in `bin/truth.py` provides an additional safety layer by scanning content for PII patterns (email addresses, phone numbers, GPS coordinates, street addresses, etc.) that could identify a user through spatiotemporal observation.
 

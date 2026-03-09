@@ -8,7 +8,7 @@ from pathlib import Path
 # Ensure bin/ is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
-from state import DEFAULT_OUTPUT, SCHEMA_URL
+from state import SCHEMA_URL
 from response import (
     ProviderBundle,
     Source,
@@ -27,8 +27,8 @@ def _make_state(**overrides):
     base = {
         "version": 2,
         "schema": SCHEMA_URL,
-        "time": "2026-02-23T00:00:00Z",
-        "context": "<div>You are a helpful assistant.</div>",
+        "time_creation": "2026-02-23T00:00:00Z",
+        "time_lastModified": "2026-02-23T00:00:00Z",
         "conversations": [],
         "selected_conversation": None,
         "truth": [],
@@ -59,7 +59,8 @@ class TestBuildProviderBundle(unittest.TestCase):
 
     def test_basic_bundle(self):
         state = _make_state()
-        bundle = build_query(state, "Hello!", {})
+        qc = {"context": "<div>You are a helpful assistant.</div>"}
+        bundle = build_query(state, "Hello!", qc)
         self.assertIsInstance(bundle, ProviderBundle)
         self.assertEqual(bundle.query, "Hello!")
         # System now includes mandatory XHTML instruction
@@ -81,7 +82,7 @@ class TestBuildProviderBundle(unittest.TestCase):
             _make_trust_entry("Doc B", 0.5, "Fact B", "t2"),
         ]
         state = _make_state(truth=trust)
-        bundle = build_query(state, "query", {"chat": {"rag": True}})
+        bundle = build_query(state, "query", {"truthset": {"truth_weight": 0.7}})
         self.assertEqual(len(bundle.sources), 2)
         self.assertEqual(bundle.sources[0].title, "Doc A")
         self.assertGreaterEqual(bundle.sources[0].trust, bundle.sources[1].trust)
@@ -89,7 +90,7 @@ class TestBuildProviderBundle(unittest.TestCase):
     def test_rag_disabled(self):
         trust = [_make_trust_entry("Doc", 0.9)]
         state = _make_state(truth=trust)
-        bundle = build_query(state, "q", {"chat": {"rag": False}})
+        bundle = build_query(state, "q", {"truthset": {"truth_weight": 0}})
         self.assertEqual(len(bundle.sources), 0)
 
     def test_all_entries_included(self):
@@ -99,7 +100,7 @@ class TestBuildProviderBundle(unittest.TestCase):
             _make_trust_entry("Low", 0.3, entry_id="t2"),
         ]
         state = _make_state(truth=trust)
-        bundle = build_query(state, "q", {"chat": {"rag": True}})
+        bundle = build_query(state, "q", {"truthset": {"truth_weight": 0.7}})
         self.assertEqual(len(bundle.sources), 2)
 
     def test_full_history_sent(self):
@@ -141,7 +142,7 @@ class TestBuildProviderBundle(unittest.TestCase):
              "content": '<and><child id="t1"/></and>'},
         ]
         state = _make_state(truth=trust)
-        bundle = build_query(state, "q", {"chat": {"rag": True}})
+        bundle = build_query(state, "q", {"truthset": {"truth_weight": 0.7}})
         titles = [s.title for s in bundle.sources]
         self.assertIn("Normal", titles)
         self.assertIn("LLM Provider", titles)
@@ -160,7 +161,7 @@ class TestBuildProviderBundle(unittest.TestCase):
              "content": "<provider><name>GPT-4</name></provider>"},
         ]
         state = _make_state(truth=trust)
-        bundle = build_query(state, "q", {"chat": {"rag": False}})
+        bundle = build_query(state, "q", {"truthset": {"truth_weight": 0}})
         self.assertEqual(len(bundle.sources), 0)
 
 
@@ -628,7 +629,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
         )
         state = _make_state()
         bundle = build_query(
-            state, "query", {"chat": {"rag": False}},
+            state, "query", {"truthset": {"truth_weight": 0}},
             provider_sources=[provider_src],
         )
         self.assertEqual(len(bundle.sources), 0)
@@ -643,7 +644,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
         )
         state = _make_state()
         bundle = build_query(
-            state, "query", {"chat": {"rag": True}},
+            state, "query", {"truthset": {"truth_weight": 0.7}},
             provider_sources=[provider_src],
         )
         self.assertEqual(len(bundle.sources), 1)
@@ -659,7 +660,7 @@ class TestProviderSourcesInBundle(unittest.TestCase):
         trust = [_make_trust_entry("Fact A", 0.9, "Some fact", "t1")]
         state = _make_state(truth=trust)
         bundle = build_query(
-            state, "q", {"chat": {"rag": True}},
+            state, "q", {"truthset": {"truth_weight": 0.7}},
             provider_sources=[provider_src],
         )
         kinds = [s.kind for s in bundle.sources]
@@ -693,63 +694,33 @@ class TestProviderSourcesInBundle(unittest.TestCase):
 # Output resolution from state
 # ---------------------------------------------------------------------------
 class TestOutputResolution(unittest.TestCase):
-    """Test that bundle.output resolves from state.output with fallback."""
+    """Test that bundle.output resolves from query_config.output."""
 
-    def test_default_output_is_empty(self):
-        """DEFAULT_OUTPUT constant should be empty string."""
-        self.assertEqual(DEFAULT_OUTPUT, "")
-
-    def test_no_output_no_format(self):
-        """No output and no output_format yields empty string."""
+    def test_no_output_yields_empty(self):
+        """No output in query_config yields empty string."""
         state = _make_state()
         bundle = build_query(state, "q", {})
         self.assertEqual(bundle.output, "")
 
-    def test_state_output_used_when_present(self):
-        """When state.output is set, bundle uses it."""
+    def test_output_from_query_config(self):
+        """When query_config.output is set, bundle uses it."""
         state = _make_state()
-        state["output"] = "Return JSON only."
-        bundle = build_query(state, "q", {})
+        qc = {"output": "Return JSON only."}
+        bundle = build_query(state, "q", qc)
         self.assertEqual(bundle.output, "Return JSON only.")
 
-    def test_output_format_ignored_in_prefs(self):
-        """output_format in prefs is no longer used; XHTML is enforced in system context."""
+    def test_empty_output_stays_empty(self):
+        """Empty output in query_config remains empty."""
         state = _make_state()
-        state["output"] = "Be concise."
-        prefs = {"output_format": "XHTML"}
-        bundle = build_query(state, "q", prefs)
-        # output_format is NOT appended — XHTML is enforced via system prompt
-        self.assertEqual(bundle.output, "Be concise.")
-
-    def test_output_format_nested_chat_ignored(self):
-        """Nested prefs.chat.output_format is no longer used."""
-        state = _make_state()
-        state["output"] = "Be concise."
-        prefs = {"chat": {"output_format": "JSON"}}
-        bundle = build_query(state, "q", prefs)
-        self.assertEqual(bundle.output, "Be concise.")
-
-    def test_empty_state_output_stays_empty(self):
-        """Empty state output remains empty regardless of prefs."""
-        state = _make_state()
-        state["output"] = ""
-        prefs = {"output_format": "XHTML"}
-        bundle = build_query(state, "q", prefs)
+        qc = {"output": ""}
+        bundle = build_query(state, "q", qc)
         self.assertEqual(bundle.output, "")
 
-    def test_empty_output_format_no_effect(self):
-        """Empty output_format doesn't alter output."""
+    def test_output_with_other_config(self):
+        """Output from query_config works alongside other config keys."""
         state = _make_state()
-        state["output"] = "Custom."
-        prefs = {"output_format": ""}
-        bundle = build_query(state, "q", prefs)
-        self.assertEqual(bundle.output, "Custom.")
-
-    def test_no_output_format_in_prefs(self):
-        """Missing output_format in prefs doesn't alter output."""
-        state = _make_state()
-        state["output"] = "Custom."
-        bundle = build_query(state, "q", {})
+        qc = {"output": "Custom.", "context": "<div>Ctx</div>"}
+        bundle = build_query(state, "q", qc)
         self.assertEqual(bundle.output, "Custom.")
 
 

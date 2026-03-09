@@ -2,119 +2,9 @@
 
 WikiOracle configuration lives in `config.xml` at the project root. The file is validated by `data/config.xsd` and loaded at server startup by `bin/config.py`. A template with sensible defaults ships as `data/config.xml` — copy it to the project root and fill in your values. `config.xml` is gitignored.
 
-The configuration has five top-level sections: [User](#1-user), [Providers](#2-providers), [Chat](#3-chat), [UI](#4-ui), and [Server](#5-server). Each section is described below with its fields, defaults, and design rationale.
+The configuration has two top-level sections: [Server](#server) and [Providers](#providers). Each section is described below with its fields, defaults, and design rationale.
 
-## User
-
-Identity metadata attached to outgoing messages.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `name` | string | `"User"` | Display name shown in chat messages. Not an authenticated identity — see [Security.md](./Security.md) §3. |
-| `uid` | string | (auto) | Persistent user GUID. Leave blank to auto-generate a deterministic GUID from the display name. Used by the online training pipeline to tag authored truth entries. |
-
-```xml
-<user>
-  <name>Alice</name>
-  <uid></uid>
-</user>
-```
-
-## Providers
-
-LLM provider definitions. Each `<provider name="key">` block configures an upstream API endpoint. The `name` attribute is the internal lookup key; `display_name` is the label shown in the chat UI on assistant messages.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `display_name` | string | — | Human-readable label tagging assistant messages (e.g. `chatGPT`, `claude`, `gemini`). |
-| `username` | string | — | API login / email associated with the provider account. |
-| `url` | URI | (built-in) | API endpoint URL. Built-in defaults exist for known providers. |
-| `api_key` | string | — | API key. Prefer environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`) — see [Security.md](./Security.md) §2. |
-| `default_model` | string | — | Model identifier used when no model is explicitly selected (e.g. `gpt-4o`, `claude-sonnet-4-6`). |
-| `timeout` | positive int | `120` | Request timeout in seconds. |
-| `streaming` | boolean | `false` | Use Server-Sent Events (SSE) for streamed responses. |
-
-### Built-in providers
-
-| Key | Display name | Default model | Env var for API key |
-|---|---|---|---|
-| `wikioracle` | oracle | nanochat | (local — no key needed) |
-| `openai` | chatGPT | gpt-4o | `OPENAI_API_KEY` |
-| `anthropic` | claude | claude-sonnet-4-6 | `ANTHROPIC_API_KEY` |
-| `gemini` | gemini | gemini-2.5-flash | `GEMINI_API_KEY` |
-| `grok` | grok | grok-3-mini | `XAI_API_KEY` |
-
-Custom providers can be added by appending `<provider name="my_key">` blocks. Any `name` not in the built-in list creates a new provider entry.
-
-### API key precedence
-
-1. **Environment variable** (recommended for anything beyond localhost).
-2. **`config.xml`** `api_key` field — convenient for local dev, but the config is served to the client via `/bootstrap` and `/config`.
-3. **Truth entry** `<provider><api_key>$ENV_VAR</api_key></provider>` — the `$` prefix triggers server-side env-var resolution; the literal key is never stored in state.
-
-The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) — never the key itself. See [Security.md](./Security.md) §2 for details.
-
-## Chat
-
-Chat behaviour settings controlling how the LLM produces responses and how the online training pipeline is tuned.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `temperature` | decimal 0.0–2.0 | `0.7` | Sampling temperature. 0.0 is deterministic; 2.0 is maximum randomness. |
-| `max_tokens` | positive int | `128` | Maximum tokens in the LLM response. |
-| `timeout` | positive int | `120` | Request timeout in seconds. |
-| `truth_weight` | decimal 0.0–1.0 | `0.7` | Controls how much DegreeOfTruth (DoT) gates the online training learning rate, and whether truth entries are sent to the provider as RAG context. See [§Truth weight and RAG](#truth-weight-and-rag) below. |
-| `truth_max_entries` | positive int | `1000` | Maximum number of entries in the server truth table before trimming. Entries with `\|trust\|` closest to 0.0 are removed first. Range: 100–10000. |
-| `store_particulars` | boolean | `false` | Store particular (spatiotemporally-bound) facts in the server truth table. When false, only universal facts persist. Client-side override for the server's `store_particulars`. See [Ethics.md](./Ethics.md) §Entanglement Policy. |
-| `url_fetch` | boolean | `false` | Allow the assistant to fetch and incorporate content from URLs referenced in the conversation. |
-| `confirm_actions` | boolean | `false` | Prompt the user for confirmation before destructive operations (deletes, merges). |
-
-```xml
-<chat>
-  <temperature>0.7</temperature>
-  <max_tokens>128</max_tokens>
-  <timeout>120</timeout>
-  <truth_weight>0.7</truth_weight>
-  <truth_max_entries>1000</truth_max_entries>
-  <store_particulars>false</store_particulars>
-  <url_fetch>false</url_fetch>
-  <confirm_actions>false</confirm_actions>
-</chat>
-```
-
-### Truth weight and RAG
-
-The `truth_weight` field (0.0–1.0) replaces the former boolean `rag` flag.  It serves a dual purpose:
-
-1. **RAG delivery gate**: When `truth_weight > 0`, the full truth table — facts, feelings, references, operators, authorities, and providers — is assembled into the provider bundle and sent to the UI-selected provider.  When `truth_weight = 0`, no truth is sent (equivalent to the former `rag: false`).
-
-2. **Training LR modulation**: During online training, `truth_weight` controls how much DoT gates the learning rate.  See [Training.md](./Training.md) §Training Algorithm for the formula.
-
-**Legacy migration**: The former `rag` boolean is automatically migrated: `rag: true` → `truth_weight: 0.7`, `rag: false` → `truth_weight: 0.0`.  This migration runs in both the client (`client/config.js`) and server (`bin/response.py`).
-
-## UI
-
-Client-side defaults for the browser interface. These are persisted in `sessionStorage` and can be changed at runtime via the Settings panel.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `default_provider` | string | `"wikioracle"` | Provider key selected on startup. Must match a key in the `<providers>` section. |
-| `layout` | `horizontal` \| `vertical` \| `flat` | `"horizontal"` | Layout mode. `horizontal` = side-by-side tree and chat panels. `vertical` = stacked. `flat` = single-panel chat only. |
-| `theme` | `system` \| `light` \| `dark` | `"system"` | Colour theme. `system` follows the OS preference. |
-| `splitter_pct` | integer 0–100 | `0` | Tree/chat panel splitter position as a percentage. 0 collapses the tree panel. |
-| `swipe_nav_horizontal` | boolean | `true` | Enable horizontal swipe gestures (left/right) to navigate between sibling conversation branches. |
-| `swipe_nav_vertical` | boolean | `false` | Enable vertical swipe gestures (up/down) to navigate between sibling branches. |
-
-```xml
-<ui>
-  <default_provider>wikioracle</default_provider>
-  <layout>horizontal</layout>
-  <theme>system</theme>
-  <splitter_pct>0</splitter_pct>
-  <swipe_nav_horizontal>true</swipe_nav_horizontal>
-  <swipe_nav_vertical>false</swipe_nav_vertical>
-</ui>
-```
+> **Migration note (v0.x):** The former `user`, `chat`, and `ui` top-level sections have been removed. User identity (`client_name`, `client_id`) is now in [State](./State.md). Chat evaluation fields moved to `server.evaluation`; truth policy fields moved to `server.truthset`; UI preferences moved to `state.client.ui`. See each section below for the full mapping.
 
 ## Server
 
@@ -122,20 +12,81 @@ Runtime parameters. These values serve as defaults and are typically overridden 
 
 | Field | Type | Default | Description |
 |---|---|---|---|
+| `server_name` | string | `"WikiOracle"` | Human-readable display name for this server instance. |
+| `server_id` | string | `"wikioracle"` | Stable identifier for this server instance. Used as the `source` field in server truth entries returned to the client in debug mode. |
 | `stateless` | boolean | `false` | Stateless mode — no disk writes. Equivalent to `--stateless` CLI flag. See [Entanglement.md](./Entanglement.md). |
 | `url_prefix` | string | `""` | URL path prefix prepended to all routes (e.g. `/chat`) for reverse-proxy deployments. Equivalent to `--url-prefix`. |
-| `server_id` | string | `"wikioracle"` | Stable identifier for this server instance. Used as the `source` field in server truth entries returned to the client in debug mode. Defaults to `"wikioracle"`. |
-| `online_training` | section | — | Online learning subsystem. See [§5a](#5a-online-training) below. |
-| `allowed_urls` | section | — | URL whitelist for authority/provider fetches. See [§5b](#5b-allowed-urls) below. |
+| `truthset` | section | — | TruthSet policy settings. See [Truthset](#truthset) below. |
+| `evaluation` | section | — | LLM inference defaults. See [Evaluation](#evaluation) below. |
+| `training` | section | — | Online learning subsystem. See [Training](#training) below. |
+| `allowed_urls` | section | — | URL whitelist for authority/provider fetches. See [Allowed URLs](#allowed-urls) below. |
 
-### Online training
+```xml
+<server>
+  <server_name>WikiOracle</server_name>
+  <server_id>wikioracle</server_id>
+  <stateless>true</stateless>
+  <url_prefix></url_prefix>
 
-Controls the continuous learning pipeline (Stages 2–4). See [Training.md](./Training.md) for the full design.
+  <truthset>...</truthset>
+  <evaluation>...</evaluation>
+  <training>...</training>
+  <allowed_urls>...</allowed_urls>
+</server>
+```
+
+### Truthset
+
+TruthSet policy settings controlling how facts are stored and validated.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | boolean | `false` | **Master switch.** When false, the entire post-response pipeline — DegreeOfTruth computation, truth table merge, PII filtering, symmetry checking, and NanoChat training — is skipped. See [§Behavior when disabled](#behavior-when-online-training-is-disabled) below. |
-| `truth_corpus_path` | string | `"data/truth.xml"` | Filesystem path to the server truth table (XML). Relative paths resolve from the project root. |
+| `truth_symmetry` | boolean | `true` | Enforce Truth Symmetry. Claims involving value judgements are checked for asymmetric harm under identity exchange before admission to the TruthSet. See [Ethics.md](./Ethics.md) §5–8. |
+| `store_concrete` | boolean | `false` | Store concrete (spatiotemporally-bound) facts in the server TruthSet. When false, only universal facts persist — consistent with Zero-Knowledge / Selective Disclosure principles. Particular facts always train weights regardless of this setting; the fact/feeling distinction is the privacy boundary. See [Ethics.md](./Ethics.md) §Entanglement Policy. |
+| `truth_weight` | decimal 0.0–1.0 | `0.7` | Controls how much DegreeOfTruth (DoT) gates the online training learning rate, and whether truth entries are sent to the provider as RAG context. See [Truth weight and RAG](#truth-weight-and-rag) below. |
+
+```xml
+<truthset>
+  <truth_symmetry>true</truth_symmetry>
+  <store_concrete>false</store_concrete>
+</truthset>
+```
+
+#### Truth weight and RAG
+
+The `truth_weight` field (0.0–1.0) replaces the former boolean `rag` flag.  It serves a dual purpose:
+
+1. **RAG delivery gate**: When `truth_weight > 0`, the full TruthSet — facts, feelings, references, operators, authorities, and providers — is assembled into the provider bundle and sent to the UI-selected provider.  When `truth_weight = 0`, no truth is sent (equivalent to the former `rag: false`).
+
+2. **Training LR modulation**: During online training, `truth_weight` controls how much DoT gates the learning rate.  See [Training.md](./Training.md) §Training Algorithm for the formula.
+
+**Legacy migration**: The former `rag` boolean is automatically migrated: `rag: true` → `truth_weight: 0.7`, `rag: false` → `truth_weight: 0.0`.  This migration runs in both the client (`client/config.js`) and server (`bin/response.py`).
+
+### Evaluation
+
+Defaults for LLM inference. These were formerly in the top-level `chat` section.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `temperature` | decimal 0.0–2.0 | `0.7` | Sampling temperature. 0.0 is deterministic; 2.0 is maximum randomness. |
+| `url_fetch` | boolean | `false` | Allow the assistant to fetch and incorporate content from URLs referenced in the conversation. |
+
+```xml
+<evaluation>
+  <temperature>0.7</temperature>
+  <url_fetch>false</url_fetch>
+</evaluation>
+```
+
+### Training
+
+Controls the continuous learning pipeline (Stages 2–4). Renamed from the former `online_training` section. See [Training.md](./Training.md) for the full design.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | **Master switch.** When false, the entire post-response pipeline — DegreeOfTruth computation, TruthSet merge, PII filtering, symmetry checking, and NanoChat training — is skipped. See [Behavior when disabled](#behavior-when-training-is-disabled) below. |
+| `truth_corpus_path` | string | `"data/truth.xml"` | Filesystem path to the server TruthSet (XML). Relative paths resolve from the project root. |
+| `truth_max_entries` | positive int | `1000` | Maximum server TruthSet entries before trimming. Entries with `\|trust\|` closest to 0.0 are removed first during the merge stage. Range: 100–10000. |
 | `alpha_base` | decimal | `0.01` | Base learning rate for online training weight updates. |
 | `alpha_min` | decimal | `0.001` | Minimum learning rate floor. The adaptive scheduler never reduces below this. |
 | `alpha_max` | decimal | `0.1` | Maximum learning rate ceiling. The adaptive scheduler never exceeds this. |
@@ -143,17 +94,15 @@ Controls the continuous learning pipeline (Stages 2–4). See [Training.md](./Tr
 | `device` | `auto` \| `cpu` \| `cuda` | `"cpu"` | Compute device for training operations. `auto` selects the best available. |
 | `dissonance_enabled` | boolean | `true` | Enable cognitive dissonance detection. The trainer identifies and penalises contradictions between new inputs and established truth entries. |
 | `operators_dynamic_enabled` | boolean | `true` | Load custom operators. Custom operators extend the training pipeline with user-defined transformations. |
-| `store_particulars` | boolean | `false` | When true, particular facts (narrow spatiotemporal extent) are stored in the truth table alongside universal facts (broad extent). When false, only universals persist — consistent with Zero-Knowledge / Selective Disclosure principles. Particular facts always train weights regardless of this setting; the fact/feeling distinction is the privacy boundary. See [Ethics.md](./Ethics.md) §Entanglement Policy. |
-| `truth_symmetry` | boolean | `true` | Enforce Truth Symmetry. Claims involving value judgements are checked for asymmetric harm under identity exchange before admission to the truth table. See [Ethics.md](./Ethics.md) §5–8. |
 | `warmup_steps` | positive int | `50` | Sigmoid warmup midpoint for the annealing schedule. The first ~2×`warmup_steps` interactions ramp from near-zero to full training strength, preventing early corruption. See [Training.md](./Training.md) §Sigmoid Warmup. |
 | `grad_clip` | decimal > 0 | `1.0` | Maximum gradient norm for `clip_grad_norm_()`. Prevents catastrophic single-step weight changes. Lower values are more conservative. See [Training.md](./Training.md) §Gradient Clipping. |
 | `anchor_decay` | decimal 0.0–1.0 | `0.001` | EMA blend-back rate toward checkpoint weights after each training step. Higher values pull the model back more aggressively toward its initial state. Modulated by `truth_weight`: `anchor_effective = anchor_decay × truth_weight`. See [Training.md](./Training.md) §EMA Weight Anchoring. |
-| `truth_max_entries` | positive int | `1000` | Maximum server truth table entries before trimming. Entries with `\|trust\|` closest to 0.0 are removed first during the merge stage. Also configurable per-user via `chat.truth_max_entries`. |
 
 ```xml
-<online_training>
+<training>
   <enabled>false</enabled>
   <truth_corpus_path>data/truth.xml</truth_corpus_path>
+  <truth_max_entries>1000</truth_max_entries>
   <alpha_base>0.01</alpha_base>
   <alpha_min>0.001</alpha_min>
   <alpha_max>0.1</alpha_max>
@@ -161,21 +110,18 @@ Controls the continuous learning pipeline (Stages 2–4). See [Training.md](./Tr
   <device>cpu</device>
   <dissonance_enabled>true</dissonance_enabled>
   <operators_dynamic_enabled>true</operators_dynamic_enabled>
-  <store_particulars>false</store_particulars>
-  <truth_symmetry>true</truth_symmetry>
   <warmup_steps>50</warmup_steps>
   <grad_clip>1.0</grad_clip>
   <anchor_decay>0.001</anchor_decay>
-  <truth_max_entries>1000</truth_max_entries>
-</online_training>
+</training>
 ```
 
-#### Behavior when online training is disabled
+#### Behavior when training is disabled
 
 When `enabled` is `false` (the default), the engine effectively treats all incoming facts as feelings. The Sensation preprocessor (`bin/sensation.py`) still classifies sentences into `<fact>` and `<feeling>` tags at the message level, but the entire post-response pipeline is skipped:
 
 * **No DegreeOfTruth** is computed.
-* **No truth merge** occurs — facts from conversation are never promoted into the truth table.
+* **No truth merge** occurs — facts from conversation are never promoted into the TruthSet.
 * **No PII filtering** or **symmetry checking** runs (there is nothing to filter).
 * **No NanoChat training step** is dispatched.
 
@@ -200,6 +146,68 @@ URL prefixes permitted for outbound HTTP(S) requests made by the server during a
 ```
 
 See [Security.md](./Security.md) §6 and [Authority.md](./Authority.md) for the security rationale.
+
+## Providers
+
+LLM provider definitions. Each `<provider name="key">` block configures an upstream API endpoint. The `name` attribute is the internal lookup key; `display_name` is the label shown in the chat UI on assistant messages.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `default` | string | `"wikioracle"` | Provider key selected on startup. Must match a `name` in a `<provider>` block. Formerly `ui.default_provider`. |
+| `context` | XHTML | (empty) | Persistent context block prepended to every query. Moved from state; allows config-level context that applies regardless of session. Optional. |
+| `output` | string | (empty) | Output-format instruction block appended to the system prompt. Moved from state. Optional. |
+| `truth_context` | string | (empty) | Default truth context applied to all providers. Optional. |
+| `conversation_context` | string | (empty) | Default conversation context applied to all providers. Optional. |
+
+Each `<provider name="key">` block supports:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `display_name` | string | — | Human-readable label tagging assistant messages (e.g. `chatGPT`, `claude`, `gemini`). |
+| `username` | string | — | API login / email associated with the provider account. |
+| `url` | URI | (built-in) | API endpoint URL. Built-in defaults exist for known providers. |
+| `api_key` | string | — | API key. Prefer environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`) — see [Security.md](./Security.md) §2. |
+| `default_model` | string | — | Model identifier used when no model is explicitly selected (e.g. `gpt-4o`, `claude-sonnet-4-6`). |
+| `timeout` | positive int | `120` | Request timeout in seconds. |
+| `streaming` | boolean | `false` | Use Server-Sent Events (SSE) for streamed responses. |
+
+### Built-in providers
+
+| Key | Display name | Default model | Env var for API key |
+|---|---|---|---|
+| `wikioracle` | oracle | nanochat | (local — no key needed) |
+| `openai` | chatGPT | gpt-4o | `OPENAI_API_KEY` |
+| `anthropic` | claude | claude-sonnet-4-6 | `ANTHROPIC_API_KEY` |
+| `gemini` | gemini | gemini-2.5-flash | `GEMINI_API_KEY` |
+| `grok` | grok | grok-3-mini | `XAI_API_KEY` |
+
+Custom providers can be added by appending `<provider name="my_key">` blocks. Any `name` not in the built-in list creates a new provider entry.
+
+```xml
+<providers>
+  <default>wikioracle</default>
+
+  <provider name="wikioracle">
+    <display_name>oracle</display_name>
+    <username>you@example.com</username>
+    <url>http://127.0.0.1:8000/chat/completions</url>
+    <api_key></api_key>
+    <default_model>nanochat</default_model>
+    <timeout>120</timeout>
+    <streaming>true</streaming>
+  </provider>
+
+  <!-- additional provider blocks ... -->
+</providers>
+```
+
+### API key precedence
+
+1. **Environment variable** (recommended for anything beyond localhost).
+2. **`config.xml`** `api_key` field — convenient for local dev, but the config is served to the client via `/bootstrap` and `/config`.
+3. **Truth entry** `<provider><api_key>$ENV_VAR</api_key></provider>` — the `$` prefix triggers server-side env-var resolution; the literal key is never stored in state.
+
+The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) — never the key itself. See [Security.md](./Security.md) §2 for details.
 
 ## Environment variables
 

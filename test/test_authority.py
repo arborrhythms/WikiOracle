@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 # Add bin/ to path
@@ -343,7 +344,7 @@ def test_hme_xml_authority_entry():
         return  # skip if file not present
 
     from state import load_state_file
-    state = load_state_file(hme_path, strict=True)
+    state = load_state_file(Path(hme_path), strict=True)
     entries = state.get("truth", [])
 
     authority_entries = get_authority_entries(entries)
@@ -371,11 +372,11 @@ def test_hme_authority_resolution():
     from state import load_state_file
 
     # Load fragment entries to use as mock return value.
-    fragment_state = load_state_file(fragment_path, strict=False)
+    fragment_state = load_state_file(Path(fragment_path), strict=False)
     fragment_entries = fragment_state.get("truth", [])
 
     # Load hme state
-    hme_state = load_state_file(hme_path, strict=True)
+    hme_state = load_state_file(Path(hme_path), strict=True)
     entries = hme_state.get("truth", [])
 
     authority_entries = get_authority_entries(entries)

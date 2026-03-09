@@ -338,6 +338,8 @@ def evaluate_providers(
     timeout_s: int = 60,
     call_chain: Optional[List[str]] = None,
     direct_sources: Optional[List[Source]] = None,
+    truth_context: Optional[str] = None,
+    conversation_context: Optional[str] = None,
 ) -> tuple:
     """Evaluate <provider> trust entries as beta consultations.
 
@@ -349,7 +351,7 @@ def evaluate_providers(
 
     Args:
         provider_entries: list of (trust_entry, provider_config) pairs.
-        system:   system context string (from state.context).
+        system:   system context string (from config.providers.context).
         history:  conversation history (ancestor chain).
         query:    the current user message.
         output:   structured output instructions.
@@ -388,11 +390,11 @@ def evaluate_providers(
 
         wants_conversation = pconfig.get("conversation", False)
 
-        # Resolve per-provider context
+        # Resolve context from section-level defaults (config.providers)
         if wants_conversation:
-            ctx = pconfig.get("conversation_context") or DEFAULT_CONVERSATION_CONTEXT
+            ctx = conversation_context or DEFAULT_CONVERSATION_CONTEXT
         else:
-            ctx = pconfig.get("truth_context") or DEFAULT_TRUTH_CONTEXT
+            ctx = truth_context or DEFAULT_TRUTH_CONTEXT
 
         # Per-provider truth: authority_url provides private facts
         prov_truth = resolve_provider_truth(pconfig, entry)
@@ -514,7 +516,7 @@ def build_query(
 
     # 1) System context (with mandatory XHTML output instruction)
     XHTML_INSTRUCTION = "Return strictly valid XHTML: no Markdown, close all tags, escape entities, one root element."
-    context_text = strip_xhtml_fn(state.get("context", ""))
+    context_text = strip_xhtml_fn(query_config.get("context", ""))
     if context_text:
         bundle.system = f"{context_text}\n\n{XHTML_INSTRUCTION}"
     else:
@@ -526,11 +528,11 @@ def build_query(
     #    t  = st + dynamic_truth(st)        — augmented with operators,
     #                                         authorities, and providers
     #
-    # When truth_weight > 0 (or legacy rag=true), ALL state.truth is sent.
-    # When truth_weight == 0 (or rag=false), NO truth of any kind is sent.
+    # When truth_weight > 0, ALL state.truth is sent.
+    # When truth_weight == 0, NO truth of any kind is sent.
     #
-    chat_cfg = query_config.get("chat", {})
-    _rag_on = chat_cfg.get("truth_weight", chat_cfg.get("rag", 0.7))
+    ts_cfg = query_config.get("truthset", {})
+    _rag_on = ts_cfg.get("truth_weight", 0.7)
     if (isinstance(_rag_on, bool) and _rag_on) or (isinstance(_rag_on, (int, float)) and _rag_on > 0):
         trust_entries = state.get("truth") or []
 
@@ -627,8 +629,8 @@ def build_query(
     #    always receive a non-empty user message)
     bundle.query = user_message or "(continue)"
 
-    # 6) Structured output instructions (always in state after ensure_minimal_state)
-    bundle.output = state.get("output", "")
+    # 6) Structured output instructions (from config.providers.output)
+    bundle.output = query_config.get("output", "")
 
     return bundle
 
@@ -1532,30 +1534,32 @@ def process_chat(
     user_msg = (body.get("message") or "").strip()
     query_config = body.get("config", {}) if isinstance(body.get("config"), dict) else {}
 
-    cfg_chat = runtime_cfg.get("chat", {})
+    server_eval = runtime_cfg.get("server", {}).get("evaluation", {})
+    server_ts = runtime_cfg.get("server", {}).get("truthset", {})
     provider = query_config.get("provider", "wikioracle")
     client_model = (query_config.get("model") or "").strip()
     print(f"[WikiOracle] Chat request: provider='{provider}' (from client config), "
-          f"truth_weight={query_config.get('chat', {}).get('truth_weight', '?')}")
+          f"truth_weight={query_config.get('truthset', {}).get('truth_weight', '?')}")
 
     temperature = max(0.0, min(2.0, float(
-        query_config.get("temp", cfg_chat.get("temperature", 0.7))
+        query_config.get("temp", server_eval.get("temperature", 0.7))
     )))
-    # Chat settings live at query_config.chat.{truth_weight, url_fetch, ...}.
-    # The client sends these directly; fill in defaults from config.xml.
-    if "chat" not in query_config or not isinstance(query_config.get("chat"), dict):
-        query_config["chat"] = {}
-    # Migrate legacy rag boolean → truth_weight
-    if "rag" in query_config["chat"] and "truth_weight" not in query_config["chat"]:
-        query_config["chat"]["truth_weight"] = 0.7 if query_config["chat"]["rag"] else 0.0
-    query_config["chat"].setdefault("truth_weight", float(cfg_chat.get("truth_weight",
-                                    cfg_chat.get("rag", 0.7) if isinstance(cfg_chat.get("rag"), bool)
-                                    else cfg_chat.get("rag", 0.7))))
-    query_config["chat"].setdefault("truth_max_entries", int(cfg_chat.get("truth_max_entries", 1000)))
-    query_config["chat"].setdefault("store_particulars", cfg_chat.get("store_particulars", False))
-    query_config["chat"].setdefault("url_fetch", cfg_chat.get("url_fetch", False))
-    query_config["chat"].setdefault("max_tokens", cfg_chat.get("max_tokens", 128))
-    query_config["chat"].setdefault("timeout", cfg_chat.get("timeout", 120))
+    # TruthSet settings: truth_weight, store_concrete
+    if "truthset" not in query_config or not isinstance(query_config.get("truthset"), dict):
+        query_config["truthset"] = {}
+    query_config["truthset"].setdefault("truth_weight", float(server_ts.get("truth_weight", 0.7)))
+    query_config["truthset"].setdefault("store_concrete", server_ts.get("store_concrete", False))
+    # Evaluation settings: url_fetch, max_tokens, timeout
+    if "evaluation" not in query_config or not isinstance(query_config.get("evaluation"), dict):
+        query_config["evaluation"] = {}
+    query_config["evaluation"].setdefault("url_fetch", server_eval.get("url_fetch", False))
+    query_config["evaluation"].setdefault("max_tokens", server_eval.get("max_tokens", 128))
+    query_config["evaluation"].setdefault("timeout", server_eval.get("timeout", 120))
+    # Training settings: truth_max_entries
+    server_tr = runtime_cfg.get("server", {}).get("training", {})
+    if "training" not in query_config or not isinstance(query_config.get("training"), dict):
+        query_config["training"] = {}
+    query_config["training"].setdefault("truth_max_entries", int(server_tr.get("truth_max_entries", 1000)))
 
     conversation_id = body.get("conversation_id")
     branch_from = body.get("branch_from")
@@ -1585,12 +1589,18 @@ def process_chat(
     conversation_sources: list = []
     truth_contributions: list = []
 
-    context_text = strip_xhtml(state.get("context", ""))
+    providers_cfg = runtime_cfg.get("providers", {})
+    context_text = strip_xhtml(providers_cfg.get("context", ""))
     print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
           f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
           f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
     truth_count = len(state.get("truth") or [])
-    truth_weight_flag = query_config.get("chat", {}).get("truth_weight", "MISSING")
+    truth_weight_flag = query_config.get("truthset", {}).get("truth_weight", "MISSING")
+
+    # Inject context/output from config.providers into query_config
+    # so that build_query can read them
+    query_config.setdefault("context", providers_cfg.get("context", ""))
+    query_config.setdefault("output", providers_cfg.get("output", ""))
 
     client_api_key = ""
     if config_mod.STATELESS_MODE:
@@ -1616,6 +1626,8 @@ def process_chat(
             timeout_s=max(int(cfg.timeout_s), 60),
             call_chain=call_chain,
             direct_sources=d_sources,
+            truth_context=providers_cfg.get("truth_context"),
+            conversation_context=providers_cfg.get("conversation_context"),
         )
 
     # ── Step 2: alpha final response ──
@@ -1636,7 +1648,7 @@ def process_chat(
             content = m.get("content", "")
             print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
     response_text = _call_provider(cfg, bundle, temperature, provider, client_api_key, client_model,
-                                    chat_settings=query_config.get("chat"))
+                                    chat_settings=query_config.get("evaluation"))
     if config_mod.DEBUG_MODE:
         print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
     llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
@@ -1645,7 +1657,7 @@ def process_chat(
     user_content = ensure_xhtml(user_msg) if user_msg else ""
     assistant_content = ensure_xhtml(response_text)
     assistant_timestamp = utc_now_iso()
-    user_display = state.get("user", {}).get("name", "User")
+    user_display = state.get("client_name", "User")
     llm_display = llm_provider_name
 
     if user_msg:
@@ -1813,24 +1825,24 @@ def process_chat(
     # These stages run after the user has received the response.
     symmetry_rejected: list[dict] = []
     server_cfg = runtime_cfg.get("server", {})
-    ot_cfg = server_cfg.get("online_training", {})
-    if ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE:
+    tr_cfg = server_cfg.get("training", {})
+    ts_cfg = server_cfg.get("truthset", {})
+    if tr_cfg.get("enabled", False) and not config_mod.STATELESS_MODE:
         try:
             client_truth = state.get("truth") or []
-            user_section = state.get("user", {})
             author_guid = user_guid(
-                user_section.get("name", "User"),
-                uid=user_section.get("user_id") or None,
+                state.get("client_name", "User"),
+                uid=state.get("client_id") or None,
             )
 
-            # Ensure user ID is stored in state's user block
-            state.setdefault("user", {})["user_id"] = author_guid
+            # Ensure client ID is stored in state
+            state["client_id"] = author_guid
 
             # Resolve references→facts, authorities→facts, providers→feelings
             # before DoT computation and merge.
             client_truth = resolve_entries(client_truth)
 
-            server_truth_path = Path(ot_cfg.get("truth_corpus_path", "data/truth.xml"))
+            server_truth_path = Path(tr_cfg.get("truth_corpus_path", "data/truth.xml"))
             server_truth = load_server_truth(server_truth_path)
 
             # Stage 2: compute DegreeOfTruth (before merge so it measures
@@ -1850,12 +1862,12 @@ def process_chat(
 
             # Stage 3: merge client truth into server truth
             # Filter per Entanglement Policy (doc/Entanglement.md):
-            # - When store_particulars is false (default), only universal
-            #   facts persist to the truth table.
+            # - When store_concrete is false (default), only universal
+            #   facts persist to the TruthSet.
             # - Identifiable content is always filtered regardless.
-            # Client-side override: query_config.chat.store_particulars
-            _store_part = query_config.get("chat", {}).get(
-                "store_particulars", ot_cfg.get("store_particulars", False))
+            # Client-side override: query_config.truthset.store_concrete
+            _store_part = query_config.get("truthset", {}).get(
+                "store_concrete", ts_cfg.get("store_concrete", False))
             if not _store_part:
                 client_truth = filter_knowledge_only(client_truth)
             # Strip server-origin entries before merge (avoid loopback)
@@ -1868,7 +1880,7 @@ def process_chat(
                 if not detect_identifiability(e.get("content", ""))
             ]
             # Symmetry check (doc/Ethics.md §5-8)
-            if ot_cfg.get("truth_symmetry", True):
+            if ts_cfg.get("truth_symmetry", True):
                 surviving = []
                 for e in client_truth:
                     reason = detect_asymmetric_claim(e.get("content", ""))
@@ -1883,7 +1895,7 @@ def process_chat(
                 client_truth = surviving
             # Validate operators: reject any whose leaf operands are feelings
             client_truth = validate_operator_operands(client_truth)
-            merge_rate = float(ot_cfg.get("merge_rate", 0.1))
+            merge_rate = float(tr_cfg.get("merge_rate", 0.1))
             server_truth = merge_client_truth(
                 server_truth, client_truth,
                 merge_rate=merge_rate, author=author_guid,
@@ -1891,8 +1903,8 @@ def process_chat(
 
             # ── Truth table size cap (truth_max_entries) ──
             # Trim entries with |trust| closest to 0 when table exceeds max.
-            _truth_max = int(query_config.get("chat", {}).get(
-                "truth_max_entries", ot_cfg.get("truth_max_entries", 1000)))
+            _truth_max = int(query_config.get("training", {}).get(
+                "truth_max_entries", tr_cfg.get("truth_max_entries", 1000)))
             if len(server_truth) > _truth_max:
                 before_count = len(server_truth)
                 # Sort by |trust| descending — keep strongest signals
@@ -1917,12 +1929,12 @@ def process_chat(
                 train_messages = _bundle_to_messages(bundle, provider)
                 # Append the response as the final assistant turn
                 train_messages.append({"role": "assistant", "content": response_text})
-                train_device = ot_cfg.get("device", "cpu")
+                train_device = tr_cfg.get("device", "cpu")
                 # truth_weight from client config (0.0–1.0)
-                _truth_weight = float(query_config.get("chat", {}).get("truth_weight", 0.7))
-                _warmup_steps = int(ot_cfg.get("warmup_steps", 50))
-                _grad_clip = float(ot_cfg.get("grad_clip", 1.0))
-                _anchor_decay = float(ot_cfg.get("anchor_decay", 0.001))
+                _truth_weight = float(query_config.get("truthset", {}).get("truth_weight", 0.7))
+                _warmup_steps = int(tr_cfg.get("warmup_steps", 50))
+                _grad_clip = float(tr_cfg.get("grad_clip", 1.0))
+                _anchor_decay = float(tr_cfg.get("anchor_decay", 0.001))
                 # Snapshot everything the thread needs — no shared mutable state.
                 _train_payload = {
                     "messages": [{"role": m["role"], "content": m.get("content", "")}

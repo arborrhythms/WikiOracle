@@ -5,8 +5,8 @@
   <xs:annotation>
     <xs:documentation>
       WikiOracle State XML schema.
-      The root state contains a required header, zero or more top-level
-      conversations, and an optional truth table. Conversations recurse
+      The root state contains a required client block, zero or more top-level
+      conversations, and an optional TruthSet. Conversations recurse
       directly through nested conversation/message children. Truth entries
       are typed XML elements under &lt;truth&gt; and use DoT on [-1, +1]
       for all truth-bearing kinds except feeling.
@@ -37,26 +37,144 @@
   <xs:element name="state">
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="header" type="HeaderType"/>
+        <xs:element name="client" type="ClientType"/>
         <xs:element ref="conversation" minOccurs="0" maxOccurs="unbounded"/>
-        <xs:element name="truth" type="TruthTableType" minOccurs="0"/>
+        <xs:element name="truth" type="TruthSetType" minOccurs="0"/>
       </xs:sequence>
     </xs:complexType>
   </xs:element>
 
   <!-- ======================================================================
-       Header
+       Client
        ====================================================================== -->
 
-  <xs:complexType name="HeaderType">
+  <xs:complexType name="ClientType">
+    <xs:annotation>
+      <xs:documentation>
+        Client identity and preferences. The client is the authority for
+        all data in this block — the server never owns it.
+      </xs:documentation>
+    </xs:annotation>
     <xs:all>
       <xs:element name="version" type="xs:positiveInteger"/>
       <xs:element name="schema" type="xs:string"/>
-      <xs:element name="time" type="xs:string"/>
+      <xs:element name="time_creation" type="xs:string"/>
+      <xs:element name="time_lastModified" type="xs:string" minOccurs="0"/>
       <xs:element name="title" type="xs:string"/>
-      <xs:element name="context" type="XHTMLContentType"/>
-      <xs:element name="user_guid" type="xs:string" minOccurs="0"/>
-      <xs:element name="output" type="xs:string" minOccurs="0"/>
+      <xs:element name="client_name" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Display name shown in chat messages.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="client_id" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Persistent client identifier. Auto-generated from the client
+            name when absent.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="ui" type="StateUIType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Client-side UI preferences. These are owned by the client and
+            persisted in the state file, not the server config.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- ── State UI ──────────────────────────────────────────────────────── -->
+
+  <xs:complexType name="StateUIType">
+    <xs:annotation>
+      <xs:documentation>
+        User interface preferences including layout mode, colour theme,
+        model selection, splitter position, swipe navigation toggles,
+        and action confirmation prompts.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:all>
+      <xs:element name="layout" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Layout mode for the chat interface.
+            - horizontal: side-by-side tree and chat panels
+            - vertical:   stacked tree and chat panels
+            - flat:       single-panel chat only
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="horizontal"/>
+            <xs:enumeration value="vertical"/>
+            <xs:enumeration value="flat"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="theme" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Colour theme for the UI.
+            - system: follow the operating system preference
+            - light:  light background theme
+            - dark:   dark background theme
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="system"/>
+            <xs:enumeration value="light"/>
+            <xs:enumeration value="dark"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="model" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Currently selected model identifier for the active provider.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="splitter_pct" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Conversation-tree / chat panel splitter position expressed as
+            a percentage (0-100). A value of 0 collapses the tree panel.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:integer">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="swipe_nav_horizontal" type="xs:boolean" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Enable horizontal swipe gestures (left/right) to navigate
+            between sibling conversation branches.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="swipe_nav_vertical" type="xs:boolean" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Enable vertical swipe gestures (up/down) to navigate between
+            sibling conversation branches.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="confirm_actions" type="xs:boolean" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            When true, the UI prompts the user for confirmation before
+            destructive operations such as deletes and merges.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
     </xs:all>
   </xs:complexType>
 
@@ -101,7 +219,7 @@
   </xs:complexType>
 
   <!-- ======================================================================
-       Truth table
+       TruthSet
        ====================================================================== -->
 
   <xs:attributeGroup name="TruthCommonAttributes">
@@ -177,7 +295,7 @@
       <xs:element name="model" type="xs:string" minOccurs="0"/>
       <xs:element name="system" type="XHTMLContentType" minOccurs="0"/>
       <xs:element name="authority" type="AuthorityLinkType" minOccurs="0"/>
-      <xs:element name="prelim" type="xs:boolean" minOccurs="0"/>
+      <xs:element name="conversation" type="xs:boolean" minOccurs="0"/>
       <xs:element name="timeout" type="xs:nonNegativeInteger" minOccurs="0"/>
       <xs:element name="max_tokens" type="xs:nonNegativeInteger" minOccurs="0"/>
     </xs:sequence>
@@ -204,7 +322,7 @@
   <xs:element name="provider" type="ProviderTruthType"/>
   <xs:element name="authority" type="AuthorityTruthType"/>
 
-  <xs:complexType name="TruthTableType">
+  <xs:complexType name="TruthSetType">
     <xs:sequence>
       <xs:choice minOccurs="0" maxOccurs="unbounded">
         <xs:element ref="fact"/>

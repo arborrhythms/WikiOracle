@@ -231,8 +231,8 @@ class TestStage3Filtering(unittest.TestCase):
             {"id": "pii", "content": '<fact trust="0.5">Contact user@example.com for details</fact>'},
         ]
 
-    def test_store_particulars_false_filters_news(self):
-        """When store_particulars=False, news facts are excluded."""
+    def test_store_concrete_false_filters_news(self):
+        """When store_concrete=False, news facts are excluded."""
         entries = self._make_entries()
         filtered = filter_knowledge_only(entries)
         filtered = [e for e in filtered if not detect_identifiability(e.get("content", ""))]
@@ -242,10 +242,10 @@ class TestStage3Filtering(unittest.TestCase):
         self.assertNotIn("n1", ids)
         self.assertNotIn("pii", ids)
 
-    def test_store_particulars_true_preserves_news(self):
-        """When store_particulars=True, news facts pass through (but PII still filtered)."""
+    def test_store_concrete_true_preserves_news(self):
+        """When store_concrete=True, news facts pass through (but PII still filtered)."""
         entries = self._make_entries()
-        # Skip filter_knowledge_only (store_particulars=True)
+        # Skip filter_knowledge_only (store_concrete=True)
         filtered = [e for e in entries if not detect_identifiability(e.get("content", ""))]
         ids = [e["id"] for e in filtered]
         self.assertIn("k1", ids)
@@ -254,7 +254,7 @@ class TestStage3Filtering(unittest.TestCase):
         self.assertNotIn("pii", ids)
 
     def test_identifiability_always_filters(self):
-        """PII entries are filtered even when store_particulars=True."""
+        """PII entries are filtered even when store_concrete=True."""
         entries = [
             {"id": "pii1", "content": '<fact trust="0.5">Call 555-123-4567</fact>'},
             {"id": "pii2", "content": '<fact trust="0.5">Located at 48.8566, 2.3522</fact>'},

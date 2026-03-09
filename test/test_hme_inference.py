@@ -45,13 +45,15 @@ def _load_hme_state() -> dict:
     return load_state_file(hme_path, strict=True)
 
 
-def _build_bundle_for_query(state: dict, query: str) -> ProviderBundle:
+def _build_bundle_for_query(state: dict, query: str, context: str = "") -> ProviderBundle:
     """Build a query bundle with RAG enabled, default prefs."""
-    prefs = {
+    qc = {
         "provider": "wikioracle",
-        "chat": {"rag": True, "url_fetch": False},
+        "truthset": {"truth_weight": 0.7},
     }
-    return build_query(state, query, prefs)
+    if context:
+        qc["context"] = context
+    return build_query(state, query, qc)
 
 
 def _source_ids(bundle: ProviderBundle) -> set:
@@ -109,10 +111,9 @@ class TestSocratesMortality(unittest.TestCase):
         self.assertAlmostEqual(s1.trust, 1.0)
         self.assertAlmostEqual(s2.trust, 1.0)
 
-    def test_context_instructs_kleene_logic(self):
-        """The system prompt should reference Kleene ternary logic."""
-        self.assertIn("Kleene", self.bundle.system)
-        self.assertIn("trust", self.bundle.system.lower())
+    def test_system_includes_xhtml_instruction(self):
+        """The system prompt should include XHTML formatting instruction."""
+        self.assertIn("XHTML", self.bundle.system)
 
     def test_simulated_llm_response(self):
         """A correct LLM should return trust ~1.0 for 'Is Socrates mortal?'"""

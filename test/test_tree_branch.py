@@ -71,9 +71,11 @@ def _make_state(**overrides):
 
 def _make_runtime_config(**overrides):
     base = {
-        "user": {"name": "TestUser"},
-        "chat": {"temperature": 0.7, "rag": True, "url_fetch": False},
-        "ui": {"default_provider": "wikioracle"},
+        "server": {
+            "evaluation": {"temperature": 0.7, "url_fetch": False},
+            "truthset": {"truth_weight": 0.7},
+        },
+        "providers": {"default": "wikioracle"},
     }
     base.update(overrides)
     return base

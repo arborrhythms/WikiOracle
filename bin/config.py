@@ -222,9 +222,10 @@ def _xml_coerce(text: str):
 def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
     """Parse a config.xml file into a dict.
 
-    The XML structure uses a ``<config>`` root element with ``<user>``,
-    ``<providers>``, ``<chat>``, ``<ui>``, and ``<server>`` sections.
-    Provider entries use ``<provider name="key">`` with child elements;
+    The XML structure uses a ``<config>`` root element with ``<server>``
+    and ``<providers>`` sections. The server section contains subsections
+    for ``<truthset>``, ``<evaluation>``, and ``<training>``. Provider
+    entries use ``<provider name="key">`` with child elements;
     ``<display_name>`` is mapped to ``name`` in the returned dict (for
     backward compat with the rest of the codebase).
 
@@ -235,10 +236,69 @@ def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
     root = tree.getroot()
     data: Dict[str, Any] = {}
 
+    def _parse_flat_children(parent_el) -> Dict[str, Any]:
+        """Parse an element's children as flat key→value pairs."""
+        result: Dict[str, Any] = {}
+        for child in parent_el:
+            result[child.tag] = _xml_coerce(_xml_text(child))
+        return result
+
+    def _parse_xhtml_content(el) -> str:
+        """Extract mixed content from an element as a string.
+
+        For elements that may contain XHTML markup, serialise all
+        children back to a string.  Falls back to plain text.
+        """
+        if el is None:
+            return ""
+        # If the element has child elements, serialise them
+        children = list(el)
+        if children:
+            parts = [el.text or ""]
+            for child in children:
+                parts.append(ET.tostring(child, encoding="unicode", method="xml"))
+            return "".join(parts).strip()
+        return (el.text or "").strip()
+
+    # --- server ---
+    server_el = root.find("server")
+    if server_el is not None:
+        server: Dict[str, Any] = {}
+        for child in server_el:
+            if child.tag == "truthset":
+                server["truthset"] = _parse_flat_children(child)
+            elif child.tag == "evaluation":
+                server["evaluation"] = _parse_flat_children(child)
+            elif child.tag == "training":
+                server["training"] = _parse_flat_children(child)
+            elif child.tag == "allowed_urls":
+                urls = [_xml_text(u) for u in child.findall("url") if _xml_text(u)]
+                server["allowed_urls"] = urls
+            else:
+                server[child.tag] = _xml_coerce(_xml_text(child))
+        data["server"] = server
+
     # --- providers ---
     providers_el = root.find("providers")
     if providers_el is not None:
         providers: Dict[str, Any] = {}
+        # Section-level elements
+        default_el = providers_el.find("default")
+        if default_el is not None:
+            providers["default"] = _xml_text(default_el)
+        context_el = providers_el.find("context")
+        if context_el is not None:
+            providers["context"] = _parse_xhtml_content(context_el)
+        output_el = providers_el.find("output")
+        if output_el is not None:
+            providers["output"] = _xml_text(output_el)
+        truth_context_el = providers_el.find("truth_context")
+        if truth_context_el is not None:
+            providers["truth_context"] = _parse_xhtml_content(truth_context_el)
+        conversation_context_el = providers_el.find("conversation_context")
+        if conversation_context_el is not None:
+            providers["conversation_context"] = _parse_xhtml_content(conversation_context_el)
+        # Per-provider entries
         for prov_el in providers_el.findall("provider"):
             prov_key = prov_el.get("name", "")
             prov: Dict[str, Any] = {}
@@ -250,39 +310,6 @@ def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
                 prov[tag] = _xml_coerce(_xml_text(child))
             providers[prov_key] = prov
         data["providers"] = providers
-
-    # --- chat ---
-    chat_el = root.find("chat")
-    if chat_el is not None:
-        chat: Dict[str, Any] = {}
-        for child in chat_el:
-            chat[child.tag] = _xml_coerce(_xml_text(child))
-        data["chat"] = chat
-
-    # --- ui ---
-    ui_el = root.find("ui")
-    if ui_el is not None:
-        ui: Dict[str, Any] = {}
-        for child in ui_el:
-            ui[child.tag] = _xml_coerce(_xml_text(child))
-        data["ui"] = ui
-
-    # --- server ---
-    server_el = root.find("server")
-    if server_el is not None:
-        server: Dict[str, Any] = {}
-        for child in server_el:
-            if child.tag == "online_training":
-                ot: Dict[str, Any] = {}
-                for ot_child in child:
-                    ot[ot_child.tag] = _xml_coerce(_xml_text(ot_child))
-                server["online_training"] = ot
-            elif child.tag == "allowed_urls":
-                urls = [_xml_text(u) for u in child.findall("url") if _xml_text(u)]
-                server["allowed_urls"] = urls
-            else:
-                server[child.tag] = _xml_coerce(_xml_text(child))
-        data["server"] = server
 
     return data
 
@@ -378,10 +405,6 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             pcfg["api_key"] = ycfg["api_key"]
         if ycfg.get("timeout"):
             pcfg["timeout"] = ycfg["timeout"]
-        if ycfg.get("truth_context"):
-            pcfg["truth_context"] = ycfg["truth_context"]
-        if ycfg.get("conversation_context"):
-            pcfg["conversation_context"] = ycfg["conversation_context"]
 
     return providers
 
@@ -417,7 +440,41 @@ _PROVIDER_MODELS: Dict[str, list] = {
 # Ordered mapping of dotted config paths → human-readable descriptions.
 # Drives field ordering and inline comments when writing config.xml.
 CONFIG_SCHEMA = [
+    ("server",                      "Runtime parameters (usually set via CLI flags)"),
+    ("server.server_name",          "Human-readable server display name"),
+    ("server.server_id",            "Persistent server identity (auto-generated UUID4)"),
+    ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
+    ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
+    ("server.truthset",             "TruthSet policy settings"),
+    ("server.truthset.truth_symmetry", "Enforce Truth Symmetry (see doc/Ethics.md)"),
+    ("server.truthset.store_concrete", "Store concrete facts in TruthSet (see doc/Ethics.md §Entanglement Policy)"),
+    ("server.truthset.truth_weight", "Truth weight factor (0.0–1.0) for provider prompts"),
+    ("server.evaluation",           "Default evaluation parameters for LLM inference"),
+    ("server.evaluation.temperature", "Sampling temperature (0.0–2.0)"),
+    ("server.evaluation.max_tokens", "Maximum tokens in a single LLM response"),
+    ("server.evaluation.timeout",   "Request timeout in seconds for LLM evaluation"),
+    ("server.evaluation.url_fetch", "Allow URL fetching in responses"),
+    ("server.training",             "Online learning from interactions (see doc/Training.md)"),
+    ("server.training.enabled",     "Enable continuous truth corpus updates"),
+    ("server.training.truth_corpus_path", "Append-only truth log"),
+    ("server.training.truth_max_entries", "Max server TruthSet entries before trimming"),
+    ("server.training.alpha_base",  "Base learning rate"),
+    ("server.training.alpha_min",   "Minimum learning rate floor"),
+    ("server.training.alpha_max",   "Maximum learning rate ceiling"),
+    ("server.training.merge_rate",  "Slow-moving average rate for truth merge"),
+    ("server.training.dissonance_enabled", "Detect and penalize contradictions"),
+    ("server.training.device",      "Training device: auto | cpu | cuda (default: cpu)"),
+    ("server.training.operators_dynamic_enabled", "Load custom operators"),
+    ("server.training.warmup_steps", "Sigmoid warmup midpoint for training annealing"),
+    ("server.training.grad_clip",   "Max gradient norm for clipping"),
+    ("server.training.anchor_decay", "EMA blend-back rate toward checkpoint weights"),
+    ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
     ("providers",                   "LLM provider configuration"),
+    ("providers.default",           "Provider selected on startup"),
+    ("providers.context",           "Shared XHTML context for all provider system prompts"),
+    ("providers.output",            "Output format instructions for all providers"),
+    ("providers.truth_context",     "System prompt context for truth-only providers"),
+    ("providers.conversation_context", "System prompt context for conversational providers"),
     ("providers.wikioracle.name",   "Display name for NanoChat provider"),
     ("providers.wikioracle.username", "API login / email"),
     ("providers.openai.name",       "Display name for OpenAI provider"),
@@ -440,37 +497,6 @@ CONFIG_SCHEMA = [
     ("providers.grok.url",          "API endpoint URL"),
     ("providers.grok.api_key",      "API key (or set XAI_API_KEY env var)"),
     ("providers.grok.default_model", "Default model"),
-    ("chat.temperature",            "Sampling temperature (0.0–2.0)"),
-    ("chat.rag",                    "Use truth entries for retrieval"),
-    ("chat.url_fetch",              "Allow URL fetching in responses"),
-    ("chat.confirm_actions",        "Prompt before deletes, merges, etc."),
-    ("ui.default_provider",         "Provider selected on startup"),
-    ("ui.layout",                   "Layout mode: flat | horizontal | vertical"),
-    ("ui.theme",                    "Color theme: system | light | dark"),
-    ("ui.splitter_pct",             "Tree/chat splitter position (percentage)"),
-    ("ui.swipe_nav_horizontal",     "Swipe left/right to navigate siblings"),
-    ("ui.swipe_nav_vertical",       "Swipe up/down to navigate siblings"),
-    ("server",                      "Runtime parameters (usually set via CLI flags)"),
-    ("server.server_id",            "Persistent server identity (auto-generated UUID4)"),
-    ("server.online_training",  "Online learning from interactions (see doc/Training.md)"),
-    ("server.online_training.enabled",     "Enable continuous truth corpus updates"),
-    ("server.online_training.truth_corpus_path", "Append-only truth log"),
-    ("server.online_training.alpha_base",  "Base learning rate"),
-    ("server.online_training.alpha_min",   "Minimum learning rate floor"),
-    ("server.online_training.alpha_max",   "Maximum learning rate ceiling"),
-    ("server.online_training.merge_rate",  "Slow-moving average rate for truth merge"),
-    ("server.online_training.dissonance_enabled", "Detect and penalize contradictions"),
-    ("server.online_training.device",  "Training device: auto | cpu | cuda (default: cpu)"),
-    ("server.online_training.operators_dynamic_enabled", "Load custom operators"),
-    ("server.online_training.store_particulars", "Store particular facts in truth table (see doc/Ethics.md §Entanglement Policy)"),
-    ("server.online_training.truth_symmetry", "Enforce Truth Symmetry (see doc/Ethics.md)"),
-    ("server.online_training.warmup_steps", "Sigmoid warmup midpoint for training annealing"),
-    ("server.online_training.grad_clip", "Max gradient norm for clipping"),
-    ("server.online_training.anchor_decay", "EMA blend-back rate toward checkpoint weights"),
-    ("server.online_training.truth_max_entries", "Max server truth table entries before trimming"),
-    ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
-    ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
-    ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
 ]
 
 
@@ -537,12 +563,70 @@ def config_to_xml(data: dict) -> str:
         safe = text.replace("--", "\u2013")  # en-dash
         parent.append(ET.Comment(f" {safe} "))
 
+    def _write_subsection(parent_el, section_name, section_data, schema_prefix):
+        """Write a subsection element with its children."""
+        desc = desc_map.get(schema_prefix)
+        if desc:
+            _add_comment(parent_el, desc)
+        section_el = ET.SubElement(parent_el, section_name)
+        for key, val in section_data.items():
+            desc = desc_map.get(f"{schema_prefix}.{key}")
+            if desc:
+                _add_comment(section_el, desc)
+            child = ET.SubElement(section_el, key)
+            child.text = _val_str(val)
+
+    # --- server ---
+    server_data = data.get("server")
+    if isinstance(server_data, dict):
+        _add_comment(root, "Runtime parameters (usually set via CLI flags)")
+        server_el = ET.SubElement(root, "server")
+        # Flat server fields
+        for key in ("server_name", "server_id", "stateless", "url_prefix"):
+            val = server_data.get(key)
+            if val is not None:
+                desc = desc_map.get(f"server.{key}")
+                if desc:
+                    _add_comment(server_el, desc)
+                child = ET.SubElement(server_el, key)
+                child.text = _val_str(val)
+        # Subsections
+        truthset_data = server_data.get("truthset")
+        if isinstance(truthset_data, dict):
+            _write_subsection(server_el, "truthset", truthset_data, "server.truthset")
+        evaluation_data = server_data.get("evaluation")
+        if isinstance(evaluation_data, dict):
+            _write_subsection(server_el, "evaluation", evaluation_data, "server.evaluation")
+        training_data = server_data.get("training")
+        if isinstance(training_data, dict):
+            _write_subsection(server_el, "training", training_data, "server.training")
+        # allowed_urls
+        urls = server_data.get("allowed_urls")
+        if isinstance(urls, list):
+            _add_comment(server_el, "URL prefixes allowed for authority/provider fetches")
+            urls_el = ET.SubElement(server_el, "allowed_urls")
+            for url_str in urls:
+                url_child = ET.SubElement(urls_el, "url")
+                url_child.text = str(url_str)
+
     # --- providers ---
     providers_data = data.get("providers")
     if isinstance(providers_data, dict):
         _add_comment(root, "LLM provider configuration")
         providers_el = ET.SubElement(root, "providers")
+        # Section-level elements
+        for section_key in ("default", "context", "output", "truth_context", "conversation_context"):
+            val = providers_data.get(section_key)
+            if val is not None:
+                desc = desc_map.get(f"providers.{section_key}")
+                if desc:
+                    _add_comment(providers_el, desc)
+                child = ET.SubElement(providers_el, section_key)
+                child.text = _val_str(val)
+        # Per-provider entries
         for prov_key, prov_cfg in providers_data.items():
+            if prov_key in ("default", "context", "output", "truth_context", "conversation_context"):
+                continue
             if not isinstance(prov_cfg, dict):
                 continue
             desc = desc_map.get(f"providers.{prov_key}.name")
@@ -558,58 +642,6 @@ def config_to_xml(data: dict) -> str:
                     _add_comment(prov_el, desc)
                 child = ET.SubElement(prov_el, xml_tag)
                 child.text = _val_str(field_val)
-
-    # --- chat ---
-    chat_data = data.get("chat")
-    if isinstance(chat_data, dict):
-        _add_comment(root, "Chat settings")
-        chat_el = ET.SubElement(root, "chat")
-        for key, val in chat_data.items():
-            desc = desc_map.get(f"chat.{key}")
-            if desc:
-                _add_comment(chat_el, desc)
-            child = ET.SubElement(chat_el, key)
-            child.text = _val_str(val)
-
-    # --- ui ---
-    ui_data = data.get("ui")
-    if isinstance(ui_data, dict):
-        _add_comment(root, "UI defaults")
-        ui_el = ET.SubElement(root, "ui")
-        for key, val in ui_data.items():
-            desc = desc_map.get(f"ui.{key}")
-            if desc:
-                _add_comment(ui_el, desc)
-            child = ET.SubElement(ui_el, key)
-            child.text = _val_str(val)
-
-    # --- server ---
-    server_data = data.get("server")
-    if isinstance(server_data, dict):
-        _add_comment(root, "Runtime parameters (usually set via CLI flags)")
-        server_el = ET.SubElement(root, "server")
-        for key, val in server_data.items():
-            if key == "online_training" and isinstance(val, dict):
-                _add_comment(server_el, "Online learning from interactions (see doc/Training.md)")
-                ot_el = ET.SubElement(server_el, "online_training")
-                for ot_key, ot_val in val.items():
-                    desc = desc_map.get(f"server.online_training.{ot_key}")
-                    if desc:
-                        _add_comment(ot_el, desc)
-                    child = ET.SubElement(ot_el, ot_key)
-                    child.text = _val_str(ot_val)
-            elif key == "allowed_urls" and isinstance(val, list):
-                _add_comment(server_el, "URL prefixes allowed for authority/provider fetches")
-                urls_el = ET.SubElement(server_el, "allowed_urls")
-                for url_str in val:
-                    url_child = ET.SubElement(urls_el, "url")
-                    url_child.text = str(url_str)
-            else:
-                desc = desc_map.get(f"server.{key}")
-                if desc:
-                    _add_comment(server_el, desc)
-                child = ET.SubElement(server_el, key)
-                child.text = _val_str(val)
 
     # Pretty-print with minidom
     rough_xml = ET.tostring(root, encoding="unicode", xml_declaration=False)
@@ -706,39 +738,42 @@ def _normalize_config(cfg_data: dict) -> dict:
     Missing sections/keys are filled with sensible defaults.
     """
     cfg = dict(cfg_data) if isinstance(cfg_data, dict) else {}
-    ui = cfg.setdefault("ui", {})
-    ui.setdefault("default_provider", "wikioracle")
-    ui.setdefault("layout", "flat")
-    ui.setdefault("theme", "system")
-    ui.setdefault("swipe_nav_horizontal", True)
-    ui.setdefault("swipe_nav_vertical", False)
-    chat = cfg.setdefault("chat", {})
-    chat.setdefault("temperature", 0.7)
-    chat.setdefault("rag", True)
-    chat.setdefault("url_fetch", False)
-    chat.setdefault("confirm_actions", False)
+    # --- server ---
     server = cfg.setdefault("server", {})
     if not server.get("server_id"):
         server["server_id"] = str(_uuid.uuid4())
-    ot = server.setdefault("online_training", {})
-    ot.setdefault("enabled", False)
-    ot.setdefault("truth_corpus_path", "data/truth.xml")
-    ot.setdefault("alpha_base", 0.01)
-    ot.setdefault("alpha_min", 0.001)
-    ot.setdefault("alpha_max", 0.1)
-    ot.setdefault("merge_rate", 0.1)
-    ot.setdefault("device", "cpu")
-    ot.setdefault("dissonance_enabled", True)
-    ot.setdefault("operators_dynamic_enabled", True)
-    ot.setdefault("store_particulars", False)
-    ot.setdefault("truth_symmetry", True)
-    ot.setdefault("warmup_steps", 50)
-    ot.setdefault("grad_clip", 1.0)
-    ot.setdefault("anchor_decay", 0.001)
-    ot.setdefault("truth_max_entries", 1000)
     server.setdefault("stateless", False)
     server.setdefault("url_prefix", "")
+    # server.truthset
+    ts = server.setdefault("truthset", {})
+    ts.setdefault("truth_symmetry", True)
+    ts.setdefault("store_concrete", False)
+    ts.setdefault("truth_weight", 0.7)
+    # server.evaluation
+    ev = server.setdefault("evaluation", {})
+    ev.setdefault("temperature", 0.7)
+    ev.setdefault("max_tokens", 128)
+    ev.setdefault("timeout", 120)
+    ev.setdefault("url_fetch", False)
+    # server.training
+    tr = server.setdefault("training", {})
+    tr.setdefault("enabled", False)
+    tr.setdefault("truth_corpus_path", "data/truth.xml")
+    tr.setdefault("truth_max_entries", 1000)
+    tr.setdefault("alpha_base", 0.01)
+    tr.setdefault("alpha_min", 0.001)
+    tr.setdefault("alpha_max", 0.1)
+    tr.setdefault("merge_rate", 0.1)
+    tr.setdefault("device", "cpu")
+    tr.setdefault("dissonance_enabled", True)
+    tr.setdefault("operators_dynamic_enabled", True)
+    tr.setdefault("warmup_steps", 50)
+    tr.setdefault("grad_clip", 1.0)
+    tr.setdefault("anchor_decay", 0.001)
     server.setdefault("allowed_urls", _default_allowed_urls())
+    # --- providers ---
+    prov = cfg.setdefault("providers", {})
+    prov.setdefault("default", "wikioracle")
     # Non-secret provider metadata for UI dropdowns / key-status badges
     prov_meta = {}
     for key, pcfg in PROVIDERS.items():

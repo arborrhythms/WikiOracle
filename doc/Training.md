@@ -10,7 +10,7 @@ it all together.
 ## DegreeOfTruth (DoT)
 
 DegreeOfTruth is a bipolar scalar on −1 .. +1 that measures how well
-a user's truth table agrees with the server's collected truth.
+a user's TruthSet agrees with the server's collected truth.
 
     DegreeOfTruth = 2 × mean(agreement_i) − 1    for shared entries
 
@@ -47,7 +47,7 @@ This structure resembles a **Hopfield network**, where the energy
 landscape has stable attractors (memorised patterns) and unstable
 saddle points.  In our system:
 
-* The **truth table** plays the role of the weight matrix, encoding
+* The **TruthSet** plays the role of the weight matrix, encoding
   the collective memory of what is true and what is false.
 * Each **training step** is a state transition that pushes the model
   toward one of the attractors (truth or refutation).
@@ -55,7 +55,7 @@ saddle points.  In our system:
   attractors — the point of maximum uncertainty where the system has
   insufficient signal to commit to either direction.
 
-As the server truth table accumulates entries from multiple users, the
+As the server TruthSet accumulates entries from multiple users, the
 poles and zeros of this dynamic equation shift.  The slow‑moving
 average merge ensures that attractors are stable under small
 perturbations (anti‑capture), while strong consensus can still move
@@ -73,7 +73,7 @@ net gradient contribution tends to zero.  This arises because:
   opposite directions (learning truth vs. learning falsehood).
 * DoT near 0 contributes nearly nothing (the sigmoid zero-crossing).
 * Over a diverse population of users, the average DoT tends toward
-  zero if the truth table is balanced.
+  zero if the TruthSet is balanced.
 
 This is directly analogous to the **symmetric energy wells** of
 Hopfield networks.  In a Hopfield network, stored patterns and their
@@ -93,9 +93,9 @@ within established wells.
 The sigmoid warmup schedule serves as a **cooling schedule** for the
 annealing process.  When online training is first enabled:
 
-1. The truth table is empty or sparse — DoT values are unreliable.
+1. The TruthSet is empty or sparse — DoT values are unreliable.
 2. The warmup suppresses the learning rate to near-zero.
-3. As interactions accumulate, the truth table gains signal.
+3. As interactions accumulate, the TruthSet gains signal.
 4. The warmup ramps up, allowing the model to learn from now-reliable
    DoT values.
 5. At steady state (step >> warmup_steps), the warmup factor is ~1.0
@@ -119,8 +119,8 @@ training examples from the online training pipeline.
 
 ### JSONL Record Types
 
-The output JSONL uses four record types, splitting the traditional
-`<header>` into separate User and Server records:
+The output JSONL uses four record types, splitting the client identity
+into separate User and Server records:
 
 | Type | Tag | Purpose |
 |------|-----|---------|
@@ -196,14 +196,14 @@ fit the collective evidence.
 
 WikiOracle accomplishes this by:
 
-1. Maintaining a **server‑owned truth table** (`truth.xml`) that
+1. Maintaining a **server‑owned TruthSet** (`truth.xml`) that
    accumulates facts from all users.
 2. Computing a **DegreeOfTruth** (−1 .. +1) per interaction.
 3. Using |DegreeOfTruth| to modulate the **learning rate** of a
    one‑step online training pass in NanoChat.
 
 Conversations are **not** stored on the server.  Only **knowledge** truth
-entries are retained.  The server truth table contains knowledge facts,
+entries are retained.  The server TruthSet contains knowledge facts,
 operators, authorities, and references — no feelings, provider entries,
 or **news facts** (spatiotemporally bound observations).
 
@@ -216,7 +216,7 @@ function in `bin/truth.py` enforces this boundary.
 ### User Identity
 
 Each user is identified by a pseudonymous GUID derived deterministically
-from `user.name` in the config file (UUID‑5 in the WikiOracle namespace).
+from `client_name` in the state file (UUID‑5 in the WikiOracle namespace).
 This GUID is stored at the root level of the user's state and used
 internally when merging truth entries into the server table.
 
@@ -227,28 +227,28 @@ and training happen after the response is delivered.
 
 **Stage 1 — Respond**
 
-1. Receive the user's query and truth table.
+1. Receive the user's query and TruthSet.
 2. Use truth entries for RAG as usual.
 3. Return the response to the user.
 
 **Stage 2 — Compute DegreeOfTruth**
 
-4. Score the user's truth table against the server's current truth
+4. Score the user's TruthSet against the server's current truth
    (formula above).
 
-**Stage 3 — Update server truth table**
+**Stage 3 — Update server TruthSet**
 
 5. Filter client truth per the Entanglement Policy (doc/Entanglement.md):
-   * When `store_particulars` is false (default), only universal
+   * When `store_concrete` is false (default), only universal
      facts pass through (`filter_knowledge_only()`).
    * Entries with identifiable content are always filtered regardless
-     of `store_particulars` (`detect_identifiability()`).
+     of `store_concrete` (`detect_identifiability()`).
    * Feelings never reach the merge (`_is_server_storable()` rejects them).
    * Operators whose leaf operands include feelings are rejected
      (`validate_operator_operands()`).
    * Feelings are also stripped from training messages
      (`strip_feelings_from_training()` in `bin/sensation.py`).
-6. Merge the surviving truth entries into the server truth table
+6. Merge the surviving truth entries into the server TruthSet
    (`truth.xml`):
    * **Match found**: nudge the server entry's trust toward the incoming
      value using a slow‑moving average:
@@ -257,9 +257,9 @@ and training happen after the response is delivered.
    * Entries are restricted to facts, operators, authorities, and
      references.  Feelings and provider entries are not stored.
 
-**Stage 3a — Truth Table Trimming**
+**Stage 3a — TruthSet Trimming**
 
-When the server truth table exceeds `truth_max_entries` (default 1000),
+When the server TruthSet exceeds `truth_max_entries` (default 1000),
 the merge step trims the table by removing entries with `|trust|` closest
 to 0.0 (no information value), keeping entries with highest `|trust|`
 (strongest signal, positive or negative).  This is checked during the
@@ -283,7 +283,7 @@ defaults to 1000 in the chat config.
 ### Device Configuration
 
 Online training runs on the device specified by
-`server.online_training.device` in the config file (`config.xml`).  Valid values:
+`server.training.device` in the config file (`config.xml`).  Valid values:
 
 * `cpu` (default) — safe for the WikiOracle production server
 * `cuda` — use NVIDIA GPU if available
@@ -379,7 +379,7 @@ The `warmup_steps` parameter (default 50) is the sigmoid midpoint.
 The steepness parameter `k` is fixed at 0.1.
 
 This schedule ensures that the first few interactions after enabling
-online training have minimal weight impact, allowing the truth table
+online training have minimal weight impact, allowing the TruthSet
 to accumulate signal before the model commits to learning from it.
 
 #### Gradient Clipping
@@ -434,25 +434,25 @@ parameter tensors.  The step count is stored in
 
 ```
 POST /train
-  ├── Clamp DoT to [-1, +1], truth_weight to [0, 1]
-  ├── If truth_weight > 0 and |DoT| < 1e-6 → skip (no signal)
-  ├── Acquire model worker from pool
-  ├── Tokenize messages (bos + user_start/end + assistant_start/end)
-  ├── If < 2 tokens → skip (empty)
-  ├── Initialize EMA anchor weights (first call only)
-  ├── Move model to training device
-  ├── Build 6 parameter groups (fresh each call)
-  ├── Compute lr_scale = (tw × |DoT| + (1 - tw)) × sigmoid_warmup(step)
-  ├── Scale each group's LR: lr_base × lr_scale
-  ├── Create fresh AdamW optimizer
-  ├── Forward pass → cross-entropy loss
-  ├── Backward pass
-  ├── Gradient clipping → grad_norm
-  ├── Optimizer step
-  ├── EMA anchor blend-back (if truth_weight > 0)
-  ├── Increment step count
-  ├── Move model back to inference device
-  └── Return {status, loss/gain, step, grad_norm}
+  |- Clamp DoT to [-1, +1], truth_weight to [0, 1]
+  |- If truth_weight > 0 and |DoT| < 1e-6 -> skip (no signal)
+  |- Acquire model worker from pool
+  |- Tokenize messages (bos + user_start/end + assistant_start/end)
+  |- If < 2 tokens -> skip (empty)
+  |- Initialize EMA anchor weights (first call only)
+  |- Move model to training device
+  |- Build 6 parameter groups (fresh each call)
+  |- Compute lr_scale = (tw x |DoT| + (1 - tw)) x sigmoid_warmup(step)
+  |- Scale each group's LR: lr_base x lr_scale
+  |- Create fresh AdamW optimizer
+  |- Forward pass -> cross-entropy loss
+  |- Backward pass
+  |- Gradient clipping -> grad_norm
+  |- Optimizer step
+  |- EMA anchor blend-back (if truth_weight > 0)
+  |- Increment step count
+  |- Move model back to inference device
+  `- Return {status, loss/gain, step, grad_norm}
 ```
 
 The response uses key `"loss"` for positive DoT (learning truth) and
@@ -463,14 +463,14 @@ cross-entropy loss value; the key name indicates the semantic direction.
 
 | Parameter | Config path | Default | Description |
 |-----------|------------|---------|-------------|
-| `truth_weight` | `chat.truth_weight` | 0.7 | DoT gating strength (0=vanilla SFT, 1=full DoT) |
-| `warmup_steps` | `server.online_training.warmup_steps` | 50 | Sigmoid warmup midpoint |
-| `grad_clip` | `server.online_training.grad_clip` | 1.0 | Max gradient norm |
-| `anchor_decay` | `server.online_training.anchor_decay` | 0.001 | EMA blend-back rate |
-| `truth_max_entries` | `chat.truth_max_entries` | 1000 | Max server truth table size |
-| `device` | `server.online_training.device` | `"cpu"` | Training device |
+| `truth_weight` | `server.truthset.truth_weight` | 0.7 | DoT gating strength (0=vanilla SFT, 1=full DoT) |
+| `warmup_steps` | `server.training.warmup_steps` | 50 | Sigmoid warmup midpoint |
+| `grad_clip` | `server.training.grad_clip` | 1.0 | Max gradient norm |
+| `anchor_decay` | `server.training.anchor_decay` | 0.001 | EMA blend-back rate |
+| `truth_max_entries` | `server.training.truth_max_entries` | 1000 | Max server TruthSet size |
+| `device` | `server.training.device` | `"cpu"` | Training device |
 
-See [Config.md](./Config.md) §5a for the full configuration reference.
+See [Config.md](./Config.md) §Server for the full configuration reference.
 
 ### SFT Corpus Preparation
 
@@ -488,9 +488,9 @@ message dicts.  Output lines are the same shape but with content
 XML-tagged using `<Q>`/`<R>` and `<fact>`/`<feeling>` tags, with
 feelings stripped (matching the online training pipeline).
 
-### Server Truth Table
+### Server TruthSet
 
-The server truth table is stored as `truth.xml` in the same XML format
+The server TruthSet is stored as `truth.xml` in the same XML format
 used for state files (WikiOracle State). Each stored entry is a typed
 truth element:
 
@@ -500,7 +500,7 @@ truth element:
 </fact>
 ```
 
-**Resolution:** Before entries reach the server truth table, they are
+**Resolution:** Before entries reach the server TruthSet, they are
 resolved by `resolve_entries()` in `bin/truth.py`:
 
 * `<reference>` → `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
@@ -513,19 +513,19 @@ and operators (`<and>`, `<or>`, `<not>`, `<non>`) whose leaf operands are all al
 
 Entry types **not** stored: `<feeling>`, `<provider>`, unresolved `<reference>`,
 unresolved `<authority>`, operators over feelings, and (when
-`store_particulars` is false) news facts with `<place>` or `<time>`
+`store_concrete` is false) news facts with `<place>` or `<time>`
 child elements.  Content matching identifiability patterns (PII) is
 always excluded.
 
 News facts are spatiotemporally bound — persisting them risks worldline
 capture.  Whether to store them is a user choice controlled by
-`store_particulars` in config.xml (default false), consistent with
+`store_concrete` in config.xml (default false), consistent with
 Zero-Knowledge / Selective Disclosure principles.  See
 `filter_knowledge_only()` in `bin/truth.py` and
 `detect_identifiability()` for PII detection.  See
 doc/Entanglement.md for the full policy.
 
-The server truth table includes the user GUID as a trust entry, so the
+The server TruthSet includes the user GUID as a trust entry, so the
 server can track per‑user trust alongside factual claims.
 
 ### Anti‑Capture
@@ -533,15 +533,15 @@ server can track per‑user trust alongside factual claims.
 The online training system has multiple layers of defense against
 weight collapse and capture by any single user:
 
-**Truth table level:**
+**TruthSet level:**
 
 * Entries are merged with a **slow‑moving average** (`merge_rate`,
   default 0.1), so no single user can instantly override collective
   truth.
 * Disproven entries naturally drift toward −1 as contradicting evidence
   accumulates from other users.
-* **Truth table trimming** (`truth_max_entries`, default 1000) removes
-  low-signal entries (|trust| near 0), keeping the table focused on
+* **TruthSet trimming** (`truth_max_entries`, default 1000) removes
+  low-signal entries (|trust| near 0), keeping the TruthSet focused on
   strong signal.
 
 **Training level:**
@@ -555,7 +555,7 @@ weight collapse and capture by any single user:
   The anchor pull is scaled by `truth_weight`, so at full truth-gating
   the model is always tugged back toward its initialized state.
 * **Sigmoid warmup** (`warmup_steps`, default 50) prevents the first
-  few interactions from corrupting weights before the truth table has
+  few interactions from corrupting weights before the TruthSet has
   accumulated sufficient signal.
 * **Fresh optimizer per call** — no persistent momentum state means a
   bad gradient cannot poison future steps.  Each interaction is
@@ -577,7 +577,7 @@ then push to restore if capture is detected.
 
 ### Dissonance Detection and Pluralistic Truth (TODO)
 
-Detecting and resolving dissonance within the server truth table is
+Detecting and resolving dissonance within the server TruthSet is
 left for future work.  The goal is to support a higher‑dimensional
 truth‑space where contradictory claims can coexist when they originate
 from different perspectives.
@@ -585,7 +585,7 @@ from different perspectives.
 For example: "the world was created in seven days" and "the world was
 created over millions of years" could both be maintained as true from
 their respective perspectives.  This requires embedding perspective
-alongside truth value so that the truth table becomes a manifold
+alongside truth value so that the TruthSet becomes a manifold
 rather than a flat list.
 
 In the current consensus model, a DoT $\approx$ 0 simply means "nothing to
@@ -598,7 +598,7 @@ proceed.
 Possible approaches include context/perspective tags on entries,
 truth‑space embeddings with frame clustering, conditional truth values
 indexed by worldview, or explicit user prompts to resolve ambiguity
-when the truth table produces conflicting signals.
+when the TruthSet produces conflicting signals.
 
 ### OpenClaw Integration
 
@@ -636,7 +636,7 @@ storage.  In stateless mode, state is serialized to a local XML file
 via `bin/wo -f`.
 
 The training pipeline treats OpenClaw messages identically to direct
-HTTP or web UI clients — the same DoT computation, truth table merge,
+HTTP or web UI clients — the same DoT computation, TruthSet merge,
 Sensation preprocessing, and `/train` call apply.  The `bin/wo` CLI
 is transparent to the training system.
 
@@ -661,11 +661,11 @@ is transparent to the training system.
 See `openclaw/extensions/wikioracle/openclaw.plugin.json` for the full
 config schema.
 
-### Server Truth Table Visibility (Debug Mode)
+### Server TruthSet Visibility (Debug Mode)
 
 When `DEBUG_MODE` is enabled and online training is active, the
 `/chat` response includes a `server_truth` key containing the server's
-truth table entries formatted as authority-tagged entries:
+TruthSet entries formatted as authority-tagged entries:
 
 ```json
 {
@@ -683,12 +683,11 @@ truth table entries formatted as authority-tagged entries:
 }
 ```
 
-The client displays these entries in the truth table with a visual
+The client displays these entries in the TruthSet with a visual
 marker (server badge, different border style).  Entries with
-`_server_origin: true` are **stripped from the truth table before
+`_server_origin: true` are **stripped from the TruthSet before
 sending queries** to prevent loopback — the client never sends server
 truth back to the server.
 
 The `server_id` field in `config.xml` under `<server>` provides a
 stable identifier for this server instance (default: `"wikioracle"`).
-

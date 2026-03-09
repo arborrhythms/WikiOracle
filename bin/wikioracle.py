@@ -193,11 +193,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     @app.route(url_prefix + "/server_info", methods=["GET"])
     def server_info():
         """Expose server-mode flags that do not require state access."""
-        ot = _CONFIG.get("server", {}).get("online_training", {})
+        tr = _CONFIG.get("server", {}).get("training", {})
         return jsonify({
             "stateless": config_mod.STATELESS_MODE,
             "url_prefix": url_prefix,
-            "online_training": ot.get("enabled", False) and not config_mod.STATELESS_MODE,
+            "training": tr.get("enabled", False) and not config_mod.STATELESS_MODE,
         })
 
     @app.route(url_prefix + "/bootstrap", methods=["GET"])
@@ -344,10 +344,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     client_state = body["state"]
                     if "truth" in client_state:
                         state["truth"] = client_state["truth"]
-                    if "context" in client_state:
-                        state["context"] = client_state["context"]
-                    if "output" in client_state:
-                        state["output"] = client_state["output"]
+                    # context/output no longer live in state (moved to config.providers)
 
             response_text, state, symmetry_rejected = process_chat(cfg, state, body, runtime_cfg)
 
@@ -376,7 +373,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             # Entries are tagged with _server_origin so the client strips them
             # before sending queries back (prevents loopback).
             if config_mod.DEBUG_MODE:
-                ot = _CONFIG.get("server", {}).get("online_training", {})
+                ot = _CONFIG.get("server", {}).get("training", {})
                 if ot.get("enabled", False) and not config_mod.STATELESS_MODE:
                     try:
                         from truth import load_server_truth
@@ -605,7 +602,7 @@ def main() -> int:
         print(f"    {pi}")
     print(f"  Config     : {_CONFIG_STATUS}")
     print(f"  Stateless  : {'ON' if config_mod.STATELESS_MODE else 'off'}")
-    ot_cfg = _CONFIG.get("server", {}).get("online_training", {})
+    ot_cfg = _CONFIG.get("server", {}).get("training", {})
     ot_on = ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE
     ot_device = ot_cfg.get("device", "cpu")
     if ot_on:

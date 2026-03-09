@@ -178,7 +178,7 @@ function _syncClientSelectionState() {
 
 // ─── Confirmation helper (skips dialog when confirm_actions is off) ───
 function confirmAction(msg) {
-  if (config.chat && config.chat.confirm_actions) return confirm(msg);
+  if (state.ui && state.ui.confirm_actions) return confirm(msg);
   return true;
 }
 
@@ -739,7 +739,7 @@ function renderMessages() {
   if (state.selected_conversation === null && !_pendingBranchParent) {
     var stats = computeTreeStats(state.conversations);
     var trustEntries = Array.isArray(state.truth) ? state.truth : [];
-    var contextText = stripTags(state.context || "").trim();
+    var contextText = stripTags((config.providers && config.providers.context) || "").trim();
 
     var summary = document.createElement("div");
     summary.className = "root-summary";
@@ -784,7 +784,7 @@ function renderMessages() {
     var otStatus = document.createElement("div");
     otStatus.className = "root-status-line";
     api("GET", "/server_info").then(function(data) {
-      if (data && data.online_training) {
+      if (data && data.training) {
         otStatus.textContent = "Online training: on";
         otStatus.classList.add("status-online");
       } else {
@@ -795,10 +795,10 @@ function renderMessages() {
     summary.appendChild(otStatus);
 
     // Date info (single line, aligned with NanoChat status)
-    if (state.time) {
+    if (state.time_lastModified || state.time_creation) {
       var dateLine = document.createElement("div");
       dateLine.className = "root-nanochat-status";
-      dateLine.textContent = "Last modified: " + _friendlyDate(state.time);
+      dateLine.textContent = "Last modified: " + _friendlyDate(state.time_lastModified || state.time_creation);
       summary.appendChild(dateLine);
     }
 
@@ -970,9 +970,9 @@ function _hideProgress() {
 
 function _updatePlaceholder() {
   const input = document.getElementById("msgInput");
-  const meta = config.server.providers[config.ui.default_provider];
-  const name = meta ? meta.name : config.ui.default_provider;
-  const model = config.ui.model || (meta ? meta.model : "");
+  const meta = config.server.providers[config.providers.default];
+  const name = meta ? meta.name : config.providers.default;
+  const model = state.ui.model || (meta ? meta.model : "");
   input.placeholder = model ? `Message ${name} (${model})...` : `Message ${name}...`;
 }
 
@@ -1015,7 +1015,7 @@ async function sendMessage() {
   const userEntry = text ? {
     id: optimisticMsgId,
     role: "user",
-    username: (state.user && state.user.name) || "User",
+    username: state.client_name || "User",
     time: now,
     content: `<p>${escapeHtml(text)}</p>`,
     _pending: true,
@@ -1063,10 +1063,11 @@ async function sendMessage() {
       conversation_id: conversationId || undefined,
       branch_from: branchFrom || undefined,
       config: {
-        provider: config.ui.default_provider,
-        model: config.ui.model || (config.server.providers[config.ui.default_provider] || {}).model || "",
-        username: (state.user && state.user.name) || "User",
-        chat: config.chat || {},
+        provider: config.providers.default,
+        model: state.ui.model || (config.server.providers[config.providers.default] || {}).model || "",
+        username: state.client_name || "User",
+        evaluation: config.server.evaluation || {},
+        truthset: config.server.truthset || {},
       },
     };
     // Include pruned state (ancestor path only) + runtime_config
@@ -1076,8 +1077,8 @@ async function sendMessage() {
     const prunedState = {
       version: state.version, schema: state.schema,
       time_creation: state.time_creation, time_lastModified: state.time_lastModified,
-      title: state.title, context: state.context, truth: _clientTruth,
-      user: state.user,
+      title: state.title, truth: _clientTruth,
+      client_name: state.client_name, client_id: state.client_id,
       selected_conversation: state.selected_conversation,
       conversations: buildAncestorSubtree(state.conversations, targetConvId),
       _path_only: true,
@@ -1110,7 +1111,7 @@ async function sendMessage() {
     if (data.symmetry_rejected && data.symmetry_rejected.length > 0) {
       showSymmetryDialog(data.symmetry_rejected);
     }
-    // ── Debug: inject server truth entries into local truth table ──
+    // ── Debug: inject server truth entries into local TruthSet ──
     // Server returns these as authority entries when debug mode is on.
     // Tagged with _server_origin so they are stripped before sending
     // queries back to the server (prevents loopback).
@@ -1133,12 +1134,10 @@ async function sendMessage() {
         const localState = _loadLocalState();
         if (localState) state = localState;
       } else {
-        const saved = { truth: state.truth, context: state.context, output: state.output };
+        const saved = { truth: state.truth };
         const data = await api("GET", "/state");
         state = data.state || state;
         state.truth = saved.truth;
-        state.context = saved.context;
-        state.output = saved.output;
       }
     } catch {}
     if (isNewRoot) {
@@ -1186,25 +1185,31 @@ function bindEvents() {
     const escAttr = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<state>\n';
 
-    // Header
-    xml += '  <header>\n';
+    // Client
+    xml += '  <client>\n';
     xml += '    <version>2</version>\n';
     xml += '    <schema>' + esc(state.schema || 'https://wikioracle.org/schemas/state/v2') + '</schema>\n';
     xml += '    <time_creation>' + esc(state.time_creation || now.toISOString()) + '</time_creation>\n';
     xml += '    <time_lastModified>' + esc(now.toISOString()) + '</time_lastModified>\n';
     xml += '    <title>' + esc(state.title || 'WikiOracle') + '</title>\n';
-    xml += '    <context>' + (state.context || '<div/>') + '</context>\n';
+    if (state.client_name)
+      xml += '    <client_name>' + esc(state.client_name) + '</client_name>\n';
+    if (state.client_id)
+      xml += '    <client_id>' + esc(state.client_id) + '</client_id>\n';
     if (state.selected_conversation)
       xml += '    <selected_conversation>' + esc(state.selected_conversation) + '</selected_conversation>\n';
-    if (state.user) {
-      xml += '    <user>\n';
-      xml += '      <name>' + esc(state.user.name || 'User') + '</name>\n';
-      xml += '      <user_id>' + esc(state.user.user_id || '') + '</user_id>\n';
-      xml += '    </user>\n';
+    if (state.ui) {
+      xml += '    <ui>\n';
+      if (state.ui.layout) xml += '      <layout>' + esc(state.ui.layout) + '</layout>\n';
+      if (state.ui.theme) xml += '      <theme>' + esc(state.ui.theme) + '</theme>\n';
+      if (state.ui.model) xml += '      <model>' + esc(state.ui.model) + '</model>\n';
+      if (state.ui.splitter_pct !== undefined) xml += '      <splitter_pct>' + esc(state.ui.splitter_pct) + '</splitter_pct>\n';
+      if (state.ui.swipe_nav_horizontal !== undefined) xml += '      <swipe_nav_horizontal>' + esc(state.ui.swipe_nav_horizontal) + '</swipe_nav_horizontal>\n';
+      if (state.ui.swipe_nav_vertical !== undefined) xml += '      <swipe_nav_vertical>' + esc(state.ui.swipe_nav_vertical) + '</swipe_nav_vertical>\n';
+      if (state.ui.confirm_actions !== undefined) xml += '      <confirm_actions>' + esc(state.ui.confirm_actions) + '</confirm_actions>\n';
+      xml += '    </ui>\n';
     }
-    if (state.output)
-      xml += '    <output>' + (state.output || '') + '</output>\n';
-    xml += '  </header>\n';
+    xml += '  </client>\n';
 
     // Conversations (nested tree — no flattening needed)
     xml += '  <conversations>\n';
@@ -1311,7 +1316,7 @@ function bindEvents() {
         const doc = parser.parseFromString(text, "application/xml");
         if (doc.querySelector("parsererror")) throw new Error("Invalid XML");
         const root = doc.documentElement;
-        const hdr = root.querySelector("header");
+        const hdr = root.querySelector("client") || root.querySelector("header");
         importState = {
           version: parseInt(hdr?.querySelector("version")?.textContent || "2"),
           schema: hdr?.querySelector("schema")?.textContent || "",
@@ -1321,26 +1326,40 @@ function bindEvents() {
               || hdr?.querySelector("time_creation")?.textContent
               || hdr?.querySelector("time")?.textContent || "",
           title: hdr?.querySelector("title")?.textContent || "",
-          context: hdr?.querySelector("context")?.innerHTML || "<div/>",
           conversations: [],
           selected_conversation: hdr?.querySelector("selected_conversation")?.textContent || null,
           truth: [],
         };
-        // User block (with backward compat for <user_guid>)
-        var _userEl = hdr?.querySelector("user");
-        if (_userEl) {
-          importState.user = {
-            name: _userEl.querySelector("name")?.textContent || "User",
-            user_id: _userEl.querySelector("user_id")?.textContent || "",
-          };
-        } else if (hdr?.querySelector("user_guid")) {
-          importState.user = {
-            name: "User",
-            user_id: hdr.querySelector("user_guid").textContent,
-          };
+        // Client identity (flat fields, with backward compat for nested <user> and <user_guid>)
+        var _clientNameEl = hdr?.querySelector("client_name");
+        var _clientIdEl = hdr?.querySelector("client_id");
+        if (_clientNameEl) {
+          importState.client_name = _clientNameEl.textContent || "User";
         }
-        if (hdr?.querySelector("output"))
-          importState.output = hdr.querySelector("output").innerHTML || "";
+        if (_clientIdEl) {
+          importState.client_id = _clientIdEl.textContent || "";
+        }
+        // Backward compat: nested <user> block
+        if (!_clientNameEl) {
+          var _userEl = hdr?.querySelector("user");
+          if (_userEl) {
+            importState.client_name = _userEl.querySelector("name")?.textContent || "User";
+            importState.client_id = _userEl.querySelector("user_id")?.textContent || "";
+          } else if (hdr?.querySelector("user_guid")) {
+            importState.client_name = "User";
+            importState.client_id = hdr.querySelector("user_guid").textContent;
+          }
+        }
+        // UI block
+        var _uiEl = hdr?.querySelector("ui");
+        if (_uiEl) {
+          importState.ui = {};
+          var _uiFields = ["layout", "theme", "model", "splitter_pct", "swipe_nav_horizontal", "swipe_nav_vertical", "confirm_actions"];
+          _uiFields.forEach(function(f) {
+            var el = _uiEl.querySelector(f);
+            if (el) importState.ui[f] = _xmlCoerce(el.textContent);
+          });
+        }
 
         // Parse conversations recursively
         function parseConv(el) {
@@ -1577,8 +1596,8 @@ function bindEvents() {
   }, { passive: true });
 
   // ─── Touch swipe: mobile-only tree navigation via swipe gestures ───
-  // Governed by config.ui.swipe_nav_horizontal (default true) and
-  // config.ui.swipe_nav_vertical (default false).  Vertical is off because
+  // Governed by state.ui.swipe_nav_horizontal (default true) and
+  // state.ui.swipe_nav_vertical (default false).  Vertical is off because
   // vertical scrolling is used to read content; horizontal swipes
   // navigate siblings.  Both are stored in config.xml (ui section).
   if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
@@ -1607,7 +1626,7 @@ function bindEvents() {
         var atTop = container.scrollTop <= 0;
         var atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
 
-        if (config.ui.swipe_nav_vertical) {
+        if (state.ui.swipe_nav_vertical) {
           // Finger drags DOWN when at top → navigate to parent
           if (atTop && dy > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
             _scrollNavCooldown = now; _treeNav("up");
@@ -1618,7 +1637,7 @@ function bindEvents() {
           }
         }
 
-        if (config.ui.swipe_nav_horizontal !== false && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
+        if (state.ui.swipe_nav_horizontal !== false && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
           // Horizontal swipe: finger left = next sibling, finger right = prev
           _scrollNavCooldown = now;
           _treeNav(dx < 0 ? "right" : "left");
@@ -1657,21 +1676,21 @@ async function init() {
     }
 
     // Apply layout, theme, and update placeholder from config
-    applyLayout(config.ui.layout);
-    applyTheme(config.ui.theme);
+    applyLayout(state.ui.layout);
+    applyTheme(state.ui.theme);
     _updatePlaceholder();
 
     // Restore splitter position from config (percentage of viewport).
     // Guard: splitter_pct === 0 means the tree was fully collapsed in a
     // previous session.  Restore to a usable default (30%) so the tree
     // is always visible on load — the user can still collapse it manually.
-    if (config.ui.splitter_pct != null) {
+    if (state.ui.splitter_pct != null) {
       const tree = document.getElementById("treeContainer");
       if (tree) {
-        var pct = config.ui.splitter_pct;
+        var pct = state.ui.splitter_pct;
         if (pct <= 0) {
           pct = 30;
-          config.ui.splitter_pct = pct;
+          state.ui.splitter_pct = pct;
         }
         if (document.body.classList.contains("layout-vertical")) {
           tree.style.width = (pct / 100 * window.innerWidth) + "px";
@@ -1699,19 +1718,17 @@ async function init() {
 // Stateless init: sessionStorage is authoritative.
 // If sessionStorage has data, use it directly — no server calls needed for
 // state or config.  If sessionStorage is empty, call /bootstrap once to seed.
-// One-time migration: move user identity from config/legacy fields to state header.
+// One-time migration: move user identity from legacy fields to flat state fields.
 function _migrateUserToState() {
-  // Migrate config.user.name → state.user.name (one-time)
-  if (config.user && config.user.name && config.user.name !== "User") {
-    if (!state.user) state.user = {};
-    if (!state.user.name || state.user.name === "User") {
-      state.user.name = config.user.name;
-    }
+  // Migrate nested state.user → flat client_name/client_id
+  if (state.user && typeof state.user === "object") {
+    if (state.user.name && !state.client_name) state.client_name = state.user.name;
+    if (state.user.user_id && !state.client_id) state.client_id = state.user.user_id;
+    delete state.user;
   }
-  // Migrate state.user_guid → state.user.user_id
+  // Migrate state.user_guid → state.client_id
   if (state.user_guid) {
-    if (!state.user) state.user = { name: "User" };
-    if (!state.user.user_id) state.user.user_id = state.user_guid;
+    if (!state.client_id) state.client_id = state.user_guid;
     delete state.user_guid;
   }
   // Migrate state.time → state.time_creation
@@ -1720,6 +1737,17 @@ function _migrateUserToState() {
     state.time_lastModified = state.time;
     delete state.time;
   }
+  // Migrate state.context/state.output → config.providers (one-time)
+  if (state.context) {
+    if (!config.providers.context) config.providers.context = state.context;
+    delete state.context;
+  }
+  if (state.output) {
+    if (!config.providers.output) config.providers.output = state.output;
+    delete state.output;
+  }
+  // Ensure state.ui exists
+  if (!state.ui) state.ui = {};
 }
 
 async function _initStateless() {
@@ -1869,7 +1897,7 @@ function _populateProviderDropdown() {
 function _populateModelDropdown(providerKey) {
   const sel = document.getElementById("setModel");
   sel.innerHTML = "";
-  const meta = config.server.providers[providerKey || config.ui.default_provider];
+  const meta = config.server.providers[providerKey || config.providers.default];
   if (!meta) return;
   const models = meta.models || [];
   if (models.length === 0 && meta.model) {
@@ -1946,7 +1974,7 @@ init();
     var size = isVertical() ? tree.clientWidth : tree.clientHeight;
     var viewport = isVertical() ? window.innerWidth : window.innerHeight;
     var pct = size < 4 ? 0 : Math.round(size / viewport * 1000) / 10;
-    config.ui.splitter_pct = pct;
+    state.ui.splitter_pct = pct;
     // Toggle collapsed state for border hiding
     tree.classList.toggle("tree-collapsed", pct === 0);
     _persistConfig();
@@ -1986,7 +2014,7 @@ init();
       tree.style.height = pct === 0 ? "0px" : (pct / 100 * window.innerHeight) + "px";
     }
     tree.classList.toggle("tree-collapsed", pct === 0);
-    config.ui.splitter_pct = pct;
+    state.ui.splitter_pct = pct;
     _persistConfig();
     if (typeof renderMessages === "function") renderMessages();
   });
@@ -1994,7 +2022,7 @@ init();
   // Reapply splitter percentage on window resize (e.g. maximize/restore)
   window.addEventListener("resize", function() {
     if (dragging) return; // don't fight with an active drag
-    var pct = config.ui.splitter_pct;
+    var pct = state.ui.splitter_pct;
     if (pct == null) return;
     if (isVertical()) {
       tree.style.width = pct === 0 ? "0px" : (pct / 100 * window.innerWidth) + "px";

@@ -102,7 +102,7 @@ When a user sends a query:
    that subset.
    * **Operators**: `compute_derived_truth()` evaluates `<and>`, `<or>`, and
      `<not>` with Strong Kleene semantics and propagates derived certainty.
-   * **Authorities**: `<authority>` entries fetch remote truth tables and
+   * **Authorities**: `<authority>` entries fetch remote TruthSets and
      append their entries with scaled certainty.
    * **Providers**: ranked `<provider>` entries are queried as beta experts.
      Each beta receives the query bundle, conversation history, output

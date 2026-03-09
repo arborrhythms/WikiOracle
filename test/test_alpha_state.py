@@ -66,10 +66,9 @@ class TestAlphaStateLoad(unittest.TestCase):
         """Header title should be 'Alpha Vote Test'."""
         self.assertEqual(self.state.get("title"), "Alpha Vote Test")
 
-    def test_context_mentions_voting(self):
-        """Context should describe a voting participant."""
-        ctx = self.state.get("context", "")
-        self.assertIn("voting", ctx.lower())
+    def test_context_moved_to_config(self):
+        """Context is no longer in state (moved to config.providers)."""
+        self.assertNotIn("context", self.state)
 
     def test_truth_entry_count(self):
         """alpha.xml has 5 trust entries: 2 facts + 1 feeling + 2 providers."""
@@ -192,11 +191,11 @@ class TestAlphaRoundTrip(unittest.TestCase):
         finally:
             rt_path.unlink(missing_ok=True)
 
-    def test_context_preserved(self):
-        """Context string should survive round-trip."""
+    def test_title_preserved(self):
+        """Title should survive round-trip (context now in config.providers)."""
         xml_text = state_to_xml(self.original)
         restored = xml_to_state(xml_text)
-        self.assertIn("voting", restored.get("context", "").lower())
+        self.assertEqual(restored.get("title"), "Alpha Vote Test")
 
     def test_copy_matches_spec(self):
         """The root alpha.xml should match test/alpha.xml."""

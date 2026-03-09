@@ -5,7 +5,7 @@
 ## Truth Symmetry
 
 Statements involving value judgements are checked for asymmetric harm
-under identity exchange before admission to the truth table. If a claim
+under identity exchange before admission to the TruthSet. If a claim
 becomes unethical when identity references are swapped, it should not be
 admitted as a universal truth.
 

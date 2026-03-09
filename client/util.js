@@ -434,10 +434,11 @@ function _toggleContextEditor() {
     document.getElementById("ctxCancel").addEventListener("click", dlg.close);
     document.getElementById("ctxSave").addEventListener("click", function() {
       const newText = document.getElementById("contextTextarea").value.trim();
-      const currentPlain = stripTags(state?.context || "").trim();
-      if (state && newText !== currentPlain) {
-        state.context = newText;
-        _persistState();
+      const currentPlain = stripTags((config.providers && config.providers.context) || "").trim();
+      if (newText !== currentPlain) {
+        if (!config.providers) config.providers = {};
+        config.providers.context = newText;
+        _saveLocalConfig(config);
         setStatus("Context saved");
       }
       dlg.close();
@@ -445,7 +446,7 @@ function _toggleContextEditor() {
   }
 
   // Populate and show
-  const rawCtx = state?.context || "";
+  const rawCtx = (config.providers && config.providers.context) || "";
   document.getElementById("contextTextarea").value = stripTags(rawCtx).trim();
   overlay.classList.add("active");
   document.getElementById("contextTextarea").focus();
@@ -478,17 +479,16 @@ function _toggleOutputEditor() {
     });
     document.getElementById("outSave").addEventListener("click", function() {
       const newText = document.getElementById("outputTextarea").value.trim();
-      if (state) {
-        state.output = newText;
-        _persistState();
-        setStatus("Output saved");
-      }
+      if (!config.providers) config.providers = {};
+      config.providers.output = newText;
+      _saveLocalConfig(config);
+      setStatus("Output saved");
       dlg.close();
     });
   }
 
-  // Populate from state (always present after server normalization)
-  const current = state?.output ?? "";
+  // Populate from config (context/output live in config.providers)
+  const current = (config.providers && config.providers.output) || "";
   document.getElementById("outputTextarea").value = current;
   overlay.classList.add("active");
   document.getElementById("outputTextarea").focus();
@@ -496,32 +496,34 @@ function _toggleOutputEditor() {
 
 // ─── Settings panel ───
 function openSettings() {
-  document.getElementById("setUsername").value = (state.user && state.user.name) || "User";
-  document.getElementById("setProvider").value = config.ui.default_provider || "wikioracle";
-  _populateModelDropdown(config.ui.default_provider);
-  var currentModel = config.ui.model || (config.server.providers[config.ui.default_provider] || {}).model || "";
+  document.getElementById("setUsername").value = state.client_name || "User";
+  document.getElementById("setProvider").value = config.providers.default || "wikioracle";
+  _populateModelDropdown(config.providers.default);
+  var currentModel = state.ui.model || (config.server.providers[config.providers.default] || {}).model || "";
   if (currentModel) document.getElementById("setModel").value = currentModel;
-  document.getElementById("setLayout").value = config.ui.layout || "flat";
-  document.getElementById("setTheme").value = config.ui.theme || "system";
+  document.getElementById("setLayout").value = state.ui.layout || "flat";
+  document.getElementById("setTheme").value = state.ui.theme || "system";
 
-  // Chat settings
-  const chat = config.chat || {};
+  // Evaluation settings
+  const eval_ = config.server.evaluation || {};
   const tempSlider = document.getElementById("setTemp");
-  tempSlider.value = chat.temperature ?? 0.7;
+  tempSlider.value = eval_.temperature ?? 0.7;
   document.getElementById("setTempVal").textContent = tempSlider.value;
   const mtSlider = document.getElementById("setMaxTokens");
-  mtSlider.value = chat.max_tokens ?? 128;
+  mtSlider.value = eval_.max_tokens ?? 128;
   document.getElementById("setMaxTokensVal").textContent = mtSlider.value;
   const toSlider = document.getElementById("setTimeout");
-  toSlider.value = chat.timeout ?? 120;
+  toSlider.value = eval_.timeout ?? 120;
   document.getElementById("setTimeoutVal").textContent = toSlider.value;
+  // TruthSet settings
+  const ts = config.server.truthset || {};
   const twSlider = document.getElementById("setTruthWeight");
-  twSlider.value = chat.truth_weight ?? 0.7;
+  twSlider.value = ts.truth_weight ?? 0.7;
   document.getElementById("setTruthWeightVal").textContent = twSlider.value;
-  document.getElementById("setTruthMaxEntries").value = chat.truth_max_entries ?? 1000;
-  document.getElementById("setStoreParticulars").checked = !!chat.store_particulars;
-  document.getElementById("setUrlFetch").checked = !!chat.url_fetch;
-  document.getElementById("setConfirm").checked = !!chat.confirm_actions;
+  document.getElementById("setTruthMaxEntries").value = (config.server.training || {}).truth_max_entries ?? 1000;
+  document.getElementById("setStoreParticulars").checked = !!ts.store_concrete;
+  document.getElementById("setUrlFetch").checked = !!eval_.url_fetch;
+  document.getElementById("setConfirm").checked = !!(state.ui.confirm_actions);
 
   document.getElementById("settingsOverlay").classList.add("active");
 }
@@ -531,32 +533,37 @@ function closeSettings() {
 async function saveSettings() {
   const newProvider = document.getElementById("setProvider").value;
 
-  config.ui.default_provider = newProvider;
-  config.ui.model = document.getElementById("setModel").value || "";
-  if (!state.user) state.user = {};
-  state.user.name = document.getElementById("setUsername").value.trim() || "User";
-  config.ui.layout = document.getElementById("setLayout").value;
-  config.ui.theme = document.getElementById("setTheme").value || "system";
+  config.providers.default = newProvider;
+  if (!state.ui) state.ui = {};
+  state.ui.model = document.getElementById("setModel").value || "";
+  state.client_name = document.getElementById("setUsername").value.trim() || "User";
+  state.ui.layout = document.getElementById("setLayout").value;
+  state.ui.theme = document.getElementById("setTheme").value || "system";
+  state.ui.confirm_actions = document.getElementById("setConfirm").checked;
 
-  // Chat settings
-  config.chat = {
-    ...(config.chat || {}),
-    temperature: parseFloat(document.getElementById("setTemp").value),
-    max_tokens: parseInt(document.getElementById("setMaxTokens").value, 10),
-    timeout: parseInt(document.getElementById("setTimeout").value, 10),
-    truth_weight: parseFloat(document.getElementById("setTruthWeight").value),
-    truth_max_entries: parseInt(document.getElementById("setTruthMaxEntries").value, 10),
-    store_particulars: document.getElementById("setStoreParticulars").checked,
-    url_fetch: document.getElementById("setUrlFetch").checked,
-    confirm_actions: document.getElementById("setConfirm").checked,
-  };
+  // Evaluation settings (config.server.evaluation)
+  if (!config.server.evaluation) config.server.evaluation = {};
+  config.server.evaluation.temperature = parseFloat(document.getElementById("setTemp").value);
+  config.server.evaluation.max_tokens = parseInt(document.getElementById("setMaxTokens").value, 10);
+  config.server.evaluation.timeout = parseInt(document.getElementById("setTimeout").value, 10);
+  config.server.evaluation.url_fetch = document.getElementById("setUrlFetch").checked;
 
-  applyLayout(config.ui.layout);
-  applyTheme(config.ui.theme);
+  // TruthSet settings (config.server.truthset)
+  if (!config.server.truthset) config.server.truthset = {};
+  config.server.truthset.truth_weight = parseFloat(document.getElementById("setTruthWeight").value);
+  config.server.truthset.store_concrete = document.getElementById("setStoreParticulars").checked;
+
+  // Training settings (config.server.training)
+  if (!config.server.training) config.server.training = {};
+  config.server.training.truth_max_entries = parseInt(document.getElementById("setTruthMaxEntries").value, 10);
+
+  applyLayout(state.ui.layout);
+  applyTheme(state.ui.theme);
   _updatePlaceholder();
   closeSettings();
 
-  // Persist: config is the single source of truth
+  // Persist: config (server-owned) + state (client-owned, UI prefs)
+  _persistState();
   if (config.server.stateless) {
     _saveLocalConfig(config);
     setStatus("Settings saved (local)");
@@ -617,11 +624,13 @@ async function _openConfigEditor() {
       newConfig.server.providers = config.server.providers;
       newConfig.server.stateless = config.server.stateless;
       newConfig.server.url_prefix = config.server.url_prefix;
-      if (config.ui.model) newConfig.ui.model = config.ui.model;
+      if (state.ui && state.ui.model) {
+        if (!newConfig.providers) newConfig.providers = {};
+      }
 
       config = newConfig;
       _saveLocalConfig(config);
-      applyLayout(config.ui.layout);
+      applyLayout(state.ui.layout);
       _updatePlaceholder();
 
       // Disk write in non-stateless mode
@@ -637,7 +646,7 @@ async function _openConfigEditor() {
       }
 
       dlg.close();
-      applyTheme(config.ui.theme);
+      applyTheme(state.ui.theme);
       await _refreshProviderMeta();
       setStatus("config.xml saved");
     });
@@ -689,7 +698,7 @@ function _openTruthEditor() {
               <option value="feeling">Feeling: subjective, non-verifiable claim</option>
               <option value="fact">Fact: disprovable assertion about the world</option>
               <option value="reference">Reference: citation with external link</option>
-              <option value="authority">Authority: pointer to remote truth table</option>
+              <option value="authority">Authority: pointer to remote TruthSet</option>
               <option value="provider">Provider: external LLM endpoint</option>
               <option value="not">NOT: negation of a truth entry</option>
               <option value="non">NON: non-affirming weakening toward zero</option>

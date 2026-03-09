@@ -5,7 +5,7 @@
 To avoid **worldline entanglement**, the system separates knowledge
 into three channels, each with a different persistence policy:
 
-| Data type | Truth table | Train weights | Session only |
+| Data type | TruthSet | Train weights | Session only |
 |-----------|-------------|---------------|--------------|
 | universal facts | $\checkmark$ | $\checkmark$ | $\checkmark$ |
 | particular facts | optional | $\checkmark$ | $\checkmark$ |
@@ -20,7 +20,7 @@ histories**.
 
 **No spacetime particulars $\to$ no worldline capture**
 
-| Data type | Truth table | Train weights | Session only |
+| Data type | TruthSet | Train weights | Session only |
 |-----------|-------------|---------------|--------------|
 | universal facts | $\checkmark$ | $\checkmark$ | $\checkmark$ |
 | particular facts | optional | $\checkmark$ | $\checkmark$ |
@@ -31,13 +31,13 @@ three channels — knowing, learning, and valuing — each with a different
 persistence policy. Universal facts (broad spatiotemporal extent) persist
 as reasoning premises and train weights. Particular facts (narrow
 spatiotemporal extent) always train weights and optionally persist to the
-truth table when `store_particulars` is true. Feelings are session-only.
+TruthSet when `store_concrete` is true. Feelings are session-only.
 
 The result: the system **learns from events but never stores worldline
 histories** (unless the user explicitly opts in).
 
 See [Entanglement.md](./Entanglement.md) for the full policy,
-[Config.md](./Config.md) for the `store_particulars` setting that controls particular-fact persistence, and
+[Config.md](./Config.md) for the `store_concrete` setting that controls particular-fact persistence, and
 [Training.md](./Training.md) for the online training pipeline.
 
 ### Why particular facts always train weights
@@ -49,8 +49,8 @@ Three design considerations fix row 2 of the table:
    particular claims (e.g. "the universe was created in seven days").
    Recording such claims as facts with explicit certainty values makes
    them inspectable and contestable. Relegating them to weight-space
-   would bury them as invisible biases. The `store_particulars` option
-   lets the user decide whether these persist in the truth table.
+   would bury them as invisible biases. The `store_concrete` option
+   lets the user decide whether these persist in the TruthSet.
 
 2. **The fact/feeling boundary is the privacy boundary.** If a user
    considers content too personal or sensitive to train on, the correct
@@ -59,7 +59,7 @@ Three design considerations fix row 2 of the table:
    table. The privacy boundary is therefore controlled by the user's
    choice of tag, not by the universal/particular distinction.
 
-3. **PII detection is the safety net.** Even when `store_particulars`
+3. **PII detection is the safety net.** Even when `store_concrete`
    is true, the `detect_identifiability()` function filters entries
    containing PII patterns (emails, phone numbers, GPS coordinates,
    named individuals with temporal markers) before any persistence.
@@ -67,7 +67,7 @@ Three design considerations fix row 2 of the table:
    the user's storage preference.
 
 The result: particular facts always carry empirical signal worth
-learning from. Storage in the truth table is the user's choice.
+learning from. Storage in the TruthSet is the user's choice.
 Privacy is enforced by fact/feeling labeling and PII detection, not
 by withholding training.
 
@@ -167,7 +167,7 @@ Examples:
 -   A implies B
 -   contradiction reduces trust
 
-These populate the **truth table**.
+These populate the **TruthSet**.
 
 Criterion:
 
@@ -187,7 +187,7 @@ Examples:
 | Action | Reason |
 |---|---|
 | train weights | they contain empirical evidence |
-| truth table (optional) | user controls via `store_particulars` |
+| TruthSet (optional) | user controls via `store_concrete` |
 
 Pipeline:
 
@@ -209,7 +209,7 @@ Examples:
 | Use | Allowed |
 |---|---|
 | evaluation of responses | $\checkmark$ |
-| truth tables | $\times$ |
+| TruthSets | $\times$ |
 | training weights | $\times$ |
 
 This avoids turning subjective states into truth claims.
@@ -230,11 +230,11 @@ yesterday was 20°C" is *narrow*: it holds at one place, one day.
 
 The policy table operationalizes this gradient:
 
--   **Broad extent** (universal) → truth table + training.
+-   **Broad extent** (universal) → TruthSet + training.
     The proposition is stable enough to serve as a reasoning premise.
--   **Narrow extent** (particular) → training + optionally truth table.
+-   **Narrow extent** (particular) → training + optionally TruthSet.
     The observation carries empirical signal.  Whether it persists as a
-    stored premise is the user's choice (`store_particulars` in
+    stored premise is the user's choice (`store_concrete` in
     config.xml, default false).  Storing particulars supports communal
     remembrance; omitting them prevents worldline anchoring.
 -   **No extent** (feelings) → session only.
@@ -250,14 +250,14 @@ reclassified as particular.
 
 | Mode | Function | Pipeline |
 |------|----------|----------|
-| knowing | universal structure | universal rules → truth table → reasoning |
+| knowing | universal structure | universal rules → TruthSet → reasoning |
 | learning | particular evidence | particular observations → abstraction → weights |
 | valuing | feelings | feelings → response evaluation |
 
 
 ## Zero-Knowledge and Selective Disclosure
 
-The default `store_particulars=false` aligns with Zero-Knowledge and
+The default `store_concrete=false` aligns with Zero-Knowledge and
 Selective Disclosure principles.  Systems that rely on identity to make
 decisions should determine the *location of a space* in which an
 individual occupies, rather than collapsing to a *point* that identifies
@@ -278,7 +278,7 @@ knowledge that generalizes) without surveillance (particular facts that
 identify).
 
 The `detect_identifiability()` function enforces this boundary at the
-content level — even when `store_particulars=true`, entries containing
+content level — even when `store_concrete=true`, entries containing
 PII patterns (emails, phone numbers, GPS coordinates, named individuals
 with temporal markers) are always filtered before persistence.
 
@@ -294,8 +294,8 @@ flattened into a single parameter space during training and a single
 context window during inference.
 
 The policy table enforces the separation structurally. The rule that
-particular facts train weights but enter the truth table only at the
-user's discretion (`store_particulars` in config.xml) is the key
+particular facts train weights but enter the TruthSet only at the
+user's discretion (`store_concrete` in config.xml) is the key
 architectural move — the system can learn from experience without
 accumulating a *personal history* unless the user explicitly opts in.
 A system with a personal history is a system that can be captured: by

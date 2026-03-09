@@ -19,7 +19,39 @@ from config import _load_config_xml, config_to_xml, _normalize_config
 SAMPLE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <config>
+  <server>
+    <server_id>test-server-id-1234</server_id>
+    <stateless>false</stateless>
+    <url_prefix></url_prefix>
+    <truthset>
+      <truth_symmetry>true</truth_symmetry>
+      <store_concrete>false</store_concrete>
+      <truth_weight>0.7</truth_weight>
+    </truthset>
+    <evaluation>
+      <temperature>0.7</temperature>
+      <max_tokens>128</max_tokens>
+      <timeout>120</timeout>
+      <url_fetch>false</url_fetch>
+    </evaluation>
+    <training>
+      <enabled>false</enabled>
+      <truth_corpus_path>data/truth.xml</truth_corpus_path>
+      <alpha_base>0.01</alpha_base>
+      <alpha_min>0.001</alpha_min>
+      <alpha_max>0.1</alpha_max>
+      <merge_rate>0.1</merge_rate>
+      <device>cpu</device>
+      <dissonance_enabled>true</dissonance_enabled>
+      <operators_dynamic_enabled>true</operators_dynamic_enabled>
+    </training>
+    <allowed_urls>
+      <url>https://api.openai.com/</url>
+      <url>https://api.anthropic.com/</url>
+    </allowed_urls>
+  </server>
   <providers>
+    <default>wikioracle</default>
     <provider name="wikioracle">
       <display_name>wikiOracle</display_name>
       <username>test@example.com</username>
@@ -33,40 +65,6 @@ SAMPLE_XML = """\
       <default_model>gpt-4o</default_model>
     </provider>
   </providers>
-  <chat>
-    <temperature>0.7</temperature>
-    <rag>true</rag>
-    <url_fetch>false</url_fetch>
-    <confirm_actions>true</confirm_actions>
-  </chat>
-  <ui>
-    <default_provider>wikioracle</default_provider>
-    <layout>horizontal</layout>
-    <theme>system</theme>
-    <splitter_pct>0</splitter_pct>
-    <swipe_nav_horizontal>true</swipe_nav_horizontal>
-    <swipe_nav_vertical>false</swipe_nav_vertical>
-  </ui>
-  <server>
-    <server_id>test-server-id-1234</server_id>
-    <stateless>false</stateless>
-    <url_prefix></url_prefix>
-    <online_training>
-      <enabled>false</enabled>
-      <truth_corpus_path>data/truth.xml</truth_corpus_path>
-      <alpha_base>0.01</alpha_base>
-      <alpha_min>0.001</alpha_min>
-      <alpha_max>0.1</alpha_max>
-      <merge_rate>0.1</merge_rate>
-      <device>cpu</device>
-      <dissonance_enabled>true</dissonance_enabled>
-      <operators_dynamic_enabled>true</operators_dynamic_enabled>
-    </online_training>
-    <allowed_urls>
-      <url>https://api.openai.com/</url>
-      <url>https://api.anthropic.com/</url>
-    </allowed_urls>
-  </server>
 </config>
 """
 
@@ -105,34 +103,34 @@ class TestLoadConfigXml(unittest.TestCase):
         self.assertIsInstance(data["providers"]["wikioracle"]["timeout"], int)
         self.assertEqual(data["providers"]["wikioracle"]["timeout"], 15)
 
-    def test_chat_booleans(self):
+    def test_evaluation_settings(self):
         data = _load_config_xml(self.tmp_path)
-        self.assertIs(data["chat"]["rag"], True)
-        self.assertIs(data["chat"]["url_fetch"], False)
-        self.assertIs(data["chat"]["confirm_actions"], True)
+        ev = data["server"]["evaluation"]
+        self.assertIs(ev["url_fetch"], False)
+        self.assertAlmostEqual(ev["temperature"], 0.7)
+        self.assertEqual(ev["max_tokens"], 128)
 
-    def test_chat_temperature_is_float(self):
+    def test_truthset_settings(self):
         data = _load_config_xml(self.tmp_path)
-        self.assertIsInstance(data["chat"]["temperature"], float)
-        self.assertAlmostEqual(data["chat"]["temperature"], 0.7)
+        ts = data["server"]["truthset"]
+        self.assertIs(ts["truth_symmetry"], True)
+        self.assertIs(ts["store_concrete"], False)
+        self.assertAlmostEqual(ts["truth_weight"], 0.7)
 
-    def test_ui_section(self):
+    def test_providers_default(self):
         data = _load_config_xml(self.tmp_path)
-        self.assertEqual(data["ui"]["default_provider"], "wikioracle")
-        self.assertEqual(data["ui"]["layout"], "horizontal")
-        self.assertIs(data["ui"]["swipe_nav_horizontal"], True)
-        self.assertIs(data["ui"]["swipe_nav_vertical"], False)
+        self.assertEqual(data["providers"]["default"], "wikioracle")
 
     def test_server_stateless(self):
         data = _load_config_xml(self.tmp_path)
         self.assertIs(data["server"]["stateless"], False)
 
-    def test_online_training(self):
+    def test_training(self):
         data = _load_config_xml(self.tmp_path)
-        ot = data["server"]["online_training"]
-        self.assertIs(ot["enabled"], False)
-        self.assertEqual(ot["device"], "cpu")
-        self.assertAlmostEqual(ot["alpha_base"], 0.01)
+        tr = data["server"]["training"]
+        self.assertIs(tr["enabled"], False)
+        self.assertEqual(tr["device"], "cpu")
+        self.assertAlmostEqual(tr["alpha_base"], 0.01)
 
     def test_allowed_urls(self):
         data = _load_config_xml(self.tmp_path)
@@ -152,27 +150,22 @@ class TestConfigToXml(unittest.TestCase):
 
     def _make_minimal_config(self):
         return {
-            "providers": {
-                "wikioracle": {
-                    "name": "wikiOracle",
-                    "username": "alice@example.com",
-                    "timeout": 15,
-                },
-            },
-            "chat": {"temperature": 0.7, "rag": True, "url_fetch": False, "confirm_actions": True},
-            "ui": {
-                "default_provider": "wikioracle",
-                "layout": "horizontal",
-                "theme": "system",
-                "splitter_pct": 0,
-                "swipe_nav_horizontal": True,
-                "swipe_nav_vertical": False,
-            },
             "server": {
                 "server_id": "test-server-id-5678",
                 "stateless": False,
                 "url_prefix": "",
-                "online_training": {
+                "truthset": {
+                    "truth_symmetry": True,
+                    "store_concrete": False,
+                    "truth_weight": 0.7,
+                },
+                "evaluation": {
+                    "temperature": 0.7,
+                    "max_tokens": 128,
+                    "timeout": 120,
+                    "url_fetch": False,
+                },
+                "training": {
                     "enabled": False,
                     "truth_corpus_path": "data/truth.xml",
                     "alpha_base": 0.01,
@@ -184,6 +177,14 @@ class TestConfigToXml(unittest.TestCase):
                     "operators_dynamic_enabled": True,
                 },
                 "allowed_urls": ["https://api.openai.com/"],
+            },
+            "providers": {
+                "default": "wikioracle",
+                "wikioracle": {
+                    "name": "wikiOracle",
+                    "username": "alice@example.com",
+                    "timeout": 15,
+                },
             },
         }
 
@@ -228,8 +229,8 @@ class TestConfigToXml(unittest.TestCase):
             reloaded = _load_config_xml(Path(tmp.name))
             self.assertEqual(reloaded["server"]["server_id"], "test-server-id-5678")
             self.assertEqual(reloaded["providers"]["wikioracle"]["name"], "wikiOracle")
-            self.assertIs(reloaded["chat"]["rag"], True)
-            self.assertAlmostEqual(reloaded["chat"]["temperature"], 0.7)
+            self.assertEqual(reloaded["providers"]["default"], "wikioracle")
+            self.assertAlmostEqual(reloaded["server"]["evaluation"]["temperature"], 0.7)
         finally:
             Path(tmp.name).unlink(missing_ok=True)
 

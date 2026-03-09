@@ -132,33 +132,34 @@ Double-click or right-click a tree node → "Branch" creates a new empty child c
 ## Settings Dialog
 
 The Settings panel (gear icon in the sidebar) lets users configure
-chat behaviour and online training parameters at runtime.  Settings
+evaluation, truthset, and training parameters at runtime.  Settings
 are persisted in `sessionStorage` (with a `localStorage` fallback for
-tab-close durability) under the `wikioracle_config` key.
+tab-close durability) under the `wikioracle_config` key; UI
+preferences (layout, theme, confirm actions) are also saved in state.
 
 ### Settings Controls
 
 | Control | ID | Type | Config path | Default | Description |
 |---------|-----|------|-------------|---------|-------------|
-| Username | `setUsername` | text | `user.name` | `"User"` | Display name shown in chat messages. |
-| Provider | `setProvider` | select | `ui.default_provider` | `"wikioracle"` | Active LLM provider. |
-| Layout | `setLayout` | select | `ui.layout` | `"flat"` | Panel layout mode (`horizontal`, `vertical`, `flat`). |
-| Theme | `setTheme` | select | `ui.theme` | `"system"` | Colour theme (`system`, `light`, `dark`). |
-| Temperature | `setTemperature` | range (0–2) | `chat.temperature` | `0.7` | Sampling temperature for the LLM. |
-| Max tokens | `setMaxTokens` | number | `chat.max_tokens` | `128` | Maximum tokens in the LLM response. |
-| Timeout | `setTimeout` | number | `chat.timeout` | `120` | Request timeout in seconds. |
-| Truth weight | `setTruthWeight` | range (0–1) | `chat.truth_weight` | `0.7` | How much DoT gates the learning rate. See below. |
-| Max truth entries | `setTruthMaxEntries` | number | `chat.truth_max_entries` | `1000` | Maximum entries in the server truth table before trimming. |
-| Store particular facts | `setStoreParticulars` | checkbox | `chat.store_particulars` | `false` | Store spatiotemporally-bound facts (news) in the server truth table. |
-| Fetch URLs | `setUrlFetch` | checkbox | `chat.url_fetch` | `false` | Allow the assistant to fetch URL content. |
-| Confirm actions | `setConfirmActions` | checkbox | `chat.confirm_actions` | `false` | Require confirmation before destructive operations. |
+| Username | `setUsername` | text | `state.client_name` | `"User"` | Display name shown in chat messages. |
+| Provider | `setProvider` | select | `providers.default` | `"wikioracle"` | Active LLM provider. |
+| Layout | `setLayout` | select | `state.ui.layout` | `"flat"` | Panel layout mode (`horizontal`, `vertical`, `flat`). |
+| Theme | `setTheme` | select | `state.ui.theme` | `"system"` | Colour theme (`system`, `light`, `dark`). |
+| Temperature | `setTemperature` | range (0–2) | `server.evaluation.temperature` | `0.7` | Sampling temperature for the LLM. |
+| Max tokens | `setMaxTokens` | number | `server.evaluation.max_tokens` | `128` | Maximum tokens in the LLM response. |
+| Timeout | `setTimeout` | number | `server.evaluation.timeout` | `120` | Request timeout in seconds. |
+| Truth weight | `setTruthWeight` | range (0–1) | `server.truthset.truth_weight` | `0.7` | How much DoT gates the learning rate. See below. |
+| Max truth entries | `setTruthMaxEntries` | number | `server.training.truth_max_entries` | `1000` | Maximum entries in the server TruthSet before trimming. |
+| Store concrete facts | `setStoreConcrete` | checkbox | `server.truthset.store_concrete` | `false` | Store spatiotemporally-bound facts (news) in the server TruthSet. |
+| Fetch URLs | `setUrlFetch` | checkbox | `server.evaluation.url_fetch` | `false` | Allow the assistant to fetch URL content. |
+| Confirm actions | `setConfirmActions` | checkbox | `state.ui.confirm_actions` | `false` | Require confirmation before destructive operations. |
 
 ### Truth Weight Slider
 
 The **truth weight** slider (0.0–1.0, step 0.05) replaces the former
-"Use Truth Table" checkbox.  It controls two things simultaneously:
+"Use TruthSet" checkbox.  It controls two things simultaneously:
 
-1. **RAG delivery**: When `truth_weight > 0`, the truth table is sent
+1. **RAG delivery**: When `truth_weight > 0`, the TruthSet is sent
    to the provider as grounding evidence (the former `rag: true`
    behavior).  When `truth_weight = 0`, no truth is sent.
 
@@ -177,21 +178,21 @@ the `#setTruthWeightVal` span, updated live on input events.
 
 ### Max Truth Entries
 
-Controls the maximum size of the server truth table.  When the table
+Controls the maximum size of the server TruthSet.  When the table
 exceeds this limit, entries with `|trust|` closest to 0.0 (lowest
 information value) are trimmed during the merge stage.  Range:
 100–10000, step 100.
 
-### Store Particular Facts
+### Store Concrete Facts
 
 When enabled, spatiotemporally-bound facts (those with `<place>` or
 `<time>` child elements carrying real values) are stored in the server
-truth table alongside universal facts.  When disabled (default), only
+TruthSet alongside universal facts.  When disabled (default), only
 universal facts persist — consistent with Zero-Knowledge / Selective
 Disclosure principles.
 
 This setting is a client-side override for the server's
-`store_particulars` config.  The client value takes precedence when
+`store_concrete` config.  The client value takes precedence when
 sent in the query payload.
 
 ### Legacy Migration
@@ -204,12 +205,13 @@ to the new `truth_weight`:
 
 This migration runs in both `client/config.js` (client-side) and
 `bin/response.py` (server-side) to handle configs from before the
-migration.
+migration.  The new config path for truth weight is
+`server.truthset.truth_weight`.
 
-## Server Truth Table Display
+## Server TruthSet Display
 
 In debug mode, when online training is enabled, the client displays
-server truth table entries alongside local truth entries.  Server
+server TruthSet entries alongside local truth entries.  Server
 entries are visually distinguished with:
 
 * A blue left border (3px, accent colour)
@@ -218,7 +220,7 @@ entries are visually distinguished with:
 
 Server truth entries are injected from the `/chat` response's
 `server_truth` field and tagged with `_server_origin: true` in local
-state.  They are **automatically stripped from the truth table before
+state.  They are **automatically stripped from the TruthSet before
 sending queries** to prevent loopback — the server should never
 receive its own truth entries back from the client.
 
@@ -237,7 +239,7 @@ strings hard-coded in `client/util.js` match the tables below.
 | `feeling` | `Feeling: subjective, non-verifiable claim` |
 | `fact` | `Fact: disprovable assertion about the world` |
 | `reference` | `Reference: citation with external link` |
-| `authority` | `Authority: pointer to remote truth table` |
+| `authority` | `Authority: pointer to remote TruthSet` |
 | `provider` | `Provider: external LLM endpoint` |
 | `not` | `NOT: negation of a truth entry` |
 | `non` | `NON: non-affirming weakening toward zero` |

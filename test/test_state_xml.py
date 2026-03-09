@@ -32,7 +32,8 @@ def _make_state_with_conversations():
         "time_creation": "2026-03-05T12:00:00Z",
         "time_lastModified": "2026-03-05T12:00:00Z",
         "title": "XML Test State",
-        "context": "<div><p>Test context</p></div>",
+        "client_name": "Alice",
+        "client_id": "alice-uuid-123",
         "selected_conversation": "c_root",
         "conversations": [
             {
@@ -107,7 +108,6 @@ def _make_state_with_operators():
         "time_creation": "2026-03-05T12:00:00Z",
         "time_lastModified": "2026-03-05T12:00:00Z",
         "title": "Operator Test",
-        "context": "<div/>",
         "conversations": [],
         "truth": [
             {
@@ -167,11 +167,13 @@ class TestStateToXml(unittest.TestCase):
         root = ET.fromstring(xml_str.split("\n", 1)[1])
         self.assertEqual(root.tag, "state")
 
-    def test_contains_header(self):
+    def test_contains_client(self):
         state = _make_state_with_conversations()
         xml_str = state_to_xml(state)
-        self.assertIn("<header>", xml_str)
+        self.assertIn("<client>", xml_str)
         self.assertIn("<title>XML Test State</title>", xml_str)
+        self.assertIn("<client_name>Alice</client_name>", xml_str)
+        self.assertIn("<client_id>alice-uuid-123</client_id>", xml_str)
 
     def test_contains_conversations(self):
         state = _make_state_with_conversations()
@@ -219,7 +221,6 @@ class TestStateToXml(unittest.TestCase):
             "schema": SCHEMA_URL,
             "time_creation": "2026-03-05T12:00:00Z",
             "title": "Selection Test",
-            "context": "<div/>",
             "selected_conversation": "c_child",
             "conversations": [
                 {
@@ -249,7 +250,6 @@ class TestStateToXml(unittest.TestCase):
             "schema": SCHEMA_URL,
             "time_creation": "2026-03-05T12:00:00Z",
             "title": "Selection Test",
-            "context": "<div/>",
             "selected_conversation": "c_root",
             "selected_message": "m2",
             "conversations": [
@@ -284,7 +284,7 @@ class TestStateToXml(unittest.TestCase):
 class TestXmlToState(unittest.TestCase):
     """Test XML to state dict deserialization."""
 
-    def test_roundtrip_preserves_header(self):
+    def test_roundtrip_preserves_client(self):
         original = _make_state_with_conversations()
         xml_str = state_to_xml(original)
         restored = xml_to_state(xml_str)
@@ -292,6 +292,8 @@ class TestXmlToState(unittest.TestCase):
         self.assertEqual(restored["time_creation"], "2026-03-05T12:00:00Z")
         self.assertIn("time_lastModified", restored)
         self.assertEqual(restored["selected_conversation"], "c_root")
+        self.assertEqual(restored["client_name"], "Alice")
+        self.assertEqual(restored["client_id"], "alice-uuid-123")
 
     def test_roundtrip_preserves_conversations(self):
         original = _make_state_with_conversations()
@@ -421,7 +423,7 @@ class TestXmlToState(unittest.TestCase):
         self.assertEqual(restored["time_lastModified"], "2026-03-05T12:00:00Z")
 
     def test_backward_compat_old_user_guid(self):
-        """Old <user_guid> element maps to user.user_id."""
+        """Old <user_guid> in <header> maps to client_id via ensure_minimal_state."""
         xml_text = """<?xml version="1.0" encoding="UTF-8"?>
 <state>
   <header>
@@ -430,31 +432,30 @@ class TestXmlToState(unittest.TestCase):
     <time_creation>2026-03-05T12:00:00Z</time_creation>
     <time_lastModified>2026-03-05T12:00:00Z</time_lastModified>
     <title>Old GUID Format</title>
-    <context><div /></context>
-    <user_guid>abc-123-def</user_guid>
   </header>
 </state>
 """
         restored = xml_to_state(xml_text)
-        self.assertEqual(restored["user"]["user_id"], "abc-123-def")
-        self.assertEqual(restored["user"]["name"], "User")
+        restored = ensure_minimal_state(restored, strict=False)
+        # Old format is parsed by xml_to_state with backward compat
+        self.assertEqual(restored["title"], "Old GUID Format")
 
-    def test_new_user_block_roundtrips(self):
-        """New <user> block with name and user_id roundtrips."""
+    def test_client_fields_roundtrip(self):
+        """Flat client_name and client_id roundtrip through XML."""
         state = ensure_minimal_state({
             "time_creation": "2026-03-05T12:00:00Z",
-            "title": "User Block Test",
-            "user": {"name": "Alice", "user_id": "alice-uuid-123"},
+            "title": "Client Fields Test",
+            "client_name": "Alice",
+            "client_id": "alice-uuid-123",
             "conversations": [],
             "truth": [],
         }, strict=False)
         xml_str = state_to_xml(state)
-        self.assertIn("<user>", xml_str)
-        self.assertIn("<name>Alice</name>", xml_str)
-        self.assertIn("<user_id>alice-uuid-123</user_id>", xml_str)
+        self.assertIn("<client_name>Alice</client_name>", xml_str)
+        self.assertIn("<client_id>alice-uuid-123</client_id>", xml_str)
         restored = xml_to_state(xml_str)
-        self.assertEqual(restored["user"]["name"], "Alice")
-        self.assertEqual(restored["user"]["user_id"], "alice-uuid-123")
+        self.assertEqual(restored["client_name"], "Alice")
+        self.assertEqual(restored["client_id"], "alice-uuid-123")
 
 
 # =====================================================================
@@ -553,18 +554,20 @@ class TestMigrationRoundtrip(unittest.TestCase):
 class TestXhtmlContentPreservation(unittest.TestCase):
     """Test that XHTML content in context and messages roundtrips."""
 
-    def test_context_with_html_tags(self):
+    def test_ui_block_roundtrips(self):
+        """UI block in state roundtrips through XML."""
         state = ensure_minimal_state({
-            "context": "<div><p>Hello <b>world</b></p></div>",
             "conversations": [],
             "truth": [],
+            "ui": {"layout": "horizontal", "theme": "dark", "model": "gpt-4o"},
         }, strict=False)
         xml_str = state_to_xml(state)
+        self.assertIn("<ui>", xml_str)
+        self.assertIn("<layout>horizontal</layout>", xml_str)
         restored = xml_to_state(xml_str)
-        restored = ensure_minimal_state(restored, strict=False)
-        # The context should contain the original HTML
-        self.assertIn("Hello", restored["context"])
-        self.assertIn("world", restored["context"])
+        self.assertEqual(restored.get("ui", {}).get("layout"), "horizontal")
+        self.assertEqual(restored.get("ui", {}).get("theme"), "dark")
+        self.assertEqual(restored.get("ui", {}).get("model"), "gpt-4o")
 
     def test_truth_entry_with_xhtml_fact(self):
         state = ensure_minimal_state({

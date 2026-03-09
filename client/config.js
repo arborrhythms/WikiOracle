@@ -1,10 +1,10 @@
 // config.js — Config persistence and normalization (no deps).
 // Loaded first; owns the config global.
 //
-// The config object has the same shape as config.xml — no flattening or
-// renaming.  Missing sections/keys are filled with sensible defaults by
-// _normalizeConfig().  Runtime-only fields (server.providers, ui.model)
-// round-trip harmlessly through config.
+// The config object has the same shape as config.xml — server and providers
+// sections only.  UI preferences and client identity live in state, not here.
+// Missing sections/keys are filled with sensible defaults by
+// _normalizeConfig().
 //
 // Exports:
 //   config                — shared global: current config (XML-shaped)
@@ -15,15 +15,11 @@
 
 // ─── Config global (owned here, used everywhere) ───
 let config = {
-  chat: { temperature: 0.7, max_tokens: 128, timeout: 120,
-          truth_weight: 0.7, truth_max_entries: 1000,
-          store_particulars: false,
-          url_fetch: false, confirm_actions: false },
-  ui: { default_provider: "wikioracle", layout: "flat", theme: "system",
-        splitter_pct: 0, swipe_nav_horizontal: true,
-        swipe_nav_vertical: false },
-  server: { stateless: false, url_prefix: "", providers: {} },
-  defaults: { context: "<div/>", output: "" },
+  server: { stateless: false, url_prefix: "", providers: {},
+            truthset: { truth_symmetry: true, store_concrete: false, truth_weight: 0.7 },
+            evaluation: { temperature: 0.7, max_tokens: 128, timeout: 120, url_fetch: false },
+            training: { enabled: false } },
+  providers: { default: "wikioracle" },
 };
 
 // ─── Storage persistence (sessionStorage + localStorage mirror) ───
@@ -61,33 +57,25 @@ function _saveLocalConfig(cfg) {
 // Fill defaults in a config dict — mirrors server's _normalize_config().
 function _normalizeConfig(cfg) {
   cfg = cfg || {};
-  if (!cfg.ui) cfg.ui = {};
-  if (!cfg.ui.default_provider) cfg.ui.default_provider = "wikioracle";
-  if (!cfg.ui.layout) cfg.ui.layout = "flat";
-  if (!cfg.ui.theme) cfg.ui.theme = "system";
-  if (cfg.ui.splitter_pct == null) cfg.ui.splitter_pct = 0;
-  if (cfg.ui.swipe_nav_horizontal === undefined) cfg.ui.swipe_nav_horizontal = true;
-  if (cfg.ui.swipe_nav_vertical === undefined) cfg.ui.swipe_nav_vertical = false;
-  if (!cfg.chat) cfg.chat = {};
-  if (cfg.chat.temperature === undefined) cfg.chat.temperature = 0.7;
-  if (cfg.chat.max_tokens === undefined) cfg.chat.max_tokens = 128;
-  if (cfg.chat.timeout === undefined) cfg.chat.timeout = 120;
-  if (cfg.chat.truth_weight === undefined) cfg.chat.truth_weight = 0.7;
-  if (cfg.chat.truth_max_entries === undefined) cfg.chat.truth_max_entries = 1000;
-  if (cfg.chat.store_particulars === undefined) cfg.chat.store_particulars = false;
-  if (cfg.chat.url_fetch === undefined) cfg.chat.url_fetch = false;
-  if (cfg.chat.confirm_actions === undefined) cfg.chat.confirm_actions = false;
-  // Migrate legacy rag boolean → truth_weight
-  if (cfg.chat.rag !== undefined) {
-    if (cfg.chat.truth_weight === undefined || cfg.chat.truth_weight === 0.7) {
-      cfg.chat.truth_weight = cfg.chat.rag ? 0.7 : 0.0;
-    }
-    delete cfg.chat.rag;
-  }
+  // --- server ---
   if (!cfg.server) cfg.server = {};
   if (cfg.server.stateless === undefined) cfg.server.stateless = false;
   if (cfg.server.url_prefix === undefined) cfg.server.url_prefix = "";
   if (!cfg.server.providers) cfg.server.providers = {};
+  // server.truthset
+  if (!cfg.server.truthset) cfg.server.truthset = {};
+  if (cfg.server.truthset.truth_symmetry === undefined) cfg.server.truthset.truth_symmetry = true;
+  if (cfg.server.truthset.store_concrete === undefined) cfg.server.truthset.store_concrete = false;
+  if (cfg.server.truthset.truth_weight === undefined) cfg.server.truthset.truth_weight = 0.7;
+  // server.evaluation
+  if (!cfg.server.evaluation) cfg.server.evaluation = {};
+  if (cfg.server.evaluation.temperature === undefined) cfg.server.evaluation.temperature = 0.7;
+  if (cfg.server.evaluation.max_tokens === undefined) cfg.server.evaluation.max_tokens = 128;
+  if (cfg.server.evaluation.timeout === undefined) cfg.server.evaluation.timeout = 120;
+  if (cfg.server.evaluation.url_fetch === undefined) cfg.server.evaluation.url_fetch = false;
+  // --- providers ---
+  if (!cfg.providers) cfg.providers = {};
+  if (!cfg.providers.default) cfg.providers.default = "wikioracle";
   return cfg;
 }
 
@@ -121,22 +109,55 @@ function configToXml(obj) {
   if (!obj || typeof obj !== "object") return '<?xml version="1.0" encoding="UTF-8"?>\n<config/>\n';
   var lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<config>"];
 
-  function addSimpleSection(tag, data) {
+  function addSubsection(indent, tag, data) {
     if (!data || typeof data !== "object") return;
-    lines.push("  <" + tag + ">");
+    lines.push(indent + "<" + tag + ">");
     for (var key in data) {
       if (!data.hasOwnProperty(key)) continue;
-      lines.push("    <" + key + ">" + _xmlEsc(_xmlValStr(data[key])) + "</" + key + ">");
+      lines.push(indent + "  <" + key + ">" + _xmlEsc(_xmlValStr(data[key])) + "</" + key + ">");
     }
-    lines.push("  </" + tag + ">");
+    lines.push(indent + "</" + tag + ">");
   }
 
-  // providers — <provider name="key"> with display_name mapping
+  // server
+  var srv = obj.server;
+  if (srv && typeof srv === "object") {
+    lines.push("  <server>");
+    // Flat server fields
+    var flatKeys = ["server_name", "server_id", "stateless", "url_prefix"];
+    flatKeys.forEach(function(sk) {
+      if (srv[sk] !== undefined && sk !== "providers") {
+        lines.push("    <" + sk + ">" + _xmlEsc(_xmlValStr(srv[sk])) + "</" + sk + ">");
+      }
+    });
+    // Subsections
+    if (srv.truthset && typeof srv.truthset === "object") addSubsection("    ", "truthset", srv.truthset);
+    if (srv.evaluation && typeof srv.evaluation === "object") addSubsection("    ", "evaluation", srv.evaluation);
+    if (srv.training && typeof srv.training === "object") addSubsection("    ", "training", srv.training);
+    // allowed_urls
+    if (Array.isArray(srv.allowed_urls)) {
+      lines.push("    <allowed_urls>");
+      srv.allowed_urls.forEach(function(u) { lines.push("      <url>" + _xmlEsc(u) + "</url>"); });
+      lines.push("    </allowed_urls>");
+    }
+    lines.push("  </server>");
+  }
+
+  // providers — section-level elements + <provider name="key">
   var provs = obj.providers;
   if (provs && typeof provs === "object") {
     lines.push("  <providers>");
+    // Section-level elements
+    var sectionKeys = ["default", "context", "output", "truth_context", "conversation_context"];
+    sectionKeys.forEach(function(sk) {
+      if (provs[sk] !== undefined) {
+        lines.push("    <" + sk + ">" + _xmlEsc(_xmlValStr(provs[sk])) + "</" + sk + ">");
+      }
+    });
+    // Per-provider entries
     for (var pk in provs) {
       if (!provs.hasOwnProperty(pk)) continue;
+      if (sectionKeys.indexOf(pk) !== -1) continue;
       var prov = provs[pk];
       if (!prov || typeof prov !== "object") continue;
       lines.push('    <provider name="' + _xmlEsc(pk) + '">');
@@ -149,39 +170,6 @@ function configToXml(obj) {
     }
     lines.push("  </providers>");
   }
-
-  // chat, ui
-  addSimpleSection("chat", obj.chat);
-  addSimpleSection("ui", obj.ui);
-
-  // server — special handling for online_training and allowed_urls
-  var srv = obj.server;
-  if (srv && typeof srv === "object") {
-    lines.push("  <server>");
-    for (var sk in srv) {
-      if (!srv.hasOwnProperty(sk)) continue;
-      if (sk === "providers") continue; // runtime-only, strip
-      if (sk === "online_training" && typeof srv[sk] === "object") {
-        lines.push("    <online_training>");
-        var ot = srv[sk];
-        for (var otk in ot) {
-          if (!ot.hasOwnProperty(otk)) continue;
-          lines.push("      <" + otk + ">" + _xmlEsc(_xmlValStr(ot[otk])) + "</" + otk + ">");
-        }
-        lines.push("    </online_training>");
-      } else if (sk === "allowed_urls" && Array.isArray(srv[sk])) {
-        lines.push("    <allowed_urls>");
-        srv[sk].forEach(function(u) { lines.push("      <url>" + _xmlEsc(u) + "</url>"); });
-        lines.push("    </allowed_urls>");
-      } else {
-        lines.push("    <" + sk + ">" + _xmlEsc(_xmlValStr(srv[sk])) + "</" + sk + ">");
-      }
-    }
-    lines.push("  </server>");
-  }
-
-  // defaults
-  addSimpleSection("defaults", obj.defaults);
 
   lines.push("</config>");
   return lines.join("\n") + "\n";
@@ -208,39 +196,14 @@ function xmlToConfig(text) {
       return obj;
     }
 
-    // providers
-    var provsEl = root.querySelector("providers");
-    if (provsEl) {
-      data.providers = {};
-      var provEls = provsEl.querySelectorAll("provider");
-      provEls.forEach(function(pel) {
-        var key = pel.getAttribute("name") || "";
-        var prov = {};
-        for (var i = 0; i < pel.children.length; i++) {
-          var child = pel.children[i];
-          var tag = child.tagName === "display_name" ? "name" : child.tagName;
-          prov[tag] = _xmlCoerce(child.textContent);
-        }
-        data.providers[key] = prov;
-      });
-    }
-
-    // chat
-    var chatEl = root.querySelector("chat");
-    if (chatEl) data.chat = readSimple(chatEl);
-
-    // ui
-    var uiEl = root.querySelector("ui");
-    if (uiEl) data.ui = readSimple(uiEl);
-
     // server
     var srvEl = root.querySelector("server");
     if (srvEl) {
       var srv = {};
       for (var i = 0; i < srvEl.children.length; i++) {
         var child = srvEl.children[i];
-        if (child.tagName === "online_training") {
-          srv.online_training = readSimple(child);
+        if (child.tagName === "truthset" || child.tagName === "evaluation" || child.tagName === "training") {
+          srv[child.tagName] = readSimple(child);
         } else if (child.tagName === "allowed_urls") {
           var urls = [];
           var urlEls = child.querySelectorAll("url");
@@ -253,9 +216,29 @@ function xmlToConfig(text) {
       data.server = srv;
     }
 
-    // defaults
-    var defEl = root.querySelector("defaults");
-    if (defEl) data.defaults = readSimple(defEl);
+    // providers — section-level + per-provider
+    var provsEl = root.querySelector("providers");
+    if (provsEl) {
+      data.providers = {};
+      // Section-level elements
+      var sectionKeys = ["default", "context", "output", "truth_context", "conversation_context"];
+      sectionKeys.forEach(function(sk) {
+        var el = provsEl.querySelector(":scope > " + sk);
+        if (el) data.providers[sk] = (sk === "default") ? el.textContent.trim() : el.textContent.trim();
+      });
+      // Per-provider entries
+      var provEls = provsEl.querySelectorAll("provider");
+      provEls.forEach(function(pel) {
+        var key = pel.getAttribute("name") || "";
+        var prov = {};
+        for (var i = 0; i < pel.children.length; i++) {
+          var child = pel.children[i];
+          var tag = child.tagName === "display_name" ? "name" : child.tagName;
+          prov[tag] = _xmlCoerce(child.textContent);
+        }
+        data.providers[key] = prov;
+      });
+    }
 
     return data;
   } catch (e) {
@@ -276,7 +259,7 @@ async function _migrateOldPrefs() {
   } catch { return; }
 
   const existing = _loadLocalConfig();
-  if (existing && existing.ui) {
+  if (existing && existing.providers) {
     // Config already exists — just clean up
     sessionStorage.removeItem(_OLD_PREFS_KEY);
     return;
@@ -284,17 +267,13 @@ async function _migrateOldPrefs() {
 
   // Build XML-shaped config from old prefs (user name migrates to state, not config)
   const migrated = _normalizeConfig({
-    ui: {
-      default_provider: oldPrefs.provider || "wikioracle",
-      layout: oldPrefs.layout || "flat",
-      theme: oldPrefs.theme || "system",
+    providers: {
+      default: oldPrefs.provider || "wikioracle",
     },
-    chat: { ...(oldPrefs.chat || {}) },
   });
   // Store old username in state (will be picked up by _initStateful/_initStateless)
   if (oldPrefs.username && typeof state !== "undefined" && state) {
-    if (!state.user) state.user = {};
-    state.user.name = oldPrefs.username;
+    state.client_name = oldPrefs.username;
   }
 
   _saveLocalConfig(migrated);

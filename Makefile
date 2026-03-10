@@ -100,6 +100,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         run_init run_server run_debug run_cli run_web \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs \
+        parse \
         doc_report clean clean_all \
         remote remote_retrieve remote_ssh remote_status remote_logs \
         remote_deploy remote_deploy_launch \
@@ -634,6 +635,9 @@ run_web:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python ../bin/nanochat_ext.py
+
+parse:
+	@$(SHIM_ACTIVATE) && python3 bin/parse.py $(SENTENCE)
 
 # --- Documentation ------------------------------------------------------------
 

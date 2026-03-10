@@ -192,6 +192,23 @@ In WikiOracle:
 
 This preserves the tetralemma without logical explosion.
 
+## Implicit Existence and Svabhāva
+
+WikiOracle's [grammar](Grammar.md#the-five-dimensional-sentence) allows sentences without an explicit verb phrase: `S → NP`. The bare noun phrase — "Fire!" — carries an implicit existential predicate ("exists"). This grammatical default has a philosophical cost.
+
+Nāgārjuna's *Mūlamadhyamakakārikā* argues that the fundamental error of conceptual thought is the attribution of **svabhāva** (inherent existence, own-nature) to phenomena. When we say "fire" without predicating existence explicitly, the noun appears to stand on its own — as if fire possesses a permanent, independent self. This is precisely the reification that the doctrine of **śūnyatā** (emptiness) challenges.
+
+| Concept | Sanskrit | Meaning |
+|---------|----------|---------|
+| Inherent existence | *svabhāva* | the mistaken belief that things exist independently and permanently |
+| No-self | *anattā* / *anātman* | nothing possesses a fixed, independent self |
+| Dependent origination | *pratītyasamutpāda* | things arise only in dependence on causes and conditions |
+| Emptiness | *śūnyatā* | phenomena are empty of inherent existence |
+
+Making the existential predicate explicit — "fire exists" — restores what Nāgārjuna insists upon: existence is a *relation* (between causes, conditions, and the phenomenon), not an *attribute* (inherent in the noun). The verb "exists" is not redundant; it is the grammatical trace of dependent origination.
+
+The grammar's rule that $VP \to \varepsilon$ if and only if $MP \to \varepsilon$ reinforces this point. When the existential predicate is absent, so is the modal frame. The noun floats free of both process and possibility — the exact condition Nāgārjuna identifies as the root of conceptual grasping (*upādāna*).
+
 ## Summary
 
 WikiOracle's ontology forms a computational analogue of Buddhist epistemology.

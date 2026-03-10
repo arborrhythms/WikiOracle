@@ -8,20 +8,6 @@
 * Allow ranges in `<place>` and `<time>` fields (e.g. `<time>2020..2026</time>`, `<place>Western Europe</place>`) and treat bare points as implicit small ranges, consistent with point-free topology.
 * Investigate mereological / point-free representations of spatiotemporal extent so that `is_news_fact()` / `is_knowledge_fact()` can operate on extent size rather than presence/absence of child elements — a proposition with a broad temporal range behaves more like knowledge even if it carries a `<time>`.
 
-## MCP Integration
-* Expose WikiOracle as an MCP server: wrap `/chat`, truth management, and state merge as MCP tools; expose state and trust graph as MCP resources.
-* Use MCP servers as authority-adjacent inputs: convert MCP resource/tool outputs into `<reference>`/`<fact>` entries with explicit certainty and scope, replacing per-source custom integrations.
-* Multi-channel front-end via OpenClaw: route messages from Slack/Discord/Telegram to WikiOracle's `/chat` endpoint, preserving local-first truth ownership.
-
-## Sentence-Level Prediction
-* Change the next-step prediction model to a syntactically structured derivation of sentence meaning, so that token prediction becomes prediction of the sentence (as a token), of the NP+VP (as two tokens), ... until the full sentence has been specified. This would take the same number of production steps as a current LLM, but the iterative refinement of the next-sentence production is conceptually much different, and closer to human reasoning and refinement where there is a core truth (S) and spatial NP and temporal VP which are successively refined by adjectives and adverbs that scope the conceptual space of that kernel sentence.
-* A training and testing dataset for the network consisting of truth statements and implications with associated truth values.
-
-## Mereological Operations on Conceptual Space
-* Make improvements to NanoChat that allow it to compute truth within the geometric/conceptual space of the network, giving meaning to logical operations within that space (so use mereological operations to implement the ternary logic that is currently operating over the trust entries of the HME architecture in the current design). This means replacing AND with union, OR with intersection, IMPLICATION with parthood. See [Socrates.pdf](Socrates.pdf) for a quick sketch of deriving mereological (Venn-diagram-like) logic from entailment.
-* The architecture of WikiOracle is designed as a conceptual space, in the sense of Gardenfors. Conceptual spaces are similarity spaces, where similar concepts occupy regions of space close to one another. As spaces also of truth, they are amenable to logical calculation. This is similar to existing LLM architecture: Embedding spaces encode meaningful vectors in the same way, and separating hypersurfaces (the neurons of the network) categorize that space in numerous ways, allowing calculation on that space. Summing over multiplicative connections provides the basic Boolean architectural primitives {or, and} in a continuous and learnable way, which allows logical computation on that space. However, it allows such voluminous computation that the syntax and semantics are dense compared to the English language. The trust computed by the contextual structure provided here is explicit, subject to interpretation, and much higher level. The values of certainty propagate, giving not only a next-token prediction but a measure of confidence in the computed answer.
-* See [`Socrates.pdf`](./Socrates.pdf): Venn diagram as a model of luminousity. 
-
 ## Truth2vec
 * The server's TruthSet forms a second embedding space similar to the first. This design is called Truth2vec, which orthogonalizes a sentential embedding space that influences the original embedding space in virtue of higher-order concepts.
 * Contrastive learning algorithm for Truth2vec? No, use the embedding space, but the embedding space will be determined by bottom-up and top-down constraints. 
@@ -35,6 +21,19 @@
 * Having a low-rank feeling space is a bad thing. Buddha and Jesus both recommend being quiet in your mind as a way of increasing the rank of your feeling space. Which means that you let the distribution of the weight space be shaped by feelings and NOT truth. But in feeling training, all have an equal value. There is only Truth in the space of absolute truth: 1.0
 * Facts are statically encoded vectors whose location is determined syntactically.
 * Feelings are dynamically encoded vectors whose location is determined syntactically.
+
+## Sentence-Level Prediction
+* Use [Sentence Embeddings](doc/SentenceEmbeddings.pdf)
+* Turn the one-word lookahead prediction into head-first prediciton of the sentence. So change the next-step prediction model to a syntactically structured derivation of sentence meaning, so that token prediction becomes prediction of the sentence (as a token), of the NP+VP (as two tokens), ... until the full sentence has been specified. This would take the same number of production steps as a current LLM, but the iterative refinement of the next-sentence production is conceptually much different, and closer to human reasoning and refinement where there is a core truth (S) and spatial NP and temporal VP which are successively refined by adjectives and adverbs that scope the conceptual space of that kernel sentence.
+* Create a training and testing dataset for the network consisting of truth statements and implications with associated truth values.
+* For example, instead of "the fast dog jumped", predict an XML-encoded version of "(((dog) fast) the) jumped", such that we predict the head of the sentence first, then iteratively refine that conceptual space. 
+
+## Mereological Operations on Conceptual Space
+* Make improvements to NanoChat that allow it to compute truth within the geometric/conceptual space of the network, giving meaning to logical operations within that space (so use mereological operations to implement the ternary logic that is currently operating over the trust entries of the HME architecture in the current design). This means replacing AND with union, OR with intersection, IMPLICATION with parthood. See [Socrates.pdf](Socrates.pdf) for a quick sketch of deriving mereological (Venn-diagram-like) logic from entailment.
+* The architecture of WikiOracle is designed as a conceptual space, in the sense of Gardenfors. Conceptual spaces are similarity spaces, where similar concepts occupy regions of space close to one another. As spaces also of truth, they are amenable to logical calculation. This is similar to existing LLM architecture: Embedding spaces encode meaningful vectors in the same way, and separating hypersurfaces (the neurons of the network) categorize that space in numerous ways, allowing calculation on that space. Summing over multiplicative connections provides the basic Boolean architectural primitives {or, and} in a continuous and learnable way, which allows logical computation on that space. However, it allows such voluminous computation that the syntax and semantics are dense compared to the English language. The trust computed by the contextual structure provided here is explicit, subject to interpretation, and much higher level. The values of certainty propagate, giving not only a next-token prediction but a measure of confidence in the computed answer.
+* See [`Socrates.pdf`](./Socrates.pdf): Venn diagram as a model of luminousity. 
+* Use parser.py to alter the NanoChat input format as in [Grammar.md](doc/Grammar.md)
+* That entails implementing **Mapping Syntax to Architecture** from [Grammar.md](doc/Grammar.md) in Nanochat
 
 ## The Operation of an Enlightened Mind (mahamudra)
 * One pointedness is a distribution in space.

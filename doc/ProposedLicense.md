@@ -30,11 +30,11 @@ extending them for AI systems.
 
 ### License Comparison Table
 
-| License | Domain | Key Features | Typical Use |
-|---|---|---|---|
-| GPL-3.0 | Software | Strong copyleft, patent protection, source distribution requirement | Infrastructure software |
-| CC BY-SA 4.0 | Creative works | Attribution required, derivatives must remain under same license | Wikipedia articles |
-| Apache-2.0 | Software / model artifacts | Permissive reuse with patent grant | AI models and developer tools |
+| License      | Domain                     | Key Features                                                        | Typical Use                   |
+| ------------ | -------------------------- | ------------------------------------------------------------------- | ----------------------------- |
+| GPL-3.0      | Software                   | Strong copyleft, patent protection, source distribution requirement | Infrastructure software       |
+| CC BY-SA 4.0 | Creative works             | Attribution required, derivatives must remain under same license    | Wikipedia articles            |
+| Apache-2.0   | Software / model artifacts | Permissive reuse with patent grant                                  | AI models and developer tools |
 
 ### GPL-3.0
 

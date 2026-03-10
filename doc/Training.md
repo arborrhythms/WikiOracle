@@ -122,12 +122,12 @@ training examples from the online training pipeline.
 The output JSONL uses four record types, splitting the client identity
 into separate User and Server records:
 
-| Type | Tag | Purpose |
-|------|-----|---------|
-| `user` | `<User>` | User identity — username, uid, timestamp |
-| `server` | `<Server>` | Server identity — name, version, timestamp |
+| Type           | Tag              | Purpose                                                |
+| -------------- | ---------------- | ------------------------------------------------------ |
+| `user`         | `<User>`         | User identity — username, uid, timestamp               |
+| `server`       | `<Server>`       | Server identity — name, version, timestamp             |
 | `conversation` | `<Conversation>` | Messages with `<Q>` (query) and `<R>` (response) pairs |
-| `truth` | `<Truth>` | Extracted factual claims with trust and spacetime |
+| `truth`        | `<Truth>`        | Extracted factual claims with trust and spacetime      |
 
 Inside message content, user messages are wrapped in `<Q>...</Q>` and
 assistant messages in `<R>...</R>`.  Each sentence within a message is
@@ -152,14 +152,14 @@ at a particular place and time; at a different spacetime it may not be.
 
 The heuristic classifier in `sensation.py` detects these patterns:
 
-| Subtype | Pattern | Example |
-|---------|---------|---------|
-| Identity | "X is/are [a/an/the] Y" | "Socrates is a man" |
-| Predication | "X is/are ADJ" | "The sky is blue" |
-| Existence | "there is/are X" | "There are 8 planets" |
-| Mereological | "X contains/includes Y" | "Water contains hydrogen" |
-| Quantity | "X has/have N Y" | "I have 3 cats" |
-| Definition | "X is called/known as Y" | "A polygon is defined as..." |
+| Subtype      | Pattern                  | Example                      |
+| ------------ | ------------------------ | ---------------------------- |
+| Identity     | "X is/are [a/an/the] Y"  | "Socrates is a man"          |
+| Predication  | "X is/are ADJ"           | "The sky is blue"            |
+| Existence    | "there is/are X"         | "There are 8 planets"        |
+| Mereological | "X contains/includes Y"  | "Water contains hydrogen"    |
+| Quantity     | "X has/have N Y"         | "I have 3 cats"              |
+| Definition   | "X is called/known as Y" | "A polygon is defined as..." |
 
 Sentences without an IS pattern, or with subjective markers ("I think",
 "maybe", "might be"), questions, or meta-discourse ("That's a great
@@ -320,14 +320,14 @@ matrices, but online training uses AdamW for all groups because:
 The optimizer creates six parameter groups that mirror the production
 training regime in `nanochat/nanochat/gpt.py:GPT.setup_optimizer()`:
 
-| Group | Base LR | Parameters |
-|-------|---------|------------|
-| `lm_head` | 0.0027 | Output projection weights (language model head) |
-| `wte` | 0.136 | Token embedding weights |
-| `value_embeds` | 0.136 | Value residual stream embeddings |
-| `resid_lambdas` | 0.005 | Per-layer residual scaling scalars |
-| `x0_lambdas` | 0.5 | Skip-connection blending scalars |
-| `transformer_h` | 0.02 | All transformer block matrix parameters (attention, MLP, norms) |
+| Group           | Base LR | Parameters                                                      |
+| --------------- | ------- | --------------------------------------------------------------- |
+| `lm_head`       | 0.0027  | Output projection weights (language model head)                 |
+| `wte`           | 0.136   | Token embedding weights                                         |
+| `value_embeds`  | 0.136   | Value residual stream embeddings                                |
+| `resid_lambdas` | 0.005   | Per-layer residual scaling scalars                              |
+| `x0_lambdas`    | 0.5     | Skip-connection blending scalars                                |
+| `transformer_h` | 0.02    | All transformer block matrix parameters (attention, MLP, norms) |
 
 Parameters not matching any named group are included in `transformer_h`.
 All groups use the same AdamW optimizer — no Muon.
@@ -345,11 +345,11 @@ where:
 The **truth_weight** parameter (0.0–1.0) controls how much DoT gates
 the learning rate:
 
-| `truth_weight` | `lr_effective` | Behavior |
-|----------------|----------------|----------|
-| 0.0 | `lr_base × warmup` | Vanilla SFT — full LR regardless of DoT.  No truth bias. |
-| 0.5 | `lr_base × (0.5 × |DoT| + 0.5) × warmup` | Half-gated — DoT attenuates but never fully suppresses. |
-| 1.0 | `lr_base × |DoT| × warmup` | Fully DoT-gated — zero DoT means zero learning. |
+| `truth_weight` | `lr_effective`                           | Behavior                                                 |
+| -------------- | ---------------------------------------- | -------------------------------------------------------- |
+| 0.0            | `lr_base × warmup`                       | Vanilla SFT — full LR regardless of DoT.  No truth bias. |
+| 0.5            | `lr_base × (0.5 × |DoT| + 0.5) × warmup` | Half-gated — DoT attenuates but never fully suppresses.  |
+| 1.0            | `lr_base × |DoT| × warmup`               | Fully DoT-gated — zero DoT means zero learning.          |
 
 The `truth_weight` replaces the former boolean `rag` checkbox in the
 Settings dialog.  At `truth_weight=0`, the system trains on everything
@@ -368,11 +368,11 @@ corrupting the model when online training is first enabled:
 
     sigmoid_warmup(step) = 1 / (1 + exp(-k × (step - midpoint)))
 
-| Step | Warmup value | Effect |
-|------|-------------|--------|
-| 0 | ~0.007 | Nearly zero — first interactions barely train |
-| midpoint | 0.5 | Half strength |
-| 2 × midpoint | ~0.993 | Nearly full strength — training ramp is complete |
+| Step         | Warmup value | Effect                                           |
+| ------------ | ------------ | ------------------------------------------------ |
+| 0            | ~0.007       | Nearly zero — first interactions barely train    |
+| midpoint     | 0.5          | Half strength                                    |
+| 2 × midpoint | ~0.993       | Nearly full strength — training ramp is complete |
 
 The `warmup_steps` parameter (default 50) is the sigmoid midpoint.
 The steepness parameter `k` is fixed at 0.1.
@@ -460,14 +460,14 @@ cross-entropy loss value; the key name indicates the semantic direction.
 
 #### Configuration Summary
 
-| Parameter | Config path | Default | Description |
-|-----------|------------|---------|-------------|
-| `truth_weight` | `server.truthset.truth_weight` | 0.7 | DoT gating strength (0=vanilla SFT, 1=full DoT) |
-| `warmup_steps` | `server.training.warmup_steps` | 50 | Sigmoid warmup midpoint |
-| `grad_clip` | `server.training.grad_clip` | 1.0 | Max gradient norm |
-| `anchor_decay` | `server.training.anchor_decay` | 0.001 | EMA blend-back rate |
-| `truth_max_entries` | `server.training.truth_max_entries` | 1000 | Max server TruthSet size |
-| `device` | `server.training.device` | `"cpu"` | Training device |
+| Parameter           | Config path                         | Default | Description                                     |
+| ------------------- | ----------------------------------- | ------- | ----------------------------------------------- |
+| `truth_weight`      | `server.truthset.truth_weight`      | 0.7     | DoT gating strength (0=vanilla SFT, 1=full DoT) |
+| `warmup_steps`      | `server.training.warmup_steps`      | 50      | Sigmoid warmup midpoint                         |
+| `grad_clip`         | `server.training.grad_clip`         | 1.0     | Max gradient norm                               |
+| `anchor_decay`      | `server.training.anchor_decay`      | 0.001   | EMA blend-back rate                             |
+| `truth_max_entries` | `server.training.truth_max_entries` | 1000    | Max server TruthSet size                        |
+| `device`            | `server.training.device`            | `"cpu"` | Training device                                 |
 
 See [Config.md](./Config.md) §Server for the full configuration reference.
 
@@ -505,7 +505,7 @@ resolved by `resolve_entries()` in `bin/truth.py`:
 * `<reference>` → `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
 * `<authority>` → list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
 * `<provider>` → `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
-* `<fact>`, `<feeling>`, operators → pass through unchanged
+* `<fact>`, `<feeling>`, `<logic>` → pass through unchanged
 
 Entry types stored after resolution: `<fact>` (knowledge — no `<place>`/`<time>` children)
 and `<logic>` entries (operators wrapped in `<logic><and|or|not|non>...</logic>`).

@@ -21,6 +21,8 @@ Usage:
 """
 
 import sys
+from pathlib import Path
+
 import nltk
 from nltk import pos_tag
 from nltk.tokenize import word_tokenize
@@ -40,256 +42,170 @@ for _res in ("tokenizers/punkt_tab", "taggers/averaged_perceptron_tagger_eng",
 # Constants
 # ---------------------------------------------------------------------------
 
-SPATIAL_PREPS = {
-    "over", "under", "up", "down", "in", "out",
-    "on", "off", "through", "across", "above", "below",
-    "into", "onto", "upon",
-}
-
-COPULAS_IS = {"is", "are", "was", "were", "am", "be", "been", "being",
-              "'s", "'m", "'re"}
-COPULAS_HAS = {"has", "have", "had", "having", "'ve"}
-
-DEGREE_WORDS = {
-    "very", "quite", "somewhat", "rather", "extremely", "really",
-    "fairly", "slightly", "barely", "almost", "nearly", "pretty",
-    "highly", "particularly", "especially", "incredibly", "remarkably",
-    "absolutely", "completely", "totally", "entirely", "mostly",
-    "largely", "partly", "partially", "deeply", "fully", "truly",
-    "utterly", "thoroughly", "scarcely", "hardly", "merely", "exactly",
-}
-
-CLAUSE_JOINERS = {
-    "because", "since", "although", "though", "while",
-    "if", "unless", "until", "when", "where",
-    "after", "before", "so",
-}
-
 PUNCTUATION = set(".,;:?!\"'()-—–")
 
 # ---------------------------------------------------------------------------
-# POS mapping: Penn Treebank tag → grammar category
+# Grammar loading — derive all word lists from grammar.cfg
+# ---------------------------------------------------------------------------
+
+_GRAMMAR_DIR = Path(__file__).resolve().parent.parent / "data"
+_BASE_GRAMMAR = (_GRAMMAR_DIR / "grammar.cfg").read_text()
+_BASE_CFG = CFG.fromstring(_BASE_GRAMMAR)
+
+# Build function-word lookup from grammar's lexical rules.
+# Maps lowercase word → terminal name, e.g. {"is": "IS", "over": "P", ...}.
+_FUNC_WORDS = {}
+_GRAMMAR_LEXICAL = set()  # (terminal_name, word) pairs already in grammar
+for _prod in _BASE_CFG.productions():
+    if _prod.is_lexical():
+        _w = _prod.rhs()[0]
+        _nt = str(_prod.lhs())
+        _FUNC_WORDS[_w] = _nt
+        _GRAMMAR_LEXICAL.add((_nt, _w))
+
+# Coordination words — used by _select_tree to prefer clause-level parses.
+_COORD_WORDS = {w for (nt, w) in _GRAMMAR_LEXICAL if nt in ("AND", "OR")}
+
+# ---------------------------------------------------------------------------
+# POS mapping: Penn Treebank tag → grammar terminal
 # ---------------------------------------------------------------------------
 
 def ptb_to_grammar(word, tag):
-    """Map a (word, PTB-tag) pair to a SINGLE grammar category.
+    """Map a (word, PTB-tag) pair to a list of grammar terminal names.
 
-    Trusts the POS tagger's best guess.  One tag → one category.
-    If the parse fails, wordnet_categories() provides broader alternatives.
+    Function words are identified by the grammar's lexical rules (grammar.cfg).
+    Content words are classified by their POS tag.
     """
     low = word.lower()
 
-    # Copulas — test before verb fallback
-    if low in COPULAS_IS:
-        return ["copula"]
-    if low in COPULAS_HAS:
-        return ["possess"]
-
-    # Negation / privation (NOT covers both "not" and "non")
-    if low in ("not", "n't", "non"):
-        return ["not"]
+    # Function words — lookup in grammar-derived table
+    if low in _FUNC_WORDS:
+        return [_FUNC_WORDS[low]]
 
     # Contraction fragments from NLTK tokenization
     # "won't" → ["wo", "n't"], "can't" → ["ca", "n't"]
     if low in ("wo", "ca"):
-        return ["adv"]
-
-    # Coordination — "but", "yet", "nor" treated as conjunction (like "and")
-    if tag == "CC":
-        if low in ("and", "but", "yet", "nor"):
-            return ["and"]
-        return ["or"]
+        return ["ADV"]
 
     # Punctuation
     if tag in (".", ",", ":", "``", "''", "-LRB-", "-RRB-") or word in PUNCTUATION:
-        return ["punct"]
+        return ["PUNCT"]
 
     # Nouns
     if tag in ("NN", "NNS", "NNP", "NNPS", "PRP", "PRP$", "CD", "WP", "EX"):
-        return ["n"]
+        return ["N"]
 
     # Adjectives
     if tag in ("JJ", "JJR", "JJS"):
-        return ["adj"]
+        return ["ADJ"]
 
     # Verbs
     if tag in ("VB", "VBD", "VBG", "VBN", "VBP", "VBZ"):
-        return ["v"]
+        return ["V"]
 
-    # Adverbs — degree words become deg, others stay adv
+    # Adverbs
     if tag in ("RB", "RBR", "RBS", "WRB"):
-        if low in DEGREE_WORDS:
-            return ["deg"]
-        return ["adv"]
+        return ["ADV"]
 
     # Determiners
     if tag in ("DT", "PDT", "WDT"):
-        return ["det"]
+        return ["DET"]
 
-    # Prepositions — spatial vs non-spatial vs clause joiner
+    # Prepositions not in grammar → adjective fallback
     if tag in ("IN", "TO", "RP"):
-        if low in SPATIAL_PREPS:
-            return ["p"]
-        if low in CLAUSE_JOINERS:
-            return ["and"]
-        return ["adj"]  # non-spatial prepositions → adj per grammar
+        return ["ADJ"]
 
-    # Modal auxiliaries → adv (modality via MP)
+    # Coordination not in grammar
+    if tag == "CC":
+        return ["OR"]
+
+    # Modal auxiliaries → adverb (modality via MP)
     if tag == "MD":
-        return ["adv"]
+        return ["ADV"]
 
-    # Possessive ending, foreign words, etc. → adj fallback
+    # Possessive ending, foreign words, etc. → adjective fallback
     if tag in ("POS", "FW"):
-        return ["adj"]
+        return ["ADJ"]
 
     # Unknown → noun (least committal)
-    return ["n"]
+    return ["N"]
 
 
 def wordnet_categories(word):
-    """Get all possible grammar categories for a word using WordNet.
+    """Get all possible grammar terminal names for a word using WordNet.
 
     Used as fallback when strict POS-based parsing fails.
-    Function words are handled by lookup; content words use WordNet synsets.
+    Function words get their grammar terminal; content words use WordNet
+    synsets to determine all plausible open-class terminals.
     """
     from nltk.corpus import wordnet as wn
 
     low = word.lower()
+    cats = []
 
-    # --- Function words (not in WordNet) ---
-    if low in COPULAS_IS:
-        return ["copula"]
-    if low in COPULAS_HAS:
-        return ["possess"]
-    if low in ("not", "n't", "non"):
-        return ["not"]
-    if low in ("and", "but", "yet", "nor"):
-        return ["and"]
-    if low == "or":
-        return ["or"]
-    if low in SPATIAL_PREPS:
-        return ["p"]
-    if low in CLAUSE_JOINERS:
-        return ["and", "adj"]
-    if low in DEGREE_WORDS:
-        return ["deg", "adv"]
-    # Determiners / demonstratives — demonstratives can also be pronouns
-    if low in ("that", "this", "these", "those", "all", "both", "each"):
-        return ["det", "n"]
-    if low in ("the", "a", "an", "every", "some", "any", "no",
-               "my", "your", "his", "her", "its", "our", "their"):
-        return ["det"]
-    # Pronouns
-    if low in ("i", "me", "you", "he", "him", "she", "it",
-               "we", "us", "they", "them", "what", "who", "whom"):
-        return ["n"]
-    # Modal auxiliaries (including contraction fragments)
+    # Function word from grammar
+    if low in _FUNC_WORDS:
+        cats.append(_FUNC_WORDS[low])
+
+    # Modal auxiliaries (including contraction fragments) → ADV only
     if low in ("can", "could", "will", "would", "shall", "should",
                "may", "might", "must", "wo", "ca"):
-        return ["adv"]
+        if "ADV" not in cats:
+            cats.append("ADV")
+        return cats
 
-    # --- Content words: WordNet lookup ---
+    # Pronouns → N
+    if low in ("i", "me", "you", "he", "him", "she", "it",
+               "we", "us", "they", "them", "what", "who", "whom"):
+        if "N" not in cats:
+            cats.append("N")
+        return cats
+
+    # Content words: WordNet lookup
     synsets = wn.synsets(low)
 
     if not synsets:
-        # Not found — try as unknown content word (all open-class categories)
-        return ["n", "v", "adj"]
+        if not cats:
+            return ["N", "V", "ADJ"]
+        return cats
 
     wn_pos = {s.pos() for s in synsets}
-    cats = []
-    if "n" in wn_pos:
-        cats.append("n")
-    if "v" in wn_pos:
-        cats.append("v")
-    if "a" in wn_pos or "s" in wn_pos:
-        cats.append("adj")
-    if "r" in wn_pos:
-        cats.append("adv")
+    if "n" in wn_pos and "N" not in cats:
+        cats.append("N")
+    if "v" in wn_pos and "V" not in cats:
+        cats.append("V")
+    if ("a" in wn_pos or "s" in wn_pos) and "ADJ" not in cats:
+        cats.append("ADJ")
+    if "r" in wn_pos and "ADV" not in cats:
+        cats.append("ADV")
 
-    return cats if cats else ["n"]
+    return cats if cats else ["N"]
 
 
 # ---------------------------------------------------------------------------
 # CFG builder
 # ---------------------------------------------------------------------------
 
-# Structural (non-lexical) CFG rules, mirroring the production rule tables
-# in Grammar.md.  Lexical rules (e.g. N -> "fox") are added dynamically
-# by build_grammar() based on the words in the input sentence.
-STRUCTURAL_RULES = """
-    S -> NP
-    S -> NP VP
-    S -> MP S
-    S -> NP IS NP
-    S -> NP IS AP
-    S -> NP HAS NP
-    S -> NOT S
-    S -> S AND S
-    S -> S OR S
-    S -> IS NP AP
-    S -> V NP VP
-    NP -> N
-    NP -> AP NP
-    NP -> NP PP
-    NP -> NP AND NP
-    NP -> NP OR NP
-    VP -> V
-    VP -> ADV VP
-    VP -> MP VP
-    VP -> ADJ VP
-    VP -> V PP
-    VP -> V S
-    VP -> V MP
-    VP -> NOT VP
-    AP -> ADJ
-    AP -> DET
-    AP -> ADJ AP
-    AP -> DEG AP
-    MP -> ADV
-    MP -> ADV MP
-    PP -> P NP
-    IS -> COPULA
-    IS -> COPULA NOT
-    HAS -> POSSESS
-    HAS -> POSSESS NOT
-"""
-
-
-# Grammar category → CFG nonterminal symbol.
-# ptb_to_grammar() and wordnet_categories() return category strings like "n",
-# "copula", etc.  build_grammar() uses this map to create the corresponding
-# NLTK Nonterminal objects for lexical productions.
-NT_MAP = {
-    "n": "N", "adj": "ADJ", "v": "V", "adv": "ADV", "det": "DET",
-    "deg": "DEG",
-    "p": "P", "copula": "COPULA", "possess": "POSSESS", "not": "NOT",
-    "and": "AND", "or": "OR", "punct": "PUNCT",
-}
-
-
 def build_grammar(tagged_tokens):
-    """Build an NLTK CFG from structural rules + lexical rules for input tokens.
+    """Build an NLTK CFG from external grammar + dynamic content-word rules.
 
-    tagged_tokens is a list of (word, [cat1, cat2, ...]) pairs where each word
-    may have multiple possible categories.
+    tagged_tokens is a list of (word, [terminal1, terminal2, ...]) pairs.
+
+    Function words match the enumerated lexical rules already in grammar.cfg.
+    Content words (N, V, ADJ, ADV) and case-variants of function words get
+    dynamic terminal rules added here.
     """
     from nltk.grammar import Nonterminal, Production
 
-    # Parse structural rules
-    base_grammar = CFG.fromstring(STRUCTURAL_RULES)
-    productions = list(base_grammar.productions())
+    productions = list(_BASE_CFG.productions())
 
-    # Add lexical rules programmatically (avoids escaping issues)
     seen = set()
     for word, cats in tagged_tokens:
         for cat in cats:
-            nt = NT_MAP.get(cat)
-            if nt is None:
-                continue
-            key = (nt, word)
-            if key not in seen:
+            key = (cat, word)
+            if key not in _GRAMMAR_LEXICAL and key not in seen:
                 seen.add(key)
-                productions.append(Production(Nonterminal(nt), [word]))
+                productions.append(Production(Nonterminal(cat), [word]))
 
     return CFG(Nonterminal("S"), productions)
 
@@ -298,13 +214,13 @@ def build_grammar(tagged_tokens):
 # Tree → XML transformer
 # ---------------------------------------------------------------------------
 
-def _copula_surface(op_tree):
-    """Extract surface word and optional negation from IS/HAS nonterminal.
+def _definitive_surface(op_tree):
+    """Extract surface word and optional negation from DEF/HAS nonterminal.
 
-    IS → COPULA         → ('is', None)
-    IS → COPULA NOT     → ('is', "n't")
-    HAS → POSSESS       → ('has', None)
-    HAS → POSSESS NOT   → ('has', 'not')
+    DEF → IS             → ('is', None)    — definitive identity
+    DEF → IS NOT         → ('is', "n't")   — negated definitive
+    HAS → POSSESS        → ('has', None)   — definitive possession
+    HAS → POSSESS NOT    → ('has', 'not')  — negated definitive possession
     """
     ch = list(op_tree)
     base = ch[0]
@@ -321,10 +237,10 @@ def _not_tag(surface_word):
     return "non" if surface_word.lower() == "non" else "not"
 
 
-def _emit_copular(pad, indent, op_tag, op_tree, subject, predicate):
-    """Emit XML for a copular construction (is/has).
+def _emit_definitive(pad, indent, op_tag, op_tree, subject, predicate):
+    """Emit XML for a definitive construction (is/has).
 
-    When the IS/HAS nonterminal contains negation (IS → COPULA NOT),
+    When the DEF/HAS nonterminal contains negation (DEF → IS NOT),
     the negation wraps the predicate:
 
         <is word="is">               <is word="is">
@@ -334,7 +250,7 @@ def _emit_copular(pad, indent, op_tag, op_tree, subject, predicate):
                                        </not>
                                      </is>
     """
-    surface, neg = _copula_surface(op_tree)
+    surface, neg = _definitive_surface(op_tree)
     lines = [f'{pad}<{op_tag} word="{surface}">']
     lines.append(tree_to_xml(subject, indent + 1))
     if neg:
@@ -353,16 +269,16 @@ def tree_to_xml(tree, indent=0):
     """Convert an NLTK parse tree into indented XML following Grammar.md.
 
     Each production rule maps to a specific operator:
-        union        — rank-lifting composition (predication, spatial, modal)
+        union        — rank-lifting composition (predication, prepositional, modal)
         intersection — rank-dropping composition (adjective/adverb narrowing)
         conjunction  — accumulative coordination (and)
         disjunction  — alternative coordination (or)
-        is / has     — copular identity / possession (via _emit_copular)
+        is / has     — definitive identity / possession (via _emit_definitive)
         not / non    — negation / privation
-        spatial      — preposition relocating attention head
+        prep         — preposition relocating attention head
 
     Terminal nonterminals (N, ADJ, V, …) emit self-closing XML leaves.
-    Operator-word terminals (COPULA, POSSESS, NOT, AND, OR) return None
+    Operator-word terminals (IS, POSSESS, NOT, AND, OR) return None
     because their surface words are emitted by the parent operator element.
     """
     pad = "  " * indent
@@ -382,7 +298,7 @@ def tree_to_xml(tree, indent=0):
             "DET": "det", "DEG": "deg", "P": "p", "PUNCT": "punct",
         }
         # Operator-word terminals (handled by parent operator)
-        if label in ("COPULA", "POSSESS", "NOT", "AND", "OR"):
+        if label in ("IS", "POSSESS", "NOT", "AND", "OR"):
             return None
         xml_tag = tag_map.get(label, "n")
         return f'{pad}<{xml_tag} word="{word}"/>'
@@ -416,15 +332,23 @@ def tree_to_xml(tree, indent=0):
             lines.append(f"{pad}</union>")
             return "\n".join(lines)
 
-        # Copular rules — IS/HAS nonterminals handle negation internally
-        if child_labels == ["NP", "IS", "NP"]:
-            return _emit_copular(pad, indent, "is", children[1], children[0], children[2])
+        if child_labels == ["PP", "S"]:
+            # Pre-sentential PP adjunct: "In my opinion this is wrong"
+            lines = [f"{pad}<union>"]
+            lines.append(tree_to_xml(children[0], indent + 1))
+            lines.append(tree_to_xml(children[1], indent + 1))
+            lines.append(f"{pad}</union>")
+            return "\n".join(lines)
 
-        if child_labels == ["NP", "IS", "AP"]:
-            return _emit_copular(pad, indent, "is", children[1], children[0], children[2])
+        # Definitive rules — DEF/HAS nonterminals handle negation internally
+        if child_labels == ["NP", "DEF", "NP"]:
+            return _emit_definitive(pad, indent, "is", children[1], children[0], children[2])
+
+        if child_labels == ["NP", "DEF", "AP"]:
+            return _emit_definitive(pad, indent, "is", children[1], children[0], children[2])
 
         if child_labels == ["NP", "HAS", "NP"]:
-            return _emit_copular(pad, indent, "has", children[1], children[0], children[2])
+            return _emit_definitive(pad, indent, "has", children[1], children[0], children[2])
 
         if child_labels == ["NOT", "S"]:
             # Sentence negation or privation: "not S" / "non S"
@@ -453,9 +377,13 @@ def tree_to_xml(tree, indent=0):
             lines.append(f"{pad}</disjunction>")
             return "\n".join(lines)
 
-        if child_labels == ["IS", "NP", "AP"]:
-            # Copular question (inverted): "Is water wet?" / "Isn't water wet?"
-            return _emit_copular(pad, indent, "is", children[0], children[1], children[2])
+        if child_labels == ["DEF", "NP", "AP"]:
+            # Definitive question (inverted): "Is water wet?" / "Isn't water wet?"
+            return _emit_definitive(pad, indent, "is", children[0], children[1], children[2])
+
+        if child_labels == ["DEF", "NP", "NP"]:
+            # Definitive question with NP predicate (inverted): "Is Paris the capital?"
+            return _emit_definitive(pad, indent, "is", children[0], children[1], children[2])
 
         if child_labels == ["V", "NP", "VP"]:
             # Auxiliary question (inverted): "Does the fox jump?"
@@ -484,7 +412,7 @@ def tree_to_xml(tree, indent=0):
             return "\n".join(lines)
 
         if child_labels == ["NP", "PP"]:
-            # NP modified by spatial phrase: "the dog on the hill"
+            # NP modified by prepositional phrase: "the dog on the hill"
             lines = [f"{pad}<union>"]
             lines.append(tree_to_xml(children[1], indent + 1))  # PP
             lines.append(tree_to_xml(children[0], indent + 1))  # NP
@@ -539,8 +467,16 @@ def tree_to_xml(tree, indent=0):
             lines.append(f"{pad}</intersection>")
             return "\n".join(lines)
 
+        if child_labels == ["V", "NP"]:
+            # Transitive verb + direct object: "contains hydrogen"
+            lines = [f"{pad}<union>"]
+            lines.append(tree_to_xml(children[0], indent + 1))  # V (predicate)
+            lines.append(tree_to_xml(children[1], indent + 1))  # NP (object)
+            lines.append(f"{pad}</union>")
+            return "\n".join(lines)
+
         if child_labels == ["V", "PP"]:
-            # Verb + spatial complement: "jumps over the dog"
+            # Verb + PP complement: "jumps over the dog"
             lines = [f"{pad}<union>"]
             lines.append(tree_to_xml(children[0], indent + 1))
             lines.append(tree_to_xml(children[1], indent + 1))
@@ -560,6 +496,31 @@ def tree_to_xml(tree, indent=0):
             lines = [f"{pad}<union>"]
             lines.append(tree_to_xml(children[0], indent + 1))
             lines.append(tree_to_xml(children[1], indent + 1))
+            lines.append(f"{pad}</union>")
+            return "\n".join(lines)
+
+        if child_labels == ["DEF", "VP"]:
+            # Passive/progressive auxiliary: "is defined", "is running"
+            # The copula is absorbed into the VP as a verbal element.
+            surface, neg = _definitive_surface(children[0])
+            lines = [f"{pad}<union>"]
+            lines.append(f'{"  " * (indent + 1)}<v word="{surface}"/>')
+            if neg:
+                tag = _not_tag(neg)
+                inner_pad = "  " * (indent + 1)
+                lines.append(f'{inner_pad}<{tag} word="{neg}">')
+                lines.append(tree_to_xml(children[1], indent + 2))
+                lines.append(f'{inner_pad}</{tag}>')
+            else:
+                lines.append(tree_to_xml(children[1], indent + 1))
+            lines.append(f"{pad}</union>")
+            return "\n".join(lines)
+
+        if child_labels == ["VP", "PP"]:
+            # Post-verbal PP modification: "ran to the store"
+            lines = [f"{pad}<union>"]
+            lines.append(tree_to_xml(children[1], indent + 1))  # PP (modifier)
+            lines.append(tree_to_xml(children[0], indent + 1))  # VP (head)
             lines.append(f"{pad}</union>")
             return "\n".join(lines)
 
@@ -613,9 +574,9 @@ def tree_to_xml(tree, indent=0):
     if label == "PP":
         if child_labels == ["P", "NP"]:
             prep_word = children[0][0] if isinstance(children[0], Tree) else children[0]
-            lines = [f'{pad}<spatial word="{prep_word}">']
+            lines = [f'{pad}<prep word="{prep_word}">']
             lines.append(tree_to_xml(children[1], indent + 1))
-            lines.append(f"{pad}</spatial>")
+            lines.append(f"{pad}</prep>")
             return "\n".join(lines)
 
     # Fallback: unrecognised production — emit children as-is.
@@ -656,23 +617,26 @@ def fix_noun_modifiers(grammar_tokens):
     English frequently uses nouns as modifiers ("chicken soup", "car door").
     The POS tagger labels both words as nouns, but the grammar needs the
     first one to also be available as an adjective so NP → AP NP can fire.
-    This pass adds "adj" as an alternative category for any noun that
+    This pass adds "ADJ" as an alternative terminal for any noun that
     immediately precedes another noun.
     """
     result = list(grammar_tokens)
     for i in range(len(result) - 1):
         word_i, cats_i = result[i]
         _, cats_next = result[i + 1]
-        if "n" in cats_i and "n" in cats_next and "adj" not in cats_i:
-            result[i] = (word_i, cats_i + ["adj"])
+        if "N" in cats_i and "N" in cats_next and "ADJ" not in cats_i:
+            result[i] = (word_i, cats_i + ["ADJ"])
     return result
 
 
 def _try_parse(grammar_tokens, max_trees=50):
     """Attempt to parse grammar_tokens, returning list of NLTK Trees (may be empty).
 
-    grammar_tokens: list of (word, [cat1, cat2, ...]) pairs.
+    grammar_tokens: list of (word, [terminal1, ...]) pairs.
     max_trees: cap on how many parses to enumerate.
+
+    The parser receives actual words.  Function words match lexical rules
+    in grammar.cfg; content words match dynamic rules added by build_grammar.
     """
     grammar = build_grammar(grammar_tokens)
     parser = EarleyChartParser(grammar)
@@ -692,8 +656,7 @@ def _select_tree(trees, grammar_tokens):
     Prefers clause-coordination parses when coordination tokens are present.
     """
     tree = trees[0]
-    coord_words = {"and", "but", "or", "yet", "nor"} | CLAUSE_JOINERS
-    has_coord = any(w.lower() in coord_words for w, _ in grammar_tokens)
+    has_coord = any(w.lower() in _COORD_WORDS for w, _ in grammar_tokens)
     if has_coord and not has_clause_coord(tree):
         for candidate in trees[1:]:
             if has_clause_coord(candidate):
@@ -723,7 +686,7 @@ def parse(sentence):
     punct_tokens = []
     for word, tag in tagged:
         cats = ptb_to_grammar(word, tag)
-        if cats == ["punct"]:
+        if cats == ["PUNCT"]:
             punct_tokens.append(word)
         else:
             content_tagged.append((word, tag, cats))

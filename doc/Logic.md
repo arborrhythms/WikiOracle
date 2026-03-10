@@ -16,10 +16,10 @@ Examples of feelings: greetings ("Hello!"), encouragement ("That's a great quest
 
 Facts are classified into two kinds based on spatiotemporal binding:
 
-| Kind | Binding | Persistence | Buddhist Equivalent |
-|---|---|---|---|
-| **knowledge** | universal / no spacetime anchor | server TruthSet | *anumāna* (inference) |
-| **news** | bound to a specific place and/or time | session-only | *pratyakṣa* (direct perception) |
+| Kind          | Binding                               | Persistence     | Buddhist Equivalent             |
+| ------------- | ------------------------------------- | --------------- | ------------------------------- |
+| **knowledge** | universal / no spacetime anchor       | server TruthSet | *anumāna* (inference)           |
+| **news**      | bound to a specific place and/or time | session-only    | *pratyakṣa* (direct perception) |
 
 The classification is stored in the `kind` attribute of `<fact>` tags:
 
@@ -47,13 +47,13 @@ Wikipedia links (core):
 
 Each trust entry carries a **trust** value on the interval [-1..0..+1], encoding a Fuzzy Kleene (continuous ternary) logic:
 
-| Certainty | Meaning |
-|-----------|---------|
-| **+1** | Certainly true. An axiom that supports deductive reasoning. |
-| **0 < c < +1** | Soft belief. Grounds fuzzy deductions with propagated certainty. |
-| **0** | Ignorance. Equivalent to not making the statement at all; the entry is inert. |
-| **-1 < c < 0** | Soft disbelief. Evidence against the claim. |
-| **-1** | Certainly false. Active disbelief. |
+| Certainty      | Meaning                                                                       |
+| -------------- | ----------------------------------------------------------------------------- |
+| **+1**         | Certainly true. An axiom that supports deductive reasoning.                   |
+| **0 < c < +1** | Soft belief. Grounds fuzzy deductions with propagated certainty.              |
+| **0**          | Ignorance. Equivalent to not making the statement at all; the entry is inert. |
+| **-1 < c < 0** | Soft disbelief. Evidence against the claim.                                   |
+| **-1**         | Certainly false. Active disbelief.                                            |
 
 Certainty propagates through deductive chains: a conclusion derived from two premises with certainties c1 and c2 inherits certainty min(c1, c2). Entries with certainty 0 contribute nothing to reasoning.
 
@@ -77,24 +77,24 @@ The key insight behind `non`: Kleene logic cannot detect uncertainty; it can onl
 
 WikiOracle has two negation operators with distinct epistemic roles:
 
-| Operator | Formula | Effect |
-|----------|---------|--------|
-| `not(a)` | −a | Flips belief to disbelief (and vice versa). Affirming negation. |
+| Operator | Formula    | Effect                                                           |
+| -------- | ---------- | ---------------------------------------------------------------- |
+| `not(a)` | −a         | Flips belief to disbelief (and vice versa). Affirming negation.  |
 | `non(a)` | 1 − 2\|a\| | Measures epistemic openness on [-1, +1]. Non-affirming negation. |
 
 `not` is straightforward: if you believe a claim at +0.9, `not` yields −0.9 — you now disbelieve it with equal strength. This is *affirming* negation: it asserts the contrary.
 
 `non` does something fundamentally different. It erases the sign — the direction of commitment — and returns a value on the same [-1, +1] scale that measures how open or closed the epistemic state is:
 
-| Input a | \|a\| | non(a) = 1 − 2\|a\| | Reading |
-|---------|-------|----------------------|---------|
-| ±1.0 | 1.0 | −1.0 | Full certainty → fully closed |
-| ±0.9 | 0.9 | −0.8 | Strong certainty → strongly closed |
-| ±0.7 | 0.7 | −0.4 | |
-| ±0.5 | 0.5 | 0.0 | Moderate certainty → neither open nor closed |
-| ±0.3 | 0.3 | 0.4 | |
-| ±0.1 | 0.1 | 0.8 | Weak certainty → strongly open |
-| 0.0 | 0.0 | 1.0 | Ignorance → fully open |
+| Input a | \|a\| | non(a) = 1 − 2\|a\| | Reading                                      |
+| ------- | ----- | ------------------- | -------------------------------------------- |
+| ±1.0    | 1.0   | −1.0                | Full certainty → fully closed                |
+| ±0.9    | 0.9   | −0.8                | Strong certainty → strongly closed           |
+| ±0.7    | 0.7   | −0.4                |
+| ±0.5    | 0.5   | 0.0                 | Moderate certainty → neither open nor closed |
+| ±0.3    | 0.3   | 0.4                 |
+| ±0.1    | 0.1   | 0.8                 | Weak certainty → strongly open               |
+| 0.0     | 0.0   | 1.0                 | Ignorance → fully open                       |
 
 Three properties stand out:
 

@@ -66,23 +66,23 @@ SVG tree visualisation
 
 ### Tree panel
 
-| Gesture | Action |
-|---|---|
-| Click | Navigate — select that conversation, show its messages |
-| Double-click | Open context menu (Branch, Delete) |
-| Right-click | Open context menu (same) |
+| Gesture                  | Action                                                      |
+| ------------------------ | ----------------------------------------------------------- |
+| Click                    | Navigate — select that conversation, show its messages      |
+| Double-click             | Open context menu (Branch, Delete)                          |
+| Right-click              | Open context menu (same)                                    |
 | Drag node → drop on node | Merge — append source's messages into target, remove source |
 
 A 200ms timer disambiguates click from double-click. Context menus are appended to `document.body` with fixed positioning to avoid clipping by the tree container's `overflow: hidden`.
 
 ### Keyboard navigation
 
-| Key | Action |
-|---|---|
-| Arrow Up | Navigate to parent conversation |
-| Arrow Down | Navigate to first child conversation |
-| Arrow Right | Next node in inorder traversal |
-| Arrow Left | Previous node in inorder traversal |
+| Key         | Action                               |
+| ----------- | ------------------------------------ |
+| Arrow Up    | Navigate to parent conversation      |
+| Arrow Down  | Navigate to first child conversation |
+| Arrow Right | Next node in inorder traversal       |
+| Arrow Left  | Previous node in inorder traversal   |
 
 Keyboard events are ignored when a text input, textarea, or select
 element has focus, or when the context overlay is active.
@@ -112,10 +112,10 @@ reading path:
 
 ### Chat panel
 
-| Gesture | Action |
-|---|---|
+| Gesture             | Action                                    |
+| ------------------- | ----------------------------------------- |
 | Right-click message | Context menu (Move up, Move down, Delete) |
-| Drag message | Reorder within the conversation |
+| Drag message        | Reorder within the conversation           |
 
 ### Merge semantics
 
@@ -139,20 +139,20 @@ preferences (layout, theme, confirm actions) are also saved in state.
 
 ### Settings Controls
 
-| Control | ID | Type | Config path | Default | Description |
-|---------|-----|------|-------------|---------|-------------|
-| Username | `setUsername` | text | `state.client_name` | `"User"` | Display name shown in chat messages. |
-| Provider | `setProvider` | select | `providers.default` | `"wikioracle"` | Active LLM provider. |
-| Layout | `setLayout` | select | `state.ui.layout` | `"flat"` | Panel layout mode (`horizontal`, `vertical`, `flat`). |
-| Theme | `setTheme` | select | `state.ui.theme` | `"system"` | Colour theme (`system`, `light`, `dark`). |
-| Temperature | `setTemperature` | range (0–2) | `server.evaluation.temperature` | `0.7` | Sampling temperature for the LLM. |
-| Max tokens | `setMaxTokens` | number | `server.evaluation.max_tokens` | `128` | Maximum tokens in the LLM response. |
-| Timeout | `setTimeout` | number | `server.evaluation.timeout` | `120` | Request timeout in seconds. |
-| Truth weight | `setTruthWeight` | range (0–1) | `server.truthset.truth_weight` | `0.7` | How much DoT gates the learning rate. See below. |
-| Max truth entries | `setTruthMaxEntries` | number | `server.training.truth_max_entries` | `1000` | Maximum entries in the server TruthSet before trimming. |
-| Store concrete facts | `setStoreConcrete` | checkbox | `server.truthset.store_concrete` | `false` | Store spatiotemporally-bound facts (news) in the server TruthSet. |
-| Fetch URLs | `setUrlFetch` | checkbox | `server.evaluation.url_fetch` | `false` | Allow the assistant to fetch URL content. |
-| Confirm actions | `setConfirmActions` | checkbox | `state.ui.confirm_actions` | `false` | Require confirmation before destructive operations. |
+| Control              | ID                   | Type        | Config path                         | Default        | Description                                                       |
+| -------------------- | -------------------- | ----------- | ----------------------------------- | -------------- | ----------------------------------------------------------------- |
+| Username             | `setUsername`        | text        | `state.client_name`                 | `"User"`       | Display name shown in chat messages.                              |
+| Provider             | `setProvider`        | select      | `providers.default`                 | `"wikioracle"` | Active LLM provider.                                              |
+| Layout               | `setLayout`          | select      | `state.ui.layout`                   | `"flat"`       | Panel layout mode (`horizontal`, `vertical`, `flat`).             |
+| Theme                | `setTheme`           | select      | `state.ui.theme`                    | `"system"`     | Colour theme (`system`, `light`, `dark`).                         |
+| Temperature          | `setTemperature`     | range (0–2) | `server.evaluation.temperature`     | `0.7`          | Sampling temperature for the LLM.                                 |
+| Max tokens           | `setMaxTokens`       | number      | `server.evaluation.max_tokens`      | `128`          | Maximum tokens in the LLM response.                               |
+| Timeout              | `setTimeout`         | number      | `server.evaluation.timeout`         | `120`          | Request timeout in seconds.                                       |
+| Truth weight         | `setTruthWeight`     | range (0–1) | `server.truthset.truth_weight`      | `0.7`          | How much DoT gates the learning rate. See below.                  |
+| Max truth entries    | `setTruthMaxEntries` | number      | `server.training.truth_max_entries` | `1000`         | Maximum entries in the server TruthSet before trimming.           |
+| Store concrete facts | `setStoreConcrete`   | checkbox    | `server.truthset.store_concrete`    | `false`        | Store spatiotemporally-bound facts (news) in the server TruthSet. |
+| Fetch URLs           | `setUrlFetch`        | checkbox    | `server.evaluation.url_fetch`       | `false`        | Allow the assistant to fetch URL content.                         |
+| Confirm actions      | `setConfirmActions`  | checkbox    | `state.ui.confirm_actions`          | `false`        | Require confirmation before destructive operations.               |
 
 ### Truth Weight Slider
 
@@ -234,49 +234,49 @@ strings hard-coded in `client/util.js` match the tables below.
 
 ### Dropdown labels
 
-| Key | Label |
-|---|---|
-| `feeling` | `Feeling: subjective, non-verifiable claim` |
-| `fact` | `Fact: disprovable assertion about the world` |
-| `reference` | `Reference: citation with external link` |
-| `authority` | `Authority: pointer to remote TruthSet` |
-| `provider` | `Provider: external LLM endpoint` |
-| `not` | `NOT: negation of a truth entry` |
-| `non` | `NON: non-affirming weakening toward zero` |
-| `or` | `OR: true when any child is true (max)` |
-| `and` | `AND: true when all children are true (min)` |
+| Key         | Label                                         |
+| ----------- | --------------------------------------------- |
+| `feeling`   | `Feeling: subjective, non-verifiable claim`   |
+| `fact`      | `Fact: disprovable assertion about the world` |
+| `reference` | `Reference: citation with external link`      |
+| `authority` | `Authority: pointer to remote TruthSet`       |
+| `provider`  | `Provider: external LLM endpoint`             |
+| `not`       | `NOT: negation of a truth entry`              |
+| `non`       | `NON: non-affirming weakening toward zero`    |
+| `or`        | `OR: true when any child is true (max)`       |
+| `and`       | `AND: true when all children are true (min)`  |
 
 ### Descriptions
 
-| Key | Description |
-|---|---|
-| `feeling` | `Feeling — a subjective, non-verifiable claim (not penalizable).` |
-| `fact` | `Fact — a disprovable assertion with a degree of truth.` |
-| `reference` | `Reference — a citation linking to an external source.` |
-| `and` | `AND — true when all children are true (min trust).` |
-| `or` | `OR — true when any child is true (max trust).` |
-| `not` | `NOT — negation of a child entry.` |
-| `non` | `NON — non-affirming negation (weakens trust toward zero).` |
-| `provider` | `Provider — an LLM API endpoint.` |
-| `authority` | `Authority — a remote knowledge base (XML URL).` |
+| Key         | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| `feeling`   | `Feeling — a subjective, non-verifiable claim (not penalizable).` |
+| `fact`      | `Fact — a disprovable assertion with a degree of truth.`          |
+| `reference` | `Reference — a citation linking to an external source.`           |
+| `and`       | `AND — true when all children are true (min trust).`              |
+| `or`        | `OR — true when any child is true (max trust).`                   |
+| `not`       | `NOT — negation of a child entry.`                                |
+| `non`       | `NON — non-affirming negation (weakens trust toward zero).`       |
+| `provider`  | `Provider — an LLM API endpoint.`                                 |
+| `authority` | `Authority — a remote knowledge base (XML URL).`                  |
 
 ### Templates
 
-| Key | Template |
-|---|---|
-| `feeling` | `<feeling>Subjective statement here.</feeling>` |
-| `fact` | `<fact DoT="0.0">Assertion text here.</fact>` |
-| `reference` | `<reference DoT="0.0"><a href="https://example.com">Link text</a></reference>` |
-| `and` | `<logic><and><ref id=""/><ref id=""/></and></logic>` |
-| `or` | `<logic><or><ref id=""/><ref id=""/></or></logic>` |
-| `not` | `<logic><not><ref id=""/></not></logic>` |
-| `non` | `<logic><non><ref id=""/></non></logic>` |
-| `provider` | `<provider DoT="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>` |
-| `authority` | `<authority DoT="0.0"><url>https://example.com/kb.xml</url></authority>` |
+| Key         | Template                                                                                             |
+| ----------- | ---------------------------------------------------------------------------------------------------- |
+| `feeling`   | `<feeling>Subjective statement here.</feeling>`                                                      |
+| `fact`      | `<fact DoT="0.0">Assertion text here.</fact>`                                                        |
+| `reference` | `<reference DoT="0.0"><a href="https://example.com">Link text</a></reference>`                       |
+| `and`       | `<logic><and><ref id=""/><ref id=""/></and></logic>`                                                 |
+| `or`        | `<logic><or><ref id=""/><ref id=""/></or></logic>`                                                   |
+| `not`       | `<logic><not><ref id=""/></not></logic>`                                                             |
+| `non`       | `<logic><non><ref id=""/></non></logic>`                                                             |
+| `provider`  | `<provider DoT="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>` |
+| `authority` | `<authority DoT="0.0"><url>https://example.com/kb.xml</url></authority>`                             |
 
 ### Empty state
 
-| Key | Text |
-|---|---|
+| Key           | Text                                                         |
+| ------------- | ------------------------------------------------------------ |
 | `truth_empty` | `No truth entries. Add truth here or Open a new state file.` |
 

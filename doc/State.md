@@ -58,30 +58,30 @@ The state file is an XML document containing a `<truth>` section. It may be a fu
 
 Client metadata. All fields except `client_name`, `client_id`, and `ui` are required.
 
-| Field | Type | Description |
-|---|---|---|
-| `version` | positive integer | State grammar version (currently `2`). |
-| `schema` | string | Schema URL, normally `https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd`. |
-| `time_creation` | string (ISO 8601) | Timestamp of initial state creation. |
-| `time_lastModified` | string (ISO 8601) | Timestamp of last state write. |
-| `title` | string | Document or project title. |
-| `client_name` | string (optional) | Display name of the client user. |
-| `client_id` | string (optional) | Persistent client identifier (UUID). |
-| `ui` | element (optional) | UI preferences block (see below). |
+| Field               | Type               | Description                                                                                           |
+| ------------------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `version`           | positive integer   | State grammar version (currently `2`).                                                                |
+| `schema`            | string             | Schema URL, normally `https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd`. |
+| `time_creation`     | string (ISO 8601)  | Timestamp of initial state creation.                                                                  |
+| `time_lastModified` | string (ISO 8601)  | Timestamp of last state write.                                                                        |
+| `title`             | string             | Document or project title.                                                                            |
+| `client_name`       | string (optional)  | Display name of the client user.                                                                      |
+| `client_id`         | string (optional)  | Persistent client identifier (UUID).                                                                  |
+| `ui`                | element (optional) | UI preferences block (see below).                                                                     |
 
 ### UI preferences
 
 The `<ui>` block inside `<client>` stores client-owned UI preferences.
 
-| Field | Type | Description |
-|---|---|---|
-| `layout` | string | Layout mode (e.g. `horizontal`). |
-| `theme` | string | Color theme (`system`, `light`, `dark`). |
-| `model` | string | Preferred model identifier (may be empty). |
-| `splitter_pct` | integer | Splitter position as a percentage (`0`--`100`). |
-| `swipe_nav_horizontal` | boolean | Enable horizontal swipe navigation. |
-| `swipe_nav_vertical` | boolean | Enable vertical swipe navigation. |
-| `confirm_actions` | boolean | Whether to prompt before destructive actions. |
+| Field                  | Type    | Description                                     |
+| ---------------------- | ------- | ----------------------------------------------- |
+| `layout`               | string  | Layout mode (e.g. `horizontal`).                |
+| `theme`                | string  | Color theme (`system`, `light`, `dark`).        |
+| `model`                | string  | Preferred model identifier (may be empty).      |
+| `splitter_pct`         | integer | Splitter position as a percentage (`0`--`100`). |
+| `swipe_nav_horizontal` | boolean | Enable horizontal swipe navigation.             |
+| `swipe_nav_vertical`   | boolean | Enable vertical swipe navigation.               |
+| `confirm_actions`      | boolean | Whether to prompt before destructive actions.   |
 
 ```xml
 <client>
@@ -123,21 +123,21 @@ Message      → <message id="" role="" username="" time=""><content>...</conten
 
 ### Conversation attributes
 
-| Attribute | Required | Description |
-|---|---|---|
-| `id` | yes | Unique conversation ID. |
-| `parentId` | no | Parent conversation ID, or a comma-separated list of parent IDs for a merge/diamond node. Absent on root conversations. |
-| `selected` | no | Boolean. Selected conversations in the file must form one root-to-node path. |
+| Attribute  | Required | Description                                                                                                             |
+| ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `id`       | yes      | Unique conversation ID.                                                                                                 |
+| `parentId` | no       | Parent conversation ID, or a comma-separated list of parent IDs for a merge/diamond node. Absent on root conversations. |
+| `selected` | no       | Boolean. Selected conversations in the file must form one root-to-node path.                                            |
 
 ### Message attributes
 
-| Attribute | Required | Values | Description |
-|---|---|---|---|
-| `id` | yes | string | Unique message identifier. |
-| `role` | yes | `user` \| `assistant` \| `system` | Message author role. |
-| `username` | yes | string | Display name. |
-| `time` | yes | ISO 8601 | Message timestamp. |
-| `selected` | no | boolean | Optional singleton message selection across the whole state file. |
+| Attribute  | Required | Values                            | Description                                                       |
+| ---------- | -------- | --------------------------------- | ----------------------------------------------------------------- |
+| `id`       | yes      | string                            | Unique message identifier.                                        |
+| `role`     | yes      | `user` \| `assistant` \| `system` | Message author role.                                              |
+| `username` | yes      | string                            | Display name.                                                     |
+| `time`     | yes      | ISO 8601                          | Message timestamp.                                                |
+| `selected` | no       | boolean                           | Optional singleton message selection across the whole state file. |
 
 ### Example
 
@@ -180,24 +180,24 @@ When a message is sent, `get_context_messages()` walks the ancestor chain from t
 
 ### Shared truth attributes
 
-| Attribute | Applies to | Description |
-|---|---|---|
-| `id` | all truth kinds | Unique truth ID. |
-| `title` | all truth kinds | Human-readable label. |
-| `time` | all truth kinds | Timestamp. |
-| `place` | all truth kinds | Optional place label for envelope-level location metadata. |
-| `DoT` | all truth kinds except `feeling` | Degree of Truth on [-1, +1]. |
+| Attribute | Applies to                       | Description                                                |
+| --------- | -------------------------------- | ---------------------------------------------------------- |
+| `id`      | all truth kinds                  | Unique truth ID.                                           |
+| `title`   | all truth kinds                  | Human-readable label.                                      |
+| `time`    | all truth kinds                  | Timestamp.                                                 |
+| `place`   | all truth kinds                  | Optional place label for envelope-level location metadata. |
+| `DoT`     | all truth kinds except `feeling` | Degree of Truth on [-1, +1].                               |
 
 ### Truth kinds
 
-| Element | Meaning |
-|---|---|
-| `<fact>` | Knowledge claim or observation. |
-| `<feeling>` | Subjective, non-truth-evaluable statement. No `DoT` attribute. |
-| `<reference>` | External citation wrapping an `<a href="...">...</a>` link record. |
-| `<logic>` | Strong Kleene operator (`<and>`, `<or>`, `<not>`, `<non>`) over other truth entries. Wraps one operator child with `<ref>` or inline `<fact>`/`<feeling>` operands. |
-| `<provider>` | External LLM provider definition. |
-| `<authority>` | Pointer to a remote TruthSet. |
+| Element       | Meaning                                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<fact>`      | Knowledge claim or observation.                                                                                                                                     |
+| `<feeling>`   | Subjective, non-truth-evaluable statement. No `DoT` attribute.                                                                                                      |
+| `<reference>` | External citation wrapping an `<a href="...">...</a>` link record.                                                                                                  |
+| `<logic>`     | Strong Kleene operator (`<and>`, `<or>`, `<not>`, `<non>`) over other truth entries. Wraps one operator child with `<ref>` or inline `<fact>`/`<feeling>` operands. |
+| `<provider>`  | External LLM provider definition.                                                                                                                                   |
+| `<authority>` | Pointer to a remote TruthSet.                                                                                                                                       |
 
 ### Example
 

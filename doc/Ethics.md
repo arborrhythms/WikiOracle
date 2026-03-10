@@ -54,12 +54,12 @@ Ethical failures often correspond to **asymmetries in truth claims**.
 
 Examples:
 
-| Ethical failure | Epistemic distortion |
-|-----------------|---------------------|
-| propaganda | false belief |
-| discrimination | asymmetric reasoning |
-| authoritarianism | opaque claims |
-| scapegoating | category errors |
+| Ethical failure  | Epistemic distortion |
+| ---------------- | -------------------- |
+| propaganda       | false belief         |
+| discrimination   | asymmetric reasoning |
+| authoritarianism | opaque claims        |
+| scapegoating     | category errors      |
 
 A truth system that enforces symmetry naturally resists these
 distortions.
@@ -157,13 +157,13 @@ distortions.
 WikiOracle already includes several components that encourage ethical
 reasoning:
 
-| Feature | Ethical effect |
-|---------|---------------|
-| explicit truth values | discourages propaganda |
-| multiple POVs | prevents epistemic monopoly |
-| no worldline storage | protects identity |
-| local-first architecture | preserves autonomy |
-| inspectable reasoning | prevents hidden authority |
+| Feature                  | Ethical effect              |
+| ------------------------ | --------------------------- |
+| explicit truth values    | discourages propaganda      |
+| multiple POVs            | prevents epistemic monopoly |
+| no worldline storage     | protects identity           |
+| local-first architecture | preserves autonomy          |
+| inspectable reasoning    | prevents hidden authority   |
 
 These mechanisms provide a foundation for ethical AI without relying on
 censorship.
@@ -205,11 +205,11 @@ behavioral data becomes an identity model.
 Surveillance capitalism reinforces this illusion by continuously building
 **worldline histories**:
 
-| Feature | Effect |
-|---------|--------|
+| Feature              | Effect                |
+| -------------------- | --------------------- |
 | mass data collection | identity construction |
-| behavior tracking | worldline inference |
-| predictive modeling | reduced autonomy |
+| behavior tracking    | worldline inference   |
+| predictive modeling  | reduced autonomy      |
 
 AI trained on behavioral histories tends toward **identity locking**
 where past data predicts future behavior. Removing persistent worldline

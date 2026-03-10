@@ -13,45 +13,45 @@ Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
 
 ### Components
 
-| Layer | File(s) | Role |
-|---|---|---|
-| Server | `bin/wikioracle.py` | Flask app — `/chat`, `/state`, `/merge`, `/config`, `/bootstrap` endpoints; reads/writes `state.xml` |
-| Config | `bin/config.py` | Config dataclass, XML loader, provider registry, schema-driven XML writer, normalization |
-| State library | `bin/state.py` | Pure-Python tree operations, XML serialisation, merge with deterministic ID suffixing |
-| Response | `bin/response.py` | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4) |
-| Truth | `bin/truth.py` | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, spacetime fact classification, PII detection |
-| Sensation | `bin/sensation.py` | Preprocessing: Korzybski IS detection, XML tagging (`<fact>`/`<feeling>`/`<Q>`/`<R>` with `<place>`/`<time>` child elements), corpus conversion |
-| OpenClaw | `openclaw/` (git submodule) + `openclaw/extensions/wikioracle/` | Multi-channel front-end (Slack/Discord/Telegram) — TypeScript extension routes messages through `bin/wo` CLI to WikiOracle's full pipeline |
-| NanoChat ext | `bin/nanochat_ext.py` | `POST /train` route mounted onto NanoChat's FastAPI app for online SFT |
-| Client app | `client/wikioracle.js` | State management, API calls, message rendering, drag/context-menu interactions |
-| Client config | `client/config.js` | Config global, sessionStorage persistence, normalization, legacy migration |
-| Client state | `client/state.js` | State global, sessionStorage persistence |
-| Client utils | `client/util.js` | Shared helpers, settings panel, config editor, context/output editors |
-| Client query | `client/query.js` | Server communication layer, conversation tree helpers |
-| Tree renderer | `client/tree.js` | D3.js top-down hierarchy — layout, navigation, drag-to-merge |
-| Shell | `client/index.html` | Single-page app: layout, CSS, settings panel |
-| State schema | `data/state.xsd` | XSD schema for XML state files (WikiOracle State) |
-| Config schema | `data/config.xsd` | XSD schema for `config.xml` validation (WikiOracle Config) |
-| Tests | `test/test_*.py` | Tests covering state, stateless contract, prompt bundles, authority, derived truth, DoT, sensation, online training, XML state roundtrip |
+| Layer         | File(s)                                                         | Role                                                                                                                                            |
+| ------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server        | `bin/wikioracle.py`                                             | Flask app — `/chat`, `/state`, `/merge`, `/config`, `/bootstrap` endpoints; reads/writes `state.xml`                                            |
+| Config        | `bin/config.py`                                                 | Config dataclass, XML loader, provider registry, schema-driven XML writer, normalization                                                        |
+| State library | `bin/state.py`                                                  | Pure-Python tree operations, XML serialisation, merge with deterministic ID suffixing                                                           |
+| Response      | `bin/response.py`                                               | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4)                                                          |
+| Truth         | `bin/truth.py`                                                  | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, spacetime fact classification, PII detection               |
+| Sensation     | `bin/sensation.py`                                              | Preprocessing: Korzybski IS detection, XML tagging (`<fact>`/`<feeling>`/`<Q>`/`<R>` with `<place>`/`<time>` child elements), corpus conversion |
+| OpenClaw      | `openclaw/` (git submodule) + `openclaw/extensions/wikioracle/` | Multi-channel front-end (Slack/Discord/Telegram) — TypeScript extension routes messages through `bin/wo` CLI to WikiOracle's full pipeline      |
+| NanoChat ext  | `bin/nanochat_ext.py`                                           | `POST /train` route mounted onto NanoChat's FastAPI app for online SFT                                                                          |
+| Client app    | `client/wikioracle.js`                                          | State management, API calls, message rendering, drag/context-menu interactions                                                                  |
+| Client config | `client/config.js`                                              | Config global, sessionStorage persistence, normalization, legacy migration                                                                      |
+| Client state  | `client/state.js`                                               | State global, sessionStorage persistence                                                                                                        |
+| Client utils  | `client/util.js`                                                | Shared helpers, settings panel, config editor, context/output editors                                                                           |
+| Client query  | `client/query.js`                                               | Server communication layer, conversation tree helpers                                                                                           |
+| Tree renderer | `client/tree.js`                                                | D3.js top-down hierarchy — layout, navigation, drag-to-merge                                                                                    |
+| Shell         | `client/index.html`                                             | Single-page app: layout, CSS, settings panel                                                                                                    |
+| State schema  | `data/state.xsd`                                                | XSD schema for XML state files (WikiOracle State)                                                                                               |
+| Config schema | `data/config.xsd`                                               | XSD schema for `config.xml` validation (WikiOracle Config)                                                                                      |
+| Tests         | `test/test_*.py`                                                | Tests covering state, stateless contract, prompt bundles, authority, derived truth, DoT, sensation, online training, XML state roundtrip        |
 
 
 ## Server endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/health` | Liveness check |
-| GET | `/server_info` | Stateless flag + url_prefix |
-| GET | `/bootstrap` | One-shot seed for stateless clients (state + config) |
-| GET | `/info` | State/schema/provider metadata for diagnostics |
-| GET | `/state` | Return current in-memory state |
-| POST | `/state` | Replace state |
-| GET | `/state_size` | State file size in bytes (progress bar) |
-| POST | `/chat` | Send a message — append to existing conversation, branch, or create new root |
-| POST | `/merge` | Merge an imported state file into current state |
-| GET | `/config` | Normalized config (includes provider metadata and defaults) |
-| POST | `/config` | Accept full config dict; write config.xml to disk |
-| GET | `/` | Serve `client/index.html` |
-| GET | `/<file>` | Serve static assets from `client/` |
+| Method | Path           | Purpose                                                                      |
+| ------ | -------------- | ---------------------------------------------------------------------------- |
+| GET    | `/health`      | Liveness check                                                               |
+| GET    | `/server_info` | Stateless flag + url_prefix                                                  |
+| GET    | `/bootstrap`   | One-shot seed for stateless clients (state + config)                         |
+| GET    | `/info`        | State/schema/provider metadata for diagnostics                               |
+| GET    | `/state`       | Return current in-memory state                                               |
+| POST   | `/state`       | Replace state                                                                |
+| GET    | `/state_size`  | State file size in bytes (progress bar)                                      |
+| POST   | `/chat`        | Send a message — append to existing conversation, branch, or create new root |
+| POST   | `/merge`       | Merge an imported state file into current state                              |
+| GET    | `/config`      | Normalized config (includes provider metadata and defaults)                  |
+| POST   | `/config`      | Accept full config dict; write config.xml to disk                            |
+| GET    | `/`            | Serve `client/index.html`                                                    |
+| GET    | `/<file>`      | Serve static assets from `client/`                                           |
 
 ### Data flow: client <-> server
 
@@ -127,16 +127,16 @@ theoretical foundation.
 
 Key functions:
 
-| Function | Purpose |
-|---|---|
-| `state_to_xml(state)` | Serialise nested tree → XML string |
-| `xml_to_state(text)` | Parse XML → nested tree |
-| `atomic_write_xml(path, state)` | Atomic XML file write (temp + fsync + rename) |
-| `load_state_file(path)` | Load state from XML file |
-| `find_conversation(convs, id)` | Recursive tree lookup |
-| `get_ancestor_chain(convs, id)` | Walk up to root, return list of ancestors |
-| `get_context_messages(convs, id)` | Ancestor chain messages in order (for LLM context) |
-| `add_message_to_conversation(convs, id, msg)` | Append a message |
-| `add_child_conversation(convs, parent_id, child)` | Insert a new branch |
-| `remove_conversation(convs, id)` | Delete a subtree |
-| `ensure_minimal_state(state)` | Fill in missing fields with defaults |
+| Function                                          | Purpose                                            |
+| ------------------------------------------------- | -------------------------------------------------- |
+| `state_to_xml(state)`                             | Serialise nested tree → XML string                 |
+| `xml_to_state(text)`                              | Parse XML → nested tree                            |
+| `atomic_write_xml(path, state)`                   | Atomic XML file write (temp + fsync + rename)      |
+| `load_state_file(path)`                           | Load state from XML file                           |
+| `find_conversation(convs, id)`                    | Recursive tree lookup                              |
+| `get_ancestor_chain(convs, id)`                   | Walk up to root, return list of ancestors          |
+| `get_context_messages(convs, id)`                 | Ancestor chain messages in order (for LLM context) |
+| `add_message_to_conversation(convs, id, msg)`     | Append a message                                   |
+| `add_child_conversation(convs, parent_id, child)` | Insert a new branch                                |
+| `remove_conversation(convs, id)`                  | Delete a subtree                                   |
+| `ensure_minimal_state(state)`                     | Fill in missing fields with defaults               |

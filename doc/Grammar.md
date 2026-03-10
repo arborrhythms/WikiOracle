@@ -21,11 +21,11 @@ Limits:
 - `<intersection>`: binary rank-dropping composition (Hadamard masking $\odot$; narrows or selects within a space)
 - `<conjunction word="and">`: binary accumulative coordination (surface word on attribute)
 - `<disjunction word="or">`: binary alternative coordination (surface word on attribute)
-- `<not word="">`: unary negation (surface word: `not`, `n't`)
-- `<non word="">`: unary privation (surface word: `non`). Shares the NOT nonterminal with `<not>`; the XML tag is chosen by surface word
-- `<spatial word="...">`: unary spatial relation (prepositions such as `over`, `under`, `up`, `down`, `in`, `out` that relocate the attention head without changing dimensionality)
-- `<is word="">`: identity or definition (operator name is the surface word)
-- `<has word="">`: possession or parthood (operator name is the surface word)
+- `<not word="...">`: unary negation (surface word: `not`, `n't`)
+- `<non word="...">`: unary privation (surface word: `non`). Shares the NOT nonterminal with `<not>`; the XML tag is chosen by surface word
+- `<prep word="...">`: unary prepositional relation (all prepositions — spatial such as `over`, `under`, `in`, `out` and non-spatial such as `of`, `to`, `for`, `with` — live in perceptual space and relocate the attention head without changing dimensionality)
+- `<is word="...">`: identity or definition (surface word on attribute)
+- `<has word="...">`: possession or parthood (surface word on attribute)
 
 ### Leaves
 
@@ -49,7 +49,7 @@ These are not XML elements but shorthand for common subtree patterns:
 - **AP** (adjectival phrase): `[(adj|det|deg)* (adj|det)]` — adjectives, determiners, and degree modifiers; handles all narrowing modifiers
 - **MP** (modal phrase): `[adv* adv]` — zero or more adverb modifiers followed by an adverb head
 - **PP** (prepositional phrase)
-- **IS** (copula operator): `[copula NOT?]` — copula surface word, optionally followed by negation
+- **IS** (definitive operator): `[copula NOT?]` — definitive surface word, optionally followed by negation
 - **HAS** (possession operator): `[possess NOT?]` — possession surface word, optionally followed by negation
 - **NOT** (negation): covers both `not`/`n't` (→ `<not>`) and `non` (→ `<non>`)
 
@@ -57,98 +57,103 @@ These are not XML elements but shorthand for common subtree patterns:
 
 **Sentence:**
 
-| Rule | Operator | Meaning |
-|------|----------|---------|
-| S → NP | — | bare noun phrase as sentence |
-| S → NP VP | `<union>` | predication: VP applied to subject |
-| S → MP S | `<union>` | modal augmentation |
-| S → NP IS NP | `<is>` | copular: definition, classification |
-| S → NP IS AP | `<is>` | copular: predication |
-| S → NP HAS NP | `<has>` | possession or parthood |
-| S → NOT S | `<not>` / `<non>` | negation or privation |
-| S → S `and` S | `<conjunction>` | clause coordination |
-| S → S `or` S | `<disjunction>` | clause disjunction |
-| S → IS NP AP | `<is>` | copular question (inverted) |
-| S → v NP VP | `<union>` | auxiliary question (inverted) |
+| Rule          | Operator          | Meaning                                             |
+| ------------- | ----------------- | --------------------------------------------------- |
+| S → NP        | —                 | bare noun phrase as sentence                        |
+| S → NP VP     | `<union>`         | predication: VP applied to subject                  |
+| S → MP S      | `<union>`         | modal augmentation                                  |
+| S → PP S      | `<union>`         | pre-sentential PP adjunct                           |
+| S → NP IS NP  | `<is>`            | is of definition                                    |
+| S → NP IS AP  | `<is>`            | is of predication                                   |
+| S → NP HAS NP | `<has>`           | parthood                                            |
+| S → NOT S     | `<not>` / `<non>` | negation, affirming and non-affirming               |
+| S → S `and` S | `<conjunction>`   | clause coordination                                 |
+| S → S `or` S  | `<disjunction>`   | clause disjunction                                  |
+| S → IS NP AP  | `<is>`            | question of predication (inverted)                  |
+| S → IS NP NP  | `<is>`            | question of definition with NP predicate (inverted) |
+| S → v NP VP   | `<union>`         | auxiliary question (inverted)                       |
 
 **Noun Phrase:**
 
-| Rule | Operator | Meaning |
-|------|----------|---------|
-| NP → n | — | bare noun |
-| NP → AP NP | `<intersection>` | modifier narrowing |
-| NP → NP PP | `<union>` | NP modified by spatial phrase |
-| NP → NP `and` NP | `<conjunction>` | accumulative coordination |
-| NP → NP `or` NP | `<disjunction>` | alternative coordination |
+| Rule             | Operator         | Meaning                             |
+| ---------------- | ---------------- | ----------------------------------- |
+| NP → n           | —                | bare noun                           |
+| NP → AP NP       | `<intersection>` | modifier narrowing                  |
+| NP → NP PP       | `<union>`        | NP modified by prepositional phrase |
+| NP → NP `and` NP | `<conjunction>`  | accumulative coordination           |
+| NP → NP `or` NP  | `<disjunction>`  | alternative coordination            |
 
 **Verb Phrase:**
 
-| Rule | Operator | Meaning |
-|------|----------|---------|
-| VP → v | — | intransitive |
-| VP → adv VP | `<intersection>` | adverb narrowing |
-| VP → MP VP | `<union>` | modal augmentation |
-| VP → adj VP | `<intersection>` | verb modifier narrowing |
-| VP → v PP | `<union>` | verb + spatial complement |
-| VP → v S | `<union>` | verb + clause complement |
-| VP → v MP | `<union>` | post-verbal adverb |
-| VP → `not` VP | `<not>` | VP-internal negation |
+| Rule          | Operator         | Meaning                         |
+| ------------- | ---------------- | ------------------------------- |
+| VP → v        | —                | intransitive                    |
+| VP → v NP     | `<union>`        | transitive verb + direct object |
+| VP → adv VP.  | `<intersection>` | adverb narrowing                |
+| VP → MP VP    | `<union>`        | modal augmentation              |
+| VP → adj VP.  | `<intersection>` | verb modifier narrowing         |
+| VP → v PP     | `<union>`        | verb + PP complement            |
+| VP → v S      | `<union>`        | verb + clause complement        |
+| VP → v MP     | `<union>`        | post-verbal adverb              |
+| VP → VP PP    | `<union>`        | post-verbal PP modification     |
+| VP → IS VP    | `<union>`        | passive/progressive auxiliary   |
+| VP → `not` VP | `<not>`          | VP-internal negation            |
 
 **Adjectival Phrase:**
 
-| Rule | Operator | Meaning |
-|------|----------|---------|
-| AP → adj | — | bare adjective |
-| AP → det | — | bare determiner |
+| Rule        | Operator         | Meaning             |
+| ----------- | ---------------- | ------------------- |
+| AP → adj    | —                | bare adjective      |
+| AP → det    | —                | bare determiner     |
 | AP → adj AP | `<intersection>` | adjective narrowing |
-| AP → deg AP | `<intersection>` | degree hedging |
+| AP → deg AP | `<intersection>` | degree hedging      |
 
 **Modal Phrase:**
 
-| Rule | Operator | Meaning |
-|------|----------|---------|
-| MP → adv | — | bare adverb |
+| Rule        | Operator         | Meaning          |
+| ----------- | ---------------- | ---------------- |
+| MP → adv    | —                | bare adverb      |
 | MP → adv MP | `<intersection>` | adverb narrowing |
 
 **Prepositional Phrase:**
 
-| Rule | Operator | Meaning |
-|------|----------|---------|
-| PP → p NP | `<spatial>` | spatial preposition + complement |
+| Rule      | Operator | Meaning                  |
+| --------- | -------- | ------------------------ |
+| PP → p NP | `<prep>` | preposition + complement |
 
-**Copula:**
+**Definitive:**
 
-| Rule | Meaning |
-|------|---------|
-| IS → `is` | bare copula (`is`, `are`, `was`, `were`, …) |
-| IS → `is` NOT | negated copula (`isn't`, `is not`, …) |
+| Rule          | Meaning                                         |
+| ------------- | ----------------------------------------------- |
+| IS → `is`     | bare definitive (`is`, `are`, `was`, `were`, …) |
+| IS → `is` NOT | negated definitive (`isn't`, `is not`, …)       |
 
 **Possession:**
 
-| Rule | Meaning |
-|------|---------|
-| HAS → `has` | bare possession (`has`, `have`, `had`, …) |
+| Rule            | Meaning                                     |
+| --------------- | ------------------------------------------- |
+| HAS → `has`     | bare possession (`has`, `have`, `had`, …)   |
 | HAS → `has` NOT | negated possession (`hasn't`, `has not`, …) |
 
 **Negation:**
 
-| Rule | XML tag | Meaning |
-|------|---------|---------|
+| Rule        | XML tag | Meaning                 |
+| ----------- | ------- | ----------------------- |
 | NOT → `not` | `<not>` | negation (`not`, `n't`) |
-| NOT → `non` | `<non>` | privation (`non`) |
+| NOT → `non` | `<non>` | privation (`non`)       |
 
-## Surface-Preservation Rule
+## Surface Preservation Rule
 
 Every surface token should appear somewhere as a leaf. The operators carry the composition; the leaves preserve the visible words.
 
 Semantic arity:
 
 - `union`, `intersection`, `conjunction`, `disjunction`, `is`, `has`: binary
-- `not`, `non`, `spatial`: unary
+- `not`, `non`, `prep`: unary
 
-To preserve the surface string, operators that carry a surface word use the `word` attribute (e.g. `<conjunction word="and">`, `<is word="">`, `<spatial word="over">`). Terminal punctuation should usually sit outside the clause operator as its own leaf.
+To preserve the surface string, operators that carry a surface word use the `word` attribute (e.g. `<conjunction word="and">`, `<is word="is">`, `<prep word="over">`). Terminal punctuation should usually sit outside the clause operator as its own leaf.
 
-## Copula-First Rule
+## Definitive Before Predication Rule
 
 Before mapping a clause to an ordinary verb phrase, check whether it is definitional, classificatory, part-whole, or about language itself.
 
@@ -157,7 +162,7 @@ Use `<is>` first when:
 - the sentence equates one thing with another
 - the sentence defines a term
 - the sentence says one thing is a kind, member, or part of another
-- the sentence attributes a property by means of a copula rather than an event verb
+- the sentence attributes a property by means of a definitive form rather than an event verb
 - the sentence is about a word, label, or linguistic expression
 
 Examples:
@@ -166,7 +171,7 @@ Examples:
 - `a robin is a bird` -> prefer `<is>`
 - `water is wet` -> prefer `<is>`, not an ordinary eventive `<v>`
 
-Preserve the surface copula on the operator itself, for example `<is word="">...</is>`, but do not let that force the whole clause into the ordinary `union + v` pattern.
+Preserve the surface copula on the operator itself, for example `<is word="is">...</is>`, but do not let that force the whole clause into the ordinary `union + v` pattern.
 
 ## Main Example
 
@@ -182,7 +187,7 @@ Parse:
   <union>
     <union>
       <v word="jumps"/>
-      <spatial word="over">
+      <prep word="over">
         <conjunction word="and">
           <intersection>
             <det word="the"/>
@@ -199,7 +204,7 @@ Parse:
             </intersection>
           </intersection>
         </conjunction>
-      </spatial>
+      </prep>
     </union>
     <intersection>
       <det word="the"/>
@@ -232,33 +237,32 @@ probably((jumps(over(the(lazy(dog)) and the(sleepy(cat)))))(the(quick(brown(fox)
   Example: `<conjunction word="and">dogs, cats</conjunction>`.
 - `<disjunction word="or">`: use when coordinating by presenting alternatives — one or the other. The surface word goes on the attribute.
   Example: `<disjunction word="or">dogs, cats</disjunction>`.
-- `<spatial word="...">`: use when a spatial preposition (`over`, `under`, `up`, `down`, `in`, `out`, etc.) relocates the attention head without changing dimensionality. The preposition goes on the operator attribute; the single child is the complement.
-  Example: `<spatial word="over">the dog</spatial>`, `<spatial word="under">the bridge</spatial>`.
-- `<not word="">`: ordinary sentence or predicate negation. The operator name is the surface word; `word` is empty.
-  Example: `<not word="">S</not>`.
-- `<non word="">`: lexical privation. The operator name is the surface word; `word` is empty.
-  Example: `<non word="">human</non>`.
-- `<is word="">`: identity, equivalence, definition, or classification. The operator name is the surface word.
-  Example: `<is word="">water, h2o</is>`.
-- `<has word="">`: possession or parthood. The operator name is the surface word.
-  Example: `<has word="">the dog, a tail</has>`.
+- `<prep word="...">`: use when any preposition (spatial or non-spatial) establishes a relation. All prepositions live in perceptual space and relocate the attention head without changing dimensionality. The preposition goes on the operator attribute; the single child is the complement.
+  Example: `<prep word="over">the dog</prep>`, `<prep word="of">France</prep>`.
+- `<not word="not">`: ordinary sentence or predicate negation. The surface word goes on the attribute.
+  Example: `<not word="not">S</not>`.
+- `<non word="non">`: lexical privation. The surface word goes on the attribute.
+  Example: `<non word="non">human</non>`.
+- `<is word="is">`: identity, equivalence, definition, or classification. The surface word goes on the attribute.
+  Example: `<is word="is">water, h2o</is>`.
+- `<has word="has">`: possession or parthood. The surface word goes on the attribute.
+  Example: `<has word="has">the dog, a tail</has>`.
 
 ## Minimal Examples
 
-Definition:
+Definition (`water is h2o`):
 
 ```xml
-<is word="">
+<is word="is">
   <n word="water"/>
-  <n word="h2o"/>
+  <adj word="h2o"/>
 </is>
-<punct word="."/>
 ```
 
-Classification:
+Classification (`a robin is a bird`):
 
 ```xml
-<is word="">
+<is word="is">
   <intersection>
     <det word="a"/>
     <n word="robin"/>
@@ -271,54 +275,84 @@ Classification:
 <punct word="."/>
 ```
 
-Copular predication:
+Definitive predication (`water is wet`):
 
 ```xml
-<is word="">
+<is word="is">
   <n word="water"/>
   <adj word="wet"/>
 </is>
 <punct word="."/>
 ```
 
-Negation:
+Passive (`a polygon is defined as a closed shape`):
 
 ```xml
-<not word="">
+<union>
   <union>
-    <v word="jump"/>
-    <intersection>
-      <det word="the"/>
-      <n word="fox"/>
-    </intersection>
+    <v word="is"/>
+    <union>
+      <v word="defined"/>
+      <prep word="as">
+        <intersection>
+          <det word="a"/>
+          <intersection>
+            <adj word="closed"/>
+            <n word="shape"/>
+          </intersection>
+        </intersection>
+      </prep>
+    </union>
   </union>
-</not>
+  <intersection>
+    <det word="A"/>
+    <n word="polygon"/>
+  </intersection>
+</union>
+<punct word="."/>
+```
+
+Negation (`the fox does not jump`):
+
+```xml
+<union>
+  <union>
+    <v word="does"/>
+    <not word="not">
+      <v word="jump"/>
+    </not>
+  </union>
+  <intersection>
+    <det word="the"/>
+    <n word="fox"/>
+  </intersection>
+</union>
 <punct word="."/>
 ```
 
 ## Suggested Mappings Into This Inventory
 
-| English item | Default mapping | Notes |
-|---|---|---|
-| common noun, proper noun, pronoun, nominal numeral | `<n>` | `alice`, `she`, `three` |
-| adjective, participle-as-modifier, ordinal, noun modifier | `<adj>` | `broken`, `first`, `chicken` in `chicken soup` |
-| non-spatial preposition, complementizer, infinitival `to` | `<adj>` | verb modifiers: `of`, `for`, `that`, `to` |
-| modal auxiliary | `<adv>` | modality via MP: `must`, `should`, `can`, `will` |
-| subordinating conjunction, `but` | `word` attribute on `<conjunction>` | clause joiners: `because`, `although`, `but`, `since` |
-| main verb, auxiliary with real verbal force | `<v>` | `runs`, `jumped`, `slept` |
-| adverb, sentence adverb, modal adverb | `<adv>` | `quickly`, `probably`, `maybe` |
-| degree modifier, hedge, scalar intensifier | `<deg>` | `very`, `quite`, `somewhat`, `rather`, `extremely` |
-| determiner, article | `<det>` | `the`, `a`, `this`, `every` |
-| spatial preposition | `<spatial word="...">` | `over`, `under`, `up`, `down`, `in`, `out` |
-| coordinator `and` | `word` attribute on `<conjunction>` | `<conjunction word="and">` |
-| coordinator `or` | `word` attribute on `<disjunction>` | `<disjunction word="or">` |
-| punctuation | `<punct>` | `. , ; : ? !` |
+| English item                                                                     | Default mapping                     | Notes                                                                         |
+| -------------------------------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------- |
+| common noun, proper noun, pronoun, nominal numeral                               | `<n>`                               | `alice`, `she`, `three`                                                       |
+| adjective, participle-as-modifier, ordinal, noun modifier                        | `<adj>`                             | `broken`, `first`, `chicken` in `chicken soup`                                |
+| non-spatial preposition (`of`, `to`, `at`, `for`, `from`, `with`, `about`, `by`) | `<prep word="...">`                 | forms PP like spatial preps; learns characteristic transform through exposure |
+| complementizer, remaining prepositions                                           | `<adj>`                             | verb modifiers: `that`, `as`                                                  |
+| modal auxiliary                                                                  | `<adv>`                             | modality via MP: `must`, `should`, `can`, `will`                              |
+| subordinating conjunction, `but`                                                 | `word` attribute on `<conjunction>` | clause joiners: `because`, `although`, `but`, `since`                         |
+| main verb, auxiliary with real verbal force                                      | `<v>`                               | `runs`, `jumped`, `slept`                                                     |
+| adverb, sentence adverb, modal adverb                                            | `<adv>`                             | `quickly`, `probably`, `maybe`                                                |
+| degree modifier, hedge, scalar intensifier                                       | `<deg>`                             | `very`, `quite`, `somewhat`, `rather`, `extremely`                            |
+| determiner, article                                                              | `<det>`                             | `the`, `a`, `this`, `every`                                                   |
+| spatial preposition                                                              | `<prep word="...">`                 | `over`, `under`, `up`, `down`, `in`, `out`                                    |
+| coordinator `and`                                                                | `word` attribute on `<conjunction>` | `<conjunction word="and">`                                                    |
+| coordinator `or`                                                                 | `word` attribute on `<disjunction>` | `<disjunction word="or">`                                                     |
+| punctuation                                                                      | `<punct>`                           | `. , ; : ? !`                                                                 |
 
 Practical special cases:
 
 - Determiners and articles appear as `det` under `intersection`.
-- Spatial prepositions (`over`, `under`, `up`, `down`, `in`, `out`, etc.) appear as the `word` attribute on `<spatial>`, e.g. `<spatial word="over">...</spatial>`.
-- Non-spatial prepositions (e.g. `of`, `for`) modify the verb and are mapped to `adj`; their NP complement is parsed normally.
+- All prepositions (spatial and non-spatial) appear as the `word` attribute on `<prep>`, e.g. `<prep word="over">...</prep>`, `<prep word="of">...</prep>`. Both types live in perceptual space and form PPs via `PP → p NP`.
 - Surface `and` is preserved as the `word` attribute on `conjunction`, e.g. `<conjunction word="and">...</conjunction>`.
 - Surface `or` is preserved as the `word` attribute on `disjunction`, e.g. `<disjunction word="or">...</disjunction>`.
 - Modal adverbs such as `probably` stay `adv` within an MP and take sentence scope via `S → MP S` (union). Manner adverbs such as `quickly` narrow the verb via `VP → adv VP` (intersection).
@@ -327,8 +361,8 @@ Practical special cases:
 - Coordinating `but`, `yet`, `nor` are treated as conjunction (like `and`) for clause coordination via `S → S and S`.
 - Subordinating conjunctions such as `because`, `since`, `although` are treated as conjunction for clause-level coordination via `S → S and S`.
 - Verb-complement clauses such as "I think [the fox jumps]" use `VP → v S` (union); the embedded clause is a full sentence.
-- Copular forms such as `is`, `are`, `was`, `were`, `has`, and `have` should be tested against `<is>` or `<has>` before falling back to `<v>`.
-- Negated copulas such as `isn't`, `hasn't` are handled by the IS and HAS nonterminals: `IS → is NOT`, `HAS → has NOT`. The negation scopes over the predicate: `<is word="is"><not word="n't">predicate</not></is>`.
+- Definitive forms such as `is`, `are`, `was`, `were`, `has`, and `have` should be tested against `<is>` or `<has>` before falling back to `<v>`.
+- Negated definitives such as `isn't`, `hasn't` are handled by the IS and HAS nonterminals: `IS → is NOT`, `HAS → has NOT`. The negation scopes over the predicate: `<is word="is"><not word="n't">predicate</not></is>`.
 - `NOT` covers both negation (`not`, `n't` → `<not>`) and privation (`non` → `<non>`). English does not disambiguate at the surface level, so both share a single nonterminal.
 - Contraction fragments such as `wo` (from `won't`) and `ca` (from `can't`) are mapped to `<adv>` (modal) so they enter through MP.
 - Post-verbal adverbs such as "runs quickly" use `VP → v MP` (union), symmetric with pre-verbal `VP → MP VP`.
@@ -345,7 +379,7 @@ Practical special cases:
 7. Use `disjunction` for alternative coordination (`or`).
 8. Use `union` whenever a word or phrase takes an argument and augments dimensionality.
 9. Use `intersection` when a modifier or determiner narrows or selects within a space.
-10. Use `spatial` when a preposition expresses a spatial relation without changing dimensionality.
+10. Use `prep` when any preposition (spatial or non-spatial) establishes a relation without changing dimensionality.
 11. Use `is` for identity, definition, property attribution, classification, and parthood.
 12. Use `not` for ordinary negation and `non` for lexical privation.
 13. If uncertain, preserve the word as a `token`
@@ -356,17 +390,17 @@ This section outlines the formal operations used to assemble and disassemble ope
 
 ### Summary Table
 
-| Process | Operation | Rank Effect | Linguistic Analogy | Space |
-| :--- | :--- | :--- | :--- | :--- |
-| **Spatial** | Relocation | **Preserving** | Relocating over the bridge. | Perceptual Space |
-| **Has** | Composition | **Preserving** | A dog having a tail. | Perceptual Space |
-| **Union** | Direct Sum ($\oplus$) | **Lifting** | Building a sentence from words. | Conceptual Space |
-| **Intersection** | Hadamard ($\odot$) | **Dropping** | Narrowing a noun by its adjective. | Conceptual Space |
-| **Conjunction** | Accumulation | **Preserving** | Gathering dogs and cats. | Symbolic Space |
-| **Disjunction** | Alternation | **Preserving** | Choosing dogs or cats. | Symbolic Space |
-| **Not** | Negation | **Preserving** | Negating a sentence. | Conceptual or Symbolic Space |
-| **Non** | Privation | **Dropping** | Excluding a property. | Conceptual or Symbolic Space |
-| **Is** | Identification | **Preserving** | Defining water as $\mathrm{H_2O}$. | Conceptual or Symbolic Space |
+| Process          | Operation             | Rank Effect    | Linguistic Analogy                 | Space                        |
+| :--------------- | :-------------------- | :------------- | :--------------------------------- | :--------------------------- |
+| **Prep**         | Relocation            | **Preserving** | Relocating over the bridge.        | Perceptual Space             |
+| **Has**          | Composition           | **Preserving** | A dog having a tail.               | Perceptual Space             |
+| **Union**        | Direct Sum ($\oplus$) | **Lifting**    | Building a sentence from words.    | Conceptual Space             |
+| **Intersection** | Hadamard ($\odot$)    | **Dropping**   | Narrowing a noun by its adjective. | Conceptual Space             |
+| **Conjunction**  | Accumulation          | **Preserving** | Gathering dogs and cats.           | Symbolic Space               |
+| **Disjunction**  | Alternation           | **Preserving** | Choosing dogs or cats.             | Symbolic Space               |
+| **Not**          | Negation              | **Preserving** | Negating a sentence.               | Conceptual or Symbolic Space |
+| **Non**          | Privation             | **Dropping**   | Excluding a property.              | Conceptual or Symbolic Space |
+| **Is**           | Identification        | **Preserving** | Defining water as $\mathrm{H_2O}$. | Conceptual or Symbolic Space |
 
 ### Perceptual Space
 
@@ -378,58 +412,29 @@ Every sentence lives in a uniform five-dimensional perceptual space:
 
 When MP is absent, the sentence carries an implicit assertoric modality ("truly" — the unmarked case). When VP is absent, the sentence carries an implicit existential predicate ("exists" — the unmarked case). These defaults are linked: $VP \to \varepsilon$ if and only if $MP \to \varepsilon$.
 
-Copular sentences (`S → NP is NP`, `S → NP has NP`) do not fit this pattern. They compare or relate two five-dimensional objects rather than predicating within one.
+Definitive sentences (`S → NP is NP`, `S → NP has NP`) do not fit this pattern. They compare or relate two five-dimensional objects rather than predicating within one.
 
 The implicit "exists" deserves particular attention. A bare noun as sentence — "Fire!" — silently asserts existence. This grammatical convenience mirrors what Buddhist philosophy identifies as the root of conceptual error: treating phenomena as if they possess inherent, permanent selfhood (*svabhāva*). When "exists" is left implicit, the noun appears to exist in its own right, independent of causes and conditions. Making the existential predicate explicit — "fire exists" — restores the processual character of phenomena: existence is something that happens, not something that inheres. See [BuddhistParallels](BuddhistParallels.md#implicit-existence-and-svabhāva) for the full parallel.
 
-#### Spatial
+#### Prep
 
-Spatial operators are naturally implemented by **relation heads** that re-express one
-object relative to another without changing the dimensionality of the space. The
-preposition (`over`, `under`, `in`, `out`, etc.) acts as an instruction for how to
-re-index attention between a figure and a ground.
+Prepositional operators are learned mereological operations on a percetual space where the distance relation is 
+geometric (L2) distance as opposed to the embedding similarity of a conceptual space. They are relation-specific 
+projections that distinguish containment, support, direction, and vertical ordering.
 
-At a high level:
-$$h'_{\text{figure}} = R_p(h_{\text{figure}}, h_{\text{ground}})$$
-where $R_p$ is a learned relation operator parameterized by the preposition $p$.
-In attention form, this looks like a preposition-specific query attending to the
-ground object and then writing a transformed location frame back to the figure or
-event token:
-$$O_p = \mathrm{softmax}\!\left(\frac{Q_pK_{\text{ground}}^\top}{\sqrt{d}}\right)V_{\text{ground}}$$
-
-The relevant Transformer mechanisms are:
-
-- heads that separate **figure** from **ground**
-- relation-specific projections that distinguish containment, support, direction, and
-  vertical ordering
-- relative-position biases, which supply a natural substrate for "near", "in",
-  "over", and path-like distinctions
-
-This is why `<spatial>` is preserving rather than lifting: the object is not given a
-new kind of feature space, it is relocated within the same conceptual manifold.
+Since the perceptual space is informed by sensation, regular relative-position biases, 
+which supply a natural substrate for "near", "in", "over", and path-like distinctions,
+are learned over time.
 
 #### Has
 
-`has` is a **role-binding** or **slot-filling** operation. It links an owner, whole,
+`has` is a **mereological** part operation or an analogue thereof. It links an owner, whole,
 or bearer to an attribute, part, or possessed object while keeping those roles
 distinct.
 
-One useful approximation is:
-$$h'_{\text{owner}} = h_{\text{owner}} +
-W_{\mathrm{has}}\,
-\mathrm{Attn}(q_{\text{owner}}, K_{\text{part}}, V_{\text{part}})$$
-
-Architecturally, the relevant Transformer logic is:
-
-- a possession head that binds possessor to possessed item
-- part-whole heads that treat the right-hand NP as a structural component of the left
-- residual storage of relation edges, so the model can later answer questions like
-  "what does the dog have?" or "what part belongs to the dog?"
-
-`has` therefore preserves rank. It does not collapse owner and possession into one
-concept, and it does not merely compare them as `<is>` does. Instead, it creates an
-addressable relation in which the left side can retrieve or expose the right side as
-one of its bound fields.
+Architecturally, it can be expressed by comparing the norm of the area of the constructed whole
+to the norm of the area of the sum of the part and the whole. T the degree that those two scalars are 
+equal, one is a part of the other.
 
 ### Conceptual Space
 
@@ -558,7 +563,7 @@ The Transformer logic implicated is usually:
 - similarity heads that compare subject and predicate in a shared basis
 - type/prototype heads that recognize `robin is bird` as class membership rather than
   strict token identity
-- copular heads that preserve both operands while adding an explicit relation between
+- definitive heads that preserve both operands while adding an explicit relation between
   them in the residual stream
 
 This is why `<is>` is preserving. The sentence does not introduce a third object so

@@ -5,11 +5,11 @@
 To avoid **worldline entanglement**, the system separates knowledge
 into three channels, each with a different persistence policy:
 
-| Data type | TruthSet | Train weights | Session only |
-|-----------|-------------|---------------|--------------|
-| universal facts | $\checkmark$ | $\checkmark$ | $\checkmark$ |
-| particular facts | optional | $\checkmark$ | $\checkmark$ |
-| feelings | $\times$ | $\times$ | $\checkmark$ |
+| Data type        | TruthSet     | Train weights | Session only |
+| ---------------- | ------------ | ------------- | ------------ |
+| universal facts  | $\checkmark$ | $\checkmark$  | $\checkmark$ |
+| particular facts | optional     | $\checkmark$  | $\checkmark$ |
+| feelings         | $\times$     | $\times$      | $\checkmark$ |
 
 This preserves empirical learning while preventing historical worldline
 capture. The system **learns from events but never stores worldline
@@ -20,11 +20,11 @@ histories**.
 
 **No spacetime particulars $\to$ no worldline capture**
 
-| Data type | TruthSet | Train weights | Session only |
-|-----------|-------------|---------------|--------------|
-| universal facts | $\checkmark$ | $\checkmark$ | $\checkmark$ |
-| particular facts | optional | $\checkmark$ | $\checkmark$ |
-| feelings | $\times$ | $\times$ | $\checkmark$ |
+| Data type        | TruthSet     | Train weights | Session only |
+| ---------------- | ------------ | ------------- | ------------ |
+| universal facts  | $\checkmark$ | $\checkmark$  | $\checkmark$ |
+| particular facts | optional     | $\checkmark$  | $\checkmark$ |
+| feelings         | $\times$     | $\times$      | $\checkmark$ |
 
 This table is the architectural foundation. It separates knowledge into
 three channels — knowing, learning, and valuing — each with a different
@@ -87,12 +87,12 @@ WikiOracle analogue:
 This means the system preserves a **shared knowledge structure** while
 allowing individual reasoning to remain flexible.
 
-| Domain | Constraint | Local freedom |
-|--------|------------|---------------|
-| physics | boundary conditions | event selection |
-| knowledge | truth constraints | interpretive reasoning |
-| cryptography | verification rules | selective disclosure |
-| surveillance capitalism | behavioral prediction | (suppressed) |
+| Domain                  | Constraint            | Local freedom          |
+| ----------------------- | --------------------- | ---------------------- |
+| physics                 | boundary conditions   | event selection        |
+| knowledge               | truth constraints     | interpretive reasoning |
+| cryptography            | verification rules    | selective disclosure   |
+| surveillance capitalism | behavioral prediction | (suppressed)           |
 
 WikiOracle aims to implement **epistemic LFGC** — freedom exists
 *inside constraint geometry*.
@@ -184,9 +184,9 @@ Examples:
 -   the temperature yesterday was 20°C
 -   model A outperformed model B
 
-| Action | Reason |
-|---|---|
-| train weights | they contain empirical evidence |
+| Action              | Reason                             |
+| ------------------- | ---------------------------------- |
+| train weights       | they contain empirical evidence    |
 | TruthSet (optional) | user controls via `store_concrete` |
 
 Pipeline:
@@ -206,11 +206,11 @@ Examples:
 -   I feel unsafe
 -   this explanation feels clear
 
-| Use | Allowed |
-|---|---|
+| Use                     | Allowed      |
+| ----------------------- | ------------ |
 | evaluation of responses | $\checkmark$ |
-| TruthSets | $\times$ |
-| training weights | $\times$ |
+| TruthSets               | $\times$     |
+| training weights        | $\times$     |
 
 This avoids turning subjective states into truth claims.
 
@@ -248,11 +248,11 @@ reclassified as particular.
 
 ## Resulting Architecture
 
-| Mode | Function | Pipeline |
-|------|----------|----------|
-| knowing | universal structure | universal rules → TruthSet → reasoning |
+| Mode     | Function            | Pipeline                                        |
+| -------- | ------------------- | ----------------------------------------------- |
+| knowing  | universal structure | universal rules → TruthSet → reasoning          |
 | learning | particular evidence | particular observations → abstraction → weights |
-| valuing | feelings | feelings → response evaluation |
+| valuing  | feelings            | feelings → response evaluation                  |
 
 
 ## Zero-Knowledge and Selective Disclosure

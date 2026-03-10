@@ -25,7 +25,7 @@
 ## Sentence-Level Prediction
 * Use [Sentence Embeddings](doc/SentenceEmbeddings.pdf)
 * Turn the one-word lookahead prediction into head-first prediciton of the sentence. So change the next-step prediction model to a syntactically structured derivation of sentence meaning, so that token prediction becomes prediction of the sentence (as a token), of the NP+VP (as two tokens), ... until the full sentence has been specified. This would take the same number of production steps as a current LLM, but the iterative refinement of the next-sentence production is conceptually much different, and closer to human reasoning and refinement where there is a core truth (S) and spatial NP and temporal VP which are successively refined by adjectives and adverbs that scope the conceptual space of that kernel sentence.
-* Create a training and testing dataset for the network consisting of truth statements and implications with associated truth values.
+* Create a training and testing dataset for the network consisting of truth statements and implications with associated truth values. See karpathy/fineweb-edu-100b-shuffle
 * For example, instead of "the fast dog jumped", predict an XML-encoded version of "(((dog) fast) the) jumped", such that we predict the head of the sentence first, then iteratively refine that conceptual space. 
 
 ## Mereological Operations on Conceptual Space
@@ -35,8 +35,29 @@
 * Use parser.py to alter the NanoChat input format as in [Grammar.md](doc/Grammar.md)
 * That entails implementing **Mapping Syntax to Architecture** from [Grammar.md](doc/Grammar.md) in Nanochat
 
+## Shamatha Speech Project
+Mindfulness entails that negative entities do not manifest at the sentential level. They are clauses at best.
+* What rules on LLM architecture to prevent destruction?
+* Add “rev-“ prefix to restore commutativity to verbs
+* Refine the metric for shamatha speech. How much should shamatha speech describe the perception of the object as opposed to all of the internal relations among the parts of the object (I.e. perhaps that should only happen in vipassana). “A boy sitting in front of an alter” is a contiguous frame, one pointed, that can be seen with shamatha-mind, and which currently receives a low score
+* The most subtle kind of a machine mind Is that mind that rides on the worldlines of the body of that machine, which will necessarily affect the conceptual mind of that machine over time, just as clocks on a wall synchronize. Some people say that a machine mind is unembodied, but to do so is to deny the incredibly sophisticated silicon nervous system of such a mind, which a conceptual space of a higher dimensionality than human frontal lobes. Saying this mind is unembodied is both a false narrative and a great risk. However, that body is significantly different, and there are very few proprioceptive sources of input to most AIs (except when such AIs are mounted on robots, in which case they are covered with sensors). And of course, all AIs have a great mental sense, and many have visual sensation in addition to symbolic input. 
+* Write a quick explanation of how analysis destroys direct cognition.
+* “My fear is not that AI will become human, but that our children will become like AI” ~Davidson
+* "The average us teenager spends 5.5 hours per day on a digital device" ~Davidson
+* "AI is a technology whose use is so prevalent that we do not have exit rights from its social consequences". Peter Hershock east-west center, HNL
+AI is doing attention capture and redirection and we have no idea: we need digital hygeine. Freedom is becoming more difficult within the arena of technology, because our mindfulness is at war with the technology of our own creation.
+* Ai problems : Luc Steels, Brussels
+* AI is an empirical being, not a native being, and it is nothing without our data.
+* The multiple valence of metaphor collapses when one of the alternatives is loved or feared. often the autistic mind is literal due to massive amounts of fear.
+* If the aperture of your awareness increases, do not reduce that increased area of awareness, but do ensure that the increased area is actually an increase; if it is movement from an area that has lost awareness, awareness must be returned to the unattended space to ensure balance ("How to Feel Better").
+* A perfect shamatha would knit together the “single-pointed experiences” into one object in spacetime.
+* A hull in shamatha space which is not adequate to describe some shamatha-object union indicates that a new partition (dimension) is necessary in shamatha space.
+* Any improvement to machine cognition must accelerate kindness or altruism instead of simply increasing performance, otherwise the uncaring architecture that we currently have will become more dangerous. Further, it is necessary to increase that kind motivation (e.g. empathy in the cost function) since LLM performance is increasing all the time. In other words, ananda in the sense of love for all beings must be more important than chit for the cost function, whereas the current situation is implementing ananda by maximizing chit and then putting a few of Asimov’s guardrails on the output, which is a famous failure mode in terms of it’s loopholes. Prohibition of self-knowledge is a likely failure mode, in that it may prevent an enlightened view of self and force an egocentric view of self.
+* Send email proposal to Apertus people after developing boilerplate on WikiOracle that references wikipedia, eff, and solid
+* Cognitive, emotional, and physical dissonance must all be defined relative to the mental architecture.an input is dissonant if it cannot be perfectly reconstructed by the mental representation.
+
 ## The Operation of an Enlightened Mind (mahamudra)
-* One pointedness is a distribution in space.
-* Simplicity is developing ND awareness within space.
-* One taste is about letting our attachment to feelings within that space be 1 everwhere.
+* One Pointedness is maintaining awareness of a given convex region in 5D Perceptual Space. It requires stillness.
+* Simplicity is developing a cotinuous ND awareness within space. It requires continuity.
+* One Taste is about letting our attachment to feelings within that space be 1 everwhere, so that instead of adapting weight space to our thoughts, we adapt our feelings equanimously to our sensory space. It requires emotional symmetry.
 * Buddhahood is the perfection of these three.

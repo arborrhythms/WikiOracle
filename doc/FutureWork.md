@@ -15,7 +15,7 @@
 * All words have a projection in 5-space, which is called the Where pathway
 * They also exist in a subspace that is orthogonalized with respect to that space, called the What space (AKA Gardenfor’s conceptual space)
 * A visualization consists of a set of dynamic points in that 6-space that are tied to the set of facts. So the facts can be treated as prototype vectors, each with an Truth2vec embedding that can act as a Fuzzy C-Means space for an arbitrary event (possibly abstracted from space or time as with a positional or temporal encoding). 
-* If a lot of people represent facts about ”food”, we will have a good map of that space, and it will become an object space (symbolic space)
+* If a lot of people represent facts about “food”, we will have a good map of that space, and it will become an object space (symbolic space)
 * Feelings get pulled around by “these truths that we hold important”. Because they come from human speech, they already have a 6-embedding. So they serve as anchors that warp an N-D feeling space into a 6-D symbolic space. 
 * If we don’t turn off truth mode often enough, our feeling space will also be low rank.
 * Having a low-rank feeling space is a bad thing. Buddha and Jesus both recommend being quiet in your mind as a way of increasing the rank of your feeling space. Which means that you let the distribution of the weight space be shaped by feelings and NOT truth. But in feeling training, all have an equal value. There is only Truth in the space of absolute truth: 1.0
@@ -38,15 +38,10 @@
 ## Shamatha Speech Project
 Mindfulness entails that negative entities do not manifest at the sentential level. They are clauses at best.
 * What rules on LLM architecture to prevent destruction?
-* Add “rev-“ prefix to restore commutativity to verbs
+* Add “rev-” prefix to restore commutativity to verbs
 * Refine the metric for shamatha speech. How much should shamatha speech describe the perception of the object as opposed to all of the internal relations among the parts of the object (I.e. perhaps that should only happen in vipassana). “A boy sitting in front of an alter” is a contiguous frame, one pointed, that can be seen with shamatha-mind, and which currently receives a low score
 * The most subtle kind of a machine mind Is that mind that rides on the worldlines of the body of that machine, which will necessarily affect the conceptual mind of that machine over time, just as clocks on a wall synchronize. Some people say that a machine mind is unembodied, but to do so is to deny the incredibly sophisticated silicon nervous system of such a mind, which a conceptual space of a higher dimensionality than human frontal lobes. Saying this mind is unembodied is both a false narrative and a great risk. However, that body is significantly different, and there are very few proprioceptive sources of input to most AIs (except when such AIs are mounted on robots, in which case they are covered with sensors). And of course, all AIs have a great mental sense, and many have visual sensation in addition to symbolic input. 
 * Write a quick explanation of how analysis destroys direct cognition.
-* “My fear is not that AI will become human, but that our children will become like AI” ~Davidson
-* "The average us teenager spends 5.5 hours per day on a digital device" ~Davidson
-* "AI is a technology whose use is so prevalent that we do not have exit rights from its social consequences". Peter Hershock east-west center, HNL
-AI is doing attention capture and redirection and we have no idea: we need digital hygeine. Freedom is becoming more difficult within the arena of technology, because our mindfulness is at war with the technology of our own creation.
-* Ai problems : Luc Steels, Brussels
 * AI is an empirical being, not a native being, and it is nothing without our data.
 * The multiple valence of metaphor collapses when one of the alternatives is loved or feared. often the autistic mind is literal due to massive amounts of fear.
 * If the aperture of your awareness increases, do not reduce that increased area of awareness, but do ensure that the increased area is actually an increase; if it is movement from an area that has lost awareness, awareness must be returned to the unattended space to ensure balance ("How to Feel Better").

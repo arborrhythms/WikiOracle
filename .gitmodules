@@ -6,3 +6,6 @@
 	path = openclaw
 	url = https://github.com/arborrhythms/openclaw.git
 	branch = main
+[submodule "basicmodel"]
+	path = basicmodel
+	url = https://github.com/arborrhythms/BasicModel

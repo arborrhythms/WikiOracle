@@ -1,4 +1,4 @@
-# Truth.md  
+# Truth
 
 *Thoughts are non-rivalrous: if someone repeats your idea, you still possess it. Therefore an idea as such cannot be a property object.*
     ~ Immanuel Kant

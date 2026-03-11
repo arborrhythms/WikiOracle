@@ -729,17 +729,12 @@ build_sft:
 # Generate a single PDF from all doc/*.md files with README as index.
 
 doc_pdf : WikiOracle.pdf
+TITLE := WikiOracle Documentation
 
 WikiOracle.pdf : $(PDF_CHAPTERS)
 	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
 	mkdir -p output
-	pandoc $(PDFOPTS) \
-		--from=gfm \
-		--metadata title="WikiOracle Documentation" \
-		--toc --toc-depth=3 \
-		--resource-path=doc \
-		-o $@ \
-		$^
+	$(MAKE_PDF) -o $@ $^
 	@echo "Done: output/WikiOracle.pdf"
 
 # --- Cleanup ------------------------------------------------------------------

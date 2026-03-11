@@ -9,3 +9,4 @@
 [submodule "basicmodel"]
 	path = basicmodel
 	url = https://github.com/arborrhythms/BasicModel
+	ignore = dirty

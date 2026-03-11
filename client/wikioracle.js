@@ -1653,8 +1653,8 @@ async function init() {
     setStatus("Loading...");
 
     // 0) Load server info (stateless flag, url_prefix)
-    //    url_prefix is detected from the page URL: if we're at /chat/,
-    //    API calls go to /chat/state etc.  Fallback: ask the server.
+    //    url_prefix is always authoritative from the page URL: if we're at
+    //    /client/, API calls go to /client/state etc.  Fallback: ask the server.
     const pagePath = window.location.pathname.replace(/\/+$/, "");
     if (pagePath && pagePath !== "/") {
       config.server.url_prefix = pagePath;
@@ -1672,6 +1672,12 @@ async function init() {
       await _initStateless();
     } else {
       await _initStateful();
+    }
+
+    // Re-assert url_prefix from the live page URL — _initStateless/_initStateful
+    // may replace `config` with stored data that has a stale prefix.
+    if (pagePath && pagePath !== "/") {
+      config.server.url_prefix = pagePath;
     }
 
     // Apply layout, theme, and update placeholder from config

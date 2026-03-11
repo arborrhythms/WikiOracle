@@ -1,6 +1,17 @@
 # WikiOracle Makefile
-# Builds, trains, and runs the NanoChat submodule.
-# Supports both CPU/MPS (MacBook demo) and GPU (multi-GPU training) modes.
+#
+# Top-level workflow:
+#   make install          — create .venv (shim + NanoChat), install all deps
+#   make build            — train model (alias for 'make train')
+#   make sync HOST=remote — sync app + checkpoints to/from production server
+#   make run              — start WikiOracle Flask shim locally
+#
+# Contributors: install → build → run gets you a working local instance.
+# Maintainers:  sync and up/down manage the production Lightsail server.
+#
+# Key variables:
+#   ARCH=cpu|gpu   — target architecture (default: cpu)
+#   HOST=local|remote — target host for sync/up/down/nano_*/wo_* (default: local)
 
 SHELL := /bin/bash
 
@@ -18,7 +29,7 @@ IDENTITY_DATA    := $(NANOCHAT_BASE)/identity_conversations.jsonl
 
 # Checkpoint backup (for rollback before/after online training)
 CHECKPOINT_BAK   := output/checkpoints
-WO_NANOCHAT      ?= /opt/bitnami/wordpress/files/wikiOracle.org/nanochat
+WO_NANOCHAT      ?= /opt/bitnami/wordpress/files/WikiOracle.org/nanochat
 WO_CHECKPOINT    := $(WO_NANOCHAT)/chatsft_checkpoints
 IDENTITY_URL     := https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
 
@@ -62,7 +73,7 @@ EC2_TARGET        ?=
 WO_KEY_FILE       ?= ./wikiOracle.pem
 WO_USER           ?= bitnami
 WO_HOST           ?= wikiOracle.org
-WO_DEST           ?= /opt/bitnami/wordpress/files/wikiOracle.org/chat
+WO_DEST           ?= /opt/bitnami/wordpress/files/WikiOracle.org/client
 
 ALERT_EMAIL ?=
 WIKIORACLE_APP ?= bin/wikioracle.py
@@ -93,20 +104,22 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
 # --- Phony targets ------------------------------------------------------------
 
 .PHONY: all some up down deploy help \
+        install build sync run \
         build_venv build_setup \
-        build_data build_tokenizer build_preprocess \
+        build_data build_tokenizer build_preprocess build_sft \
         train_pretrain train_finetune train \
+        train_remote train_retrieve train_ssh train_status train_logs train_deploy \
         test_eval test_unit \
-        run_init run_server run_debug run_cli run_web \
+        run_init run_server run_debug run_cli run_web parse \
+        sync_remote sync_checkpoint_pull sync_checkpoint_push \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
-        wo_deploy wo_start wo_stop wo_restart wo_status wo_logs \
-        parse \
-        doc_report clean clean_all \
+        wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
+        basicmodel_status \
+        openclaw_setup openclaw_run openclaw_test \
+        doc_report doc_pdf clean clean_all \
         remote remote_retrieve remote_ssh remote_status remote_logs \
         remote_deploy remote_deploy_launch \
-        checkpoint_pull checkpoint_push \
-        openclaw_setup openclaw_run openclaw_test \
-        doc_pdf
+        checkpoint_pull checkpoint_push
 
 # Ordered list of doc chapters for PDF generation
 PDF_CHAPTERS := README.md \
@@ -135,102 +148,63 @@ PDF_CHAPTERS := README.md \
 help:
 	@echo "WikiOracle / NanoChat Makefile"
 	@echo ""
-	@echo "  make all                Full pipeline: setup + train + eval + report (ARCH=cpu)"
-	@echo "  make all ARCH=gpu       Full pipeline (GPU)"
-	@echo "  make some               Lightweight smoke test (10 iters, ARCH=cpu)"
-	@echo "  make some ARCH=gpu      Lightweight smoke test (GPU)"
-	@echo "  make up                 Deploy + restart nano and wo services"
-	@echo "  make down               Stop nano and wo services"
-	@echo "  make remote             Launch EC2, copy code, train, auto-terminate"
+	@echo "Contributor workflow:  make install → make build → make run"
+	@echo "Maintainer workflow:   make sync HOST=remote → make up HOST=remote"
 	@echo ""
-	@echo "Build / Setup (build_*):"
-	@echo "  make build_venv         Create .venv and install shim deps (flask, requests)"
-	@echo "  make build_setup        Install NanoChat dependencies (CPU/MPS)"
-	@echo "  make build_setup ARCH=gpu  Install dependencies (GPU/CUDA)"
-	@echo "  make build_data         Download training data shards"
-	@echo "  make build_tokenizer    Train and evaluate the BPE tokenizer"
-	@echo "  make build_preprocess   Preprocess corpus for sensation tags"
+	@echo "Top-level targets:"
+	@echo "  make install            Create .venv and install all dependencies (ARCH=cpu|gpu)"
+	@echo "  make build              Train model (alias for 'make train', ARCH=cpu|gpu)"
+	@echo "  make sync HOST=remote   Sync app + checkpoints to/from server"
+	@echo "  make run                Start WikiOracle local shim (foreground)"
+	@echo "  make up HOST=remote     Restart both services on production"
+	@echo "  make down HOST=remote   Stop both services"
+	@echo "  make all                Full pipeline: install + train + eval + report"
 	@echo ""
 	@echo "Training (train_*):"
+	@echo "  make train              Full pipeline: data + tok + pretrain + finetune"
 	@echo "  make train_pretrain     Pretrain base model (ARCH=cpu|gpu)"
 	@echo "  make train_finetune     Supervised fine-tuning (ARCH=cpu|gpu)"
-	@echo "  make train              Full pipeline: data + tok + pretrain + finetune (ARCH=cpu|gpu)"
+	@echo "  make train_remote       Launch EC2, copy repo, start training"
+	@echo "  make train_deploy       Launch EC2, train, deploy to WikiOracle"
+	@echo "  make train_retrieve     Pull artifacts, terminate EC2 instance"
+	@echo "  make train_ssh/status/logs"
 	@echo ""
 	@echo "Test / Evaluation (test_*):"
 	@echo "  make test_unit          Run unit tests"
 	@echo "  make test_eval          Evaluate model (ARCH=cpu|gpu)"
 	@echo ""
 	@echo "Run / Inference (run_*):"
-	@echo "  make run_server         Start WikiOracle local shim (foreground)"
 	@echo "  make run_debug          Start WikiOracle local shim (debug mode)"
 	@echo "  make run_init           Remove state files for a fresh start"
 	@echo "  make run_cli            Chat with the model (CLI)"
 	@echo "  make run_web            Chat with the model (Web UI + /train)"
 	@echo ""
-	@echo "NanoChat Server (nano_*):"
-	@echo "  make nano_deploy        Deploy nanochat.service     (remote only)"
-	@echo "  make nano_start         Start NanoChat              (local: PID file, remote: systemctl)"
-	@echo "  make nano_stop          Stop NanoChat"
-	@echo "  make nano_restart       Restart NanoChat"
-	@echo "  make nano_status        Check NanoChat status"
-	@echo "  make nano_logs          Tail NanoChat logs           (remote only)"
+	@echo "Sync (sync_*):"
+	@echo "  make sync HOST=remote            Sync app + checkpoints to/from server"
+	@echo "  make sync_remote                 Sync from running EC2 to WikiOracle"
+	@echo "  make sync_checkpoint_pull/push   Backup/restore fine-tuning weights"
 	@echo ""
-	@echo "WikiOracle Server (wo_*):"
-	@echo "  make wo_deploy          Deploy WikiOracle shim      (remote only)"
-	@echo "  make wo_start           Start WikiOracle             (local: PID file, remote: systemctl)"
-	@echo "  make wo_stop            Stop WikiOracle"
-	@echo "  make wo_restart         Restart WikiOracle"
-	@echo "  make wo_status          Check WikiOracle status"
-	@echo "  make wo_logs            Tail WikiOracle logs         (remote only)"
+	@echo "Service control (nano_*/wo_*/basicmodel_*, HOST=local|remote):"
+	@echo "  make nano_start/stop/restart/status/logs"
+	@echo "  make wo_start/stop/restart/status/logs"
+	@echo "  make basicmodel_status"
 	@echo ""
-	@echo "Remote (remote_*):"
-	@echo "  make remote             Launch EC2 instance, copy repo, start training"
-	@echo "  make remote_retrieve    Pull artifacts, generate summary, terminate instance"
-	@echo "  make remote_ssh         SSH into running EC2 instance"
-	@echo "  make remote_status      Check EC2 instance state"
-	@echo "  make remote_logs        Tail training log on remote instance"
+	@echo "Other:"
+	@echo "  make openclaw_setup/run/test"
+	@echo "  make doc_pdf / doc_report"
+	@echo "  make clean / clean_all"
 	@echo ""
-	@echo "Deploy (remote_ → wo):"
-	@echo "  make remote_deploy_launch  Launch EC2, train, deploy to WikiOracle"
-	@echo "  make remote_deploy         Deploy from running EC2 to WikiOracle"
-	@echo ""
-	@echo "Checkpoint Backup (checkpoint_*):"
-	@echo "  make checkpoint_pull    Pull SFT weights from WikiOracle → output/checkpoints/"
-	@echo "  make checkpoint_push    Push output/checkpoints/ → WikiOracle SFT weights"
-	@echo ""
-	@echo "OpenClaw (openclaw_*):"
-	@echo "  make openclaw_setup     Install OpenClaw + WikiOracle extension (pnpm install)"
-	@echo "  make openclaw_run       Start OpenClaw with WikiOracle provider"
-	@echo "  make openclaw_test      Run WikiOracle extension unit tests"
-	@echo ""
-	@echo "Documentation (doc_*):"
-	@echo "  make doc_pdf            Generate PDF from all doc/*.md → output/WikiOracle.pdf"
-	@echo "  make doc_report         Generate training report"
-	@echo ""
-	@echo "Cleanup:"
-	@echo "  make clean              Remove Python caches"
-	@echo "  make clean_all          Remove caches and venv"
-	@echo ""
-	@echo "Overridable variables (pass on command line):"
+	@echo "Key variables:"
 	@echo "  ARCH=cpu|gpu            Target architecture (default: cpu)"
-	@echo "  HOST=local|remote       Target host for nano_*/wo_* (default: local)"
+	@echo "  HOST=local|remote       Target host for up/down/nano_*/wo_* (default: local)"
 	@echo "  NANO_PORT=8000          NanoChat server port (local mode)"
 	@echo "  NPROC=8                 GPUs per node for torchrun"
-	@echo "  WANDB_RUN=name          Weights & Biases run name (default: dummy)"
-	@echo "  CPU_DEPTH=6             Model depth for CPU training"
-	@echo "  CPU_ITERS=5000          Training iterations for CPU"
-	@echo "  GPU_DEPTH=26            Model depth for GPU training"
-	@echo "  DATA_SHARDS_INIT=8      Initial data shards to download"
-	@echo "  DATA_SHARDS_FULL=370    Full data shards for GPU training"
-	@echo "  EC2_INSTANCE_TYPE       EC2 instance type (default: p5.4xlarge)"
-	@echo "  EC2_DISK_SIZE           Root EBS volume in GB (default: 200)"
-	@echo "  ALERT_EMAIL             Email for idle-instance alerts (required for remote builds)"
 
 # ---- All / Service Control ----------------------------------------------------
 
-all: build_setup train test_eval doc_report
+all: install train test_eval doc_report
 
-up: nano_deploy wo_deploy nano_restart wo_restart
+up: nano_restart wo_restart
 
 down: nano_stop wo_stop
 
@@ -243,17 +217,17 @@ else
 	$(MAKE) all ARCH=cpu CPU_ITERS=10
 endif
 
-# --- Remote (EC2) -------------------------------------------------------------
+# --- Training on EC2 (train_remote/retrieve/ssh/status/logs/deploy) ----------
 
 REMOTE_ARGS := --region=$(EC2_REGION) --key-name=$(EC2_KEY_NAME) \
                --key-file=$(EC2_KEY_FILE) --user=$(EC2_USER)
 
-remote:
+train_remote:
 ifndef ALERT_EMAIL
-	$(error ALERT_EMAIL is required for remote builds — e.g. make remote ALERT_EMAIL=you@example.com)
+	$(error ALERT_EMAIL is required — e.g. make train_remote ALERT_EMAIL=you@example.com)
 endif
 ifndef EC2_TARGET
-	$(error EC2_TARGET is required for remote builds — e.g. make remote EC2_TARGET=all)
+	$(error EC2_TARGET is required — e.g. make train_remote EC2_TARGET=all)
 endif
 	python3 bin/remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
@@ -264,24 +238,24 @@ endif
 		--target="$(EC2_TARGET)" \
 		--alert-email=$(ALERT_EMAIL)
 
-remote_retrieve:
+train_retrieve:
 	python3 bin/remote.py $(REMOTE_ARGS) retrieve
 
-remote_ssh:
+train_ssh:
 	python3 bin/remote.py $(REMOTE_ARGS) ssh
 
-remote_logs:
+train_logs:
 	python3 bin/remote.py $(REMOTE_ARGS) logs
 
-remote_status:
+train_status:
 	python3 bin/remote.py $(REMOTE_ARGS) status
 
-remote_deploy_launch:
+train_deploy:
 ifndef ALERT_EMAIL
-	$(error ALERT_EMAIL is required for remote builds — e.g. make remote_deploy_launch ALERT_EMAIL=you@example.com)
+	$(error ALERT_EMAIL is required — e.g. make train_deploy ALERT_EMAIL=you@example.com)
 endif
 ifndef EC2_TARGET
-	$(error EC2_TARGET is required for remote builds — e.g. make remote_deploy_launch EC2_TARGET=all)
+	$(error EC2_TARGET is required — e.g. make train_deploy EC2_TARGET=all)
 endif
 	python3 bin/remote.py $(REMOTE_ARGS) launch \
 		--instance-type=$(EC2_INSTANCE_TYPE) \
@@ -293,8 +267,17 @@ endif
 		--alert-email=$(ALERT_EMAIL) \
 		--deploy $(DEPLOY_ARGS)
 
-remote_deploy:
+sync_remote:
 	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
+
+# Legacy aliases for remote_* targets
+remote: train_remote
+remote_retrieve: train_retrieve
+remote_ssh: train_ssh
+remote_logs: train_logs
+remote_status: train_status
+remote_deploy_launch: train_deploy
+remote_deploy: sync_remote
 
 # --- NanoChat Server (HOST=local|remote) --------------------------------------
 # When HOST=local  → background process with PID file (localhost:NANO_PORT)
@@ -302,16 +285,41 @@ remote_deploy:
 
 WO_SSH := ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10 $(WO_USER)@$(WO_HOST)
 
-nano_deploy:
+WO_RSYNC := rsync -avz -e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10"
+
+sync:
 ifeq ($(HOST),local)
-	@echo "Nothing to deploy locally."
+	@echo "Sync is a remote-only operation. Use: make sync HOST=remote"
 else
-	@echo "Deploying nanochat.service to $(WO_HOST) ..."
-	scp -i $(WO_KEY_FILE) -o ConnectTimeout=10 \
-		data/nanochat.service $(WO_USER)@$(WO_HOST):/tmp/nanochat.service
-	$(WO_SSH) "sudo cp /tmp/nanochat.service /etc/systemd/system/ && sudo systemctl daemon-reload && rm /tmp/nanochat.service"
-	@echo "nanochat.service deployed. Run 'make nano_restart HOST=remote' to apply."
+	@echo "=== Syncing app → $(WO_HOST):$(WO_DEST) ==="
+	$(WO_RSYNC) --delete \
+		--exclude .venv \
+		--exclude .git/ \
+		--exclude output/ \
+		--exclude nanochat/ \
+		--exclude config.xml \
+		--exclude state.xml \
+		--exclude '*.pem' \
+		--exclude __pycache__/ \
+		--exclude .DS_Store \
+		. $(WO_USER)@$(WO_HOST):$(WO_DEST)/
+	@echo ""
+	@echo "=== Syncing checkpoints (bidirectional) ==="
+	mkdir -p "$(CHECKPOINT_BAK)" output/base_checkpoints
+	$(WO_RSYNC) --update "$(WO_USER)@$(WO_HOST):$(WO_CHECKPOINT)/" "$(CHECKPOINT_BAK)/"
+	$(WO_RSYNC) --update "$(CHECKPOINT_BAK)/" "$(WO_USER)@$(WO_HOST):$(WO_CHECKPOINT)/"
+	$(WO_RSYNC) --update "$(WO_USER)@$(WO_HOST):$(WO_NANOCHAT)/base_checkpoints/" "output/base_checkpoints/" 2>/dev/null || true
+	$(WO_RSYNC) --update "output/base_checkpoints/" "$(WO_USER)@$(WO_HOST):$(WO_NANOCHAT)/base_checkpoints/" 2>/dev/null || true
+	@echo ""
+	@echo "=== Installing service files ==="
+	$(WO_SSH) "sudo cp $(WO_DEST)/data/wikioracle.service /etc/systemd/system/ && \
+		sudo cp $(WO_DEST)/data/nanochat.service /etc/systemd/system/ && \
+		sudo systemctl daemon-reload"
+	@echo "Sync complete. Run 'make up HOST=remote' to restart services."
 endif
+
+nano_deploy: sync
+wo_deploy: sync
 
 nano_start:
 ifeq ($(HOST),local)
@@ -402,21 +410,7 @@ endif
 # When HOST=local  → background Flask shim with PID file
 # When HOST=remote → SSH to WO_HOST, manage via systemctl wikioracle
 
-# Extra untracked files the server needs (e.g. runtime config with secrets).
-WO_DEPLOY_EXTRA := config.xml
-
-wo_deploy:
-ifeq ($(HOST),local)
-	@echo "Nothing to deploy locally."
-else
-	@echo "Deploying WikiOracle to $(WO_HOST):$(WO_DEST) ..."
-	rsync -avz --delete --exclude .venv \
-		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
-		--files-from=<(git ls-files -- bin client data test requirements.txt; echo $(WO_DEPLOY_EXTRA)) \
-		. $(WO_USER)@$(WO_HOST):$(WO_DEST)/
-	$(WO_SSH) "sudo cp $(WO_DEST)/data/wikioracle.service /etc/systemd/system/ && sudo systemctl daemon-reload"
-	@echo "WikiOracle deployed. Run 'make wo_restart HOST=remote' to apply."
-endif
+## wo_deploy is now an alias for sync (above)
 
 wo_start:
 ifeq ($(HOST),local)
@@ -493,22 +487,82 @@ else
 	$(WO_SSH) "sudo journalctl -u wikioracle -f --no-pager"
 endif
 
-# --- Build / Setup ------------------------------------------------------------
+# --- Migration (chat/ → client/) ---------------------------------------------
+# Rename WikiOracle.org/chat to WikiOracle.org/client, preserving NanoChat
+# build derivatives (.venv, checkpoints) by pulling them locally first.
+#
+# Usage: make wo_migrate HOST=remote
+
+WO_BASE         := /opt/bitnami/wordpress/files/WikiOracle.org
+WO_OLD_CHAT     := $(WO_BASE)/chat
+
+wo_migrate:
+ifeq ($(HOST),local)
+	@echo "Migration is a remote-only operation. Use: make wo_migrate HOST=remote"
+	@exit 1
+else
+	@echo "╔══════════════════════════════════════════════════════════════╗"
+	@echo "║  WikiOracle Directory Migration                            ║"
+	@echo "║  WikiOracle.org/chat → WikiOracle.org/client               ║"
+	@echo "║  WikiOracle.org/nanochat (unchanged)                       ║"
+	@echo "╚══════════════════════════════════════════════════════════════╝"
+	@printf "Type YES to continue: " && read answer && [ "$$answer" = "YES" ] || { echo "Aborted."; exit 1; }
+
+	@echo ""
+	@echo "=== Step 1/4: Stop services ==="
+	$(WO_SSH) "sudo systemctl stop wikioracle nanochat || true"
+
+	@echo ""
+	@echo "=== Step 2/4: Copy chat → client on remote ==="
+	$(WO_SSH) "cp -a $(WO_OLD_CHAT) $(WO_BASE)/client"
+
+	@echo ""
+	@echo "=== Step 3/4: Deploy updated service files + app code ==="
+	$(MAKE) wo_deploy HOST=remote
+	$(MAKE) nano_deploy HOST=remote
+	$(WO_SSH) "cd $(WO_BASE)/client && rm -rf .venv && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+
+	@echo ""
+	@echo "=== Step 4/4: Restart services and verify ==="
+	$(WO_SSH) "sudo systemctl daemon-reload && sudo systemctl start nanochat wikioracle"
+	@sleep 3
+	$(WO_SSH) "sudo systemctl status nanochat wikioracle --no-pager -l" || true
+
+	@echo ""
+	@echo "=== Done ==="
+	@echo "Migration complete. Old directory preserved at $(WO_OLD_CHAT)/"
+	@echo "Once verified, remove manually:"
+	@echo "  ssh -i $(WO_KEY_FILE) $(WO_USER)@$(WO_HOST) 'rm -rf $(WO_OLD_CHAT)'"
+endif
+
+# --- Install / Build / Run (top-level) ----------------------------------------
 
 $(VENV_DIR):
 	command -v uv &> /dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$$HOME/.local/bin:$$PATH"; }
 	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv venv
 
-build_venv:
+install: $(VENV_DIR)
+	deactivate 2>/dev/null || true
+	rm -rf $(SHIM_VENV)
 	python3 -m venv $(SHIM_VENV)
-	$(SHIM_ACTIVATE) && pip install -r requirements.txt
-
-build_setup: $(VENV_DIR)
+	$(SHIM_ACTIVATE) && python -m pip install --upgrade pip setuptools wheel && \
+		python -m pip install -r requirements.txt
 ifeq ($(ARCH),gpu)
 	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra gpu
 else
 	export PATH="$$HOME/.local/bin:$$PATH" && cd $(NANOCHAT_DIR) && uv sync --extra cpu
 endif
+
+build: train
+
+run:
+	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP)
+
+# --- Build / Setup (legacy aliases) ------------------------------------------
+
+build_venv: install
+
+build_setup: install
 
 # --- Data ---------------------------------------------------------------------
 
@@ -646,25 +700,35 @@ doc_report:
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python -m nanochat.report generate
 
-# --- Checkpoint backup / restore -----------------------------------------------
-# Use checkpoint_pull before enabling online training to snapshot the current
-# fine-tuning weights.  Use checkpoint_push to restore them if capture occurs.
+# --- Checkpoint sync (sync_checkpoint_*) ---------------------------------------
+# Use sync_checkpoint_pull before enabling online training to snapshot the
+# current fine-tuning weights.  Use sync_checkpoint_push to restore them.
 
-checkpoint_pull:
+sync_checkpoint_pull:
 	@echo "Pulling fine-tuning checkpoints from $(WO_HOST) → $(CHECKPOINT_BAK)/ ..."
 	mkdir -p "$(CHECKPOINT_BAK)"
-	rsync -avz --delete \
-		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
+	$(WO_RSYNC) --delete \
 		"$(WO_USER)@$(WO_HOST):$(WO_CHECKPOINT)/" "$(CHECKPOINT_BAK)/"
 	@echo "Done. Backup at $(CHECKPOINT_BAK)/"
 
-checkpoint_push:
+sync_checkpoint_push:
 	@test -d "$(CHECKPOINT_BAK)" || { echo "No backup at $(CHECKPOINT_BAK)/"; exit 1; }
 	@echo "Pushing $(CHECKPOINT_BAK)/ → $(WO_HOST) fine-tuning checkpoints ..."
-	rsync -avz --delete \
-		-e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10" \
+	$(WO_RSYNC) --delete \
 		"$(CHECKPOINT_BAK)/" "$(WO_USER)@$(WO_HOST):$(WO_CHECKPOINT)/"
 	@echo "Done. Run 'make wo_restart' to reload weights."
+
+# Legacy aliases
+checkpoint_pull: sync_checkpoint_pull
+checkpoint_push: sync_checkpoint_push
+
+# --- BasicModel (stub — not yet implemented) ----------------------------------
+# BasicModel is a second local provider. Service control targets will be
+# added here once the inference server exists.
+
+basicmodel_status:
+	@echo "BasicModel provider is registered but has no inference server yet."
+	@echo "Use the 'WikiOracle BasicModel' provider in settings to see the stub response."
 
 # --- OpenClaw -----------------------------------------------------------------
 

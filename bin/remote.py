@@ -46,8 +46,8 @@ WO_SSH_OPTS = [
 WO_KEY_FILE_DEFAULT = "~/.ssh/wikiOracle.pem"
 WO_USER_DEFAULT = "bitnami"
 WO_HOST_DEFAULT = "wikiOracle.org"
-WO_DEST_DEFAULT = "/opt/bitnami/wordpress/files/wikiOracle.org/chat"
-WO_DEPLOY_SCRIPT = "/opt/bitnami/wordpress/files/wikiOracle.org/deploy.sh"
+WO_DEST_DEFAULT = "/opt/bitnami/wordpress/files/WikiOracle.org/client"
+WO_DEPLOY_SCRIPT = "/opt/bitnami/wordpress/files/WikiOracle.org/deploy.sh"
 WO_EC2_TMP_KEY = "/tmp/ec2.pem"
 
 DEPLOY_RSYNC_EXCLUDES = [

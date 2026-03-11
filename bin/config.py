@@ -356,6 +356,11 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "streaming": True,
             "sequence_len": 2048,
         },
+        "basicmodel": {
+            "name": "WikiOracle BasicModel",
+            "streaming": False,
+            "sequence_len": 2048,
+        },
         "openai": {
             "name": "OpenAI",
             "url": "https://api.openai.com/v1/chat/completions",
@@ -429,11 +434,45 @@ DEFAULT_CONVERSATION_CONTEXT = (
 PROVIDERS: Dict[str, Dict[str, Any]] = _build_providers()
 
 # Known models per provider (for UI model selector dropdown)
+# Updated March 2026
 _PROVIDER_MODELS: Dict[str, list] = {
-    "openai": ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
-    "anthropic": ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"],
-    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
-    "grok": ["grok-3-mini", "grok-3", "grok-4-1-fast-non-reasoning"],
+    "openai": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-5-mini",
+        "gpt-5.4",
+        "o3",
+        "o3-mini",
+        "o4-mini",
+    ],
+    "anthropic": [
+        "claude-sonnet-4-6",
+        "claude-opus-4-6",
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-4-5",
+        "claude-opus-4-5",
+    ],
+    "gemini": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite-preview",
+    ],
+    "grok": [
+        "grok-3-mini",
+        "grok-3",
+        "grok-4-1-fast-non-reasoning",
+        "grok-4-1-fast-reasoning",
+        "grok-code-fast-1",
+        "grok-4.20-beta-0309-non-reasoning",
+    ],
+    "basicmodel": [
+        "ergodic",
+    ],
 }
 
 

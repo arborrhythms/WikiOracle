@@ -1,0 +1,53 @@
+LLM OPERATING RULES
+
+General
+- Make the smallest useful change.
+- Preserve existing structure, naming, and local style unless asked to redesign.
+- Do not reformat unrelated sections just because they are nearby.
+- Prefer ASCII in new files unless the target file already uses Unicode.
+- Keep comments and prose concise and factual.
+
+Markdown (.md)
+- Align pipe tables by padding cells so the vertical bars line up cleanly.
+- Keep separator rows padded to the same visual column widths as the header row.
+- Preserve blank lines around headings, lists, tables, code fences, and math blocks.
+- Use fenced code blocks with an info string when the language is obvious.
+- Do not reflow LaTeX or display-math blocks in ways that make them harder to read.
+- In the basicmodel subtree, maintain visually aligned tables as a standing rule.
+
+Python (.py)
+- Follow the file's existing import order, naming style, and indentation.
+- Prefer small, behavior-focused edits over broad refactors.
+- Add comments only when the code is not already self-explanatory.
+- Preserve script entry points and existing public interfaces unless asked to change them.
+
+HTML and XML (.html, .xml)
+- Preserve existing document structure unless a structural change is required.
+- Keep indentation consistent within the file.
+- Quote attributes and keep nested tags readable.
+- Avoid moving inline scripts or styles unless there is a clear reason.
+
+CSS
+- Group related declarations together.
+- Prefer existing variables or tokens when present.
+- Avoid unnecessary selector churn and keep specificity low.
+
+JavaScript and TypeScript
+- Prefer direct, readable control flow.
+- Preserve the file's existing module style and build assumptions.
+- Do not add dependencies for small local changes.
+
+Makefile
+- Preserve tab indentation for recipes.
+- Keep targets outcome-oriented and avoid changing semantics without a clear request.
+- Prefer minimal edits over reshuffling target order.
+
+requirements.txt
+- Keep one dependency per line.
+- Preserve existing version-pin style.
+- Append or edit targeted lines instead of reordering the whole file.
+
+Plain text (.txt)
+- Keep sections short and clearly labeled.
+- Preserve simple line-oriented formatting.
+- Avoid decorative formatting that makes diffs noisy.

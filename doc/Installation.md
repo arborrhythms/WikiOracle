@@ -6,26 +6,24 @@
 ### Requirements
 
 * Python 3 and `make`.
-* `uv` for NanoChat environment setup (`make build_setup` will bootstrap it if missing).
-* AWS CLI configured for EC2 launch workflows (`make remote*` targets).
+* `uv` for NanoChat environment setup (`make install` will bootstrap it if missing).
+* AWS CLI configured for EC2 launch workflows (`make train_remote` and related targets).
 * SSH keys:
   * EC2 training key (`~/.ssh/nanochat-key.pem`, auto-created by remote tooling as needed).
   * Lightsail key (`./wikiOracle.pem` by default, configurable via `WO_KEY_FILE`).
 
 ### Python dependencies
 
-The WikiOracle shim server requires only `flask` and `requests` (see `requirements.txt`). These are installed into a local `.venv`:
+`make install` creates both virtual environments and installs all dependencies:
 
 ```bash
-make build_venv
+make install              # CPU/MPS (default)
+make install ARCH=gpu     # GPU/CUDA
 ```
 
-NanoChat (the local LLM) has its own environment under `nanochat/.venv`, managed by `uv`:
-
-```bash
-make build_setup              # CPU/MPS
-make build_setup ARCH=gpu     # GPU/CUDA
-```
+This sets up:
+* `.venv` — the WikiOracle shim server (`flask`, `requests`, etc. from `requirements.txt`)
+* `nanochat/.venv` — the NanoChat local LLM (managed by `uv`)
 
 ### Data and tokenizer bootstrap
 
@@ -49,26 +47,35 @@ make build_tokenizer
 
 ## The Makefile: Running and Building
 
-All local and remote workflows are orchestrated through the Makefile. Targets are grouped by prefix.
+All local and remote workflows are orchestrated through the Makefile.
 
-### Build / Setup (`build_*`)
+### Top-level targets
 
-| Target                      | Purpose                                                |
-| --------------------------- | ------------------------------------------------------ |
-| `make build_venv`           | Create `.venv` and install shim deps (flask, requests) |
-| `make build_setup`          | Install NanoChat dependencies (CPU/MPS)                |
-| `make build_setup ARCH=gpu` | Install NanoChat dependencies (GPU/CUDA)               |
-| `make build_data`           | Download training data shards                          |
-| `make build_tokenizer`      | Train and evaluate the BPE tokenizer                   |
-| `make build_preprocess`     | Preprocess corpus for sensation tags                   |
+These are the primary entry points. Contributors need `install` → `build` → `run`. Maintainers additionally use `sync` and `up`/`down` to manage the production server.
+
+| Target                 | Purpose                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| `make install`         | Create `.venv` (shim + NanoChat), install all deps             |
+| `make build`           | Train the model (alias for `make train`, `ARCH=cpu\|gpu`)      |
+| `make sync HOST=remote`| Sync app + checkpoints to/from production server               |
+| `make run`             | Start WikiOracle Flask shim locally (foreground)               |
+| `make up HOST=remote`  | Restart both services on production                            |
+| `make down HOST=remote`| Stop both services                                             |
+| `make all`             | Full pipeline: install + train + eval + report                 |
 
 ### Training (`train_*`)
 
 | Target                | Purpose                                               |
 | --------------------- | ----------------------------------------------------- |
+| `make train`          | Full pipeline: data + tokenizer + pretrain + finetune |
 | `make train_pretrain` | Pretrain base model (`ARCH=cpu\|gpu`)                 |
 | `make train_finetune` | Supervised fine-tuning (`ARCH=cpu\|gpu`)              |
-| `make train`          | Full pipeline: data + tokenizer + pretrain + finetune |
+| `make train_remote`   | Launch EC2 GPU instance, copy repo, start training    |
+| `make train_deploy`   | Launch EC2, train, then deploy to WikiOracle          |
+| `make train_retrieve` | Pull artifacts from EC2, terminate instance           |
+| `make train_ssh`      | SSH into running EC2 training instance                |
+| `make train_status`   | Check EC2 instance state                              |
+| `make train_logs`     | Tail training log on EC2                              |
 
 ### Test / Evaluation (`test_*`)
 
@@ -81,15 +88,24 @@ All local and remote workflows are orchestrated through the Makefile. Targets ar
 
 | Target            | Purpose                                  |
 | ----------------- | ---------------------------------------- |
-| `make run_server` | Start WikiOracle local shim (foreground) |
+| `make run`        | Start WikiOracle local shim (foreground) |
 | `make run_debug`  | Start WikiOracle local shim (debug mode) |
 | `make run_init`   | Remove state files for a fresh start     |
 | `make run_cli`    | Chat with the model (CLI)                |
 | `make run_web`    | Chat with the model (Web UI + /train)    |
 
-### Service control (`nano_*`, `wo_*`)
+### Sync (`sync_*`)
 
-Both NanoChat and WikiOracle support local (PID file) and remote (systemctl) operation, controlled by `HOST=local|remote`.
+| Target                       | Purpose                                          |
+| ---------------------------- | ------------------------------------------------ |
+| `make sync HOST=remote`      | Sync app + checkpoints to/from production server |
+| `make sync_remote`           | Sync from running EC2 to WikiOracle              |
+| `make sync_checkpoint_pull`  | Pull fine-tuning weights from production         |
+| `make sync_checkpoint_push`  | Push fine-tuning weights to production            |
+
+### Service control (`nano_*`, `wo_*`, `basicmodel_*`)
+
+NanoChat and WikiOracle support local (PID file) and remote (systemctl) operation, controlled by `HOST=local|remote`. BasicModel is registered but does not yet have an inference server.
 
 | Target                                           | Purpose                          |
 | ------------------------------------------------ | -------------------------------- |
@@ -97,39 +113,26 @@ Both NanoChat and WikiOracle support local (PID file) and remote (systemctl) ope
 | `make nano_status` / `nano_logs`                 | Check NanoChat server            |
 | `make wo_start` / `wo_stop` / `wo_restart`       | Manage WikiOracle server         |
 | `make wo_status` / `wo_logs`                     | Check WikiOracle server          |
-| `make up`                                        | Deploy and restart both services |
-| `make down`                                      | Stop both services               |
-
-### Remote / Deployment (`remote_*`)
-
-Two-machine deployment model: an EC2 GPU instance (ephemeral) for training and a Lightsail instance (`wikiOracle.org`, persistent) for hosting.
-
-| Target                                              | Purpose                                              |
-| --------------------------------------------------- | ---------------------------------------------------- |
-| `make remote`                                       | Launch EC2, copy repo, start training                |
-| `make remote_retrieve`                              | Pull artifacts, generate summary, terminate instance |
-| `make remote_deploy_launch`                         | Launch EC2, train, deploy to WikiOracle              |
-| `make remote_deploy`                                | Deploy from running EC2 to WikiOracle                |
-| `make remote_ssh` / `remote_status` / `remote_logs` | Inspect remote instance                              |
+| `make basicmodel_status`                         | Check BasicModel status (stub)   |
 
 ### Other targets
 
-| Target                                     | Purpose                                |
-| ------------------------------------------ | -------------------------------------- |
-| `make checkpoint_pull` / `checkpoint_push` | Backup and restore fine-tuning weights |
-| `make doc_pdf`                             | Generate PDF from all `doc/*.md`       |
-| `make doc_report`                          | Generate training report               |
-| `make clean` / `clean_all`                 | Remove caches (and optionally venvs)   |
+| Target                          | Purpose                              |
+| ------------------------------- | ------------------------------------ |
+| `make openclaw_setup`/`run`/`test` | OpenClaw extension management     |
+| `make doc_pdf`                  | Generate PDF from all `doc/*.md`     |
+| `make doc_report`               | Generate training report             |
+| `make clean` / `clean_all`      | Remove caches (and optionally venvs) |
 
 ### Key overridable variables
 
-| Variable    | Default | Purpose                                               |
-| ----------- | ------- | ----------------------------------------------------- |
-| `ARCH`      | `cpu`   | Target architecture (`cpu` or `gpu`)                  |
-| `HOST`      | `local` | Target host for `nano_*`/`wo_*` (`local` or `remote`) |
-| `NANO_PORT` | `8000`  | NanoChat server port                                  |
-| `WO_PORT`   | `8888`  | WikiOracle server port                                |
-| `NPROC`     | `1`     | GPUs per node for torchrun                            |
+| Variable    | Default | Purpose                                                 |
+| ----------- | ------- | ------------------------------------------------------- |
+| `ARCH`      | `cpu`   | Target architecture (`cpu` or `gpu`)                    |
+| `HOST`      | `local` | Target host for `up`/`down`/`nano_*`/`wo_*`             |
+| `NANO_PORT` | `8000`  | NanoChat server port                                    |
+| `WO_PORT`   | `8888`  | WikiOracle server port                                  |
+| `NPROC`     | `1`     | GPUs per node for torchrun                              |
 
 
 ## Server and Client Setup
@@ -155,8 +158,8 @@ WikiOracle runs as a local Flask server (`bin/wikioracle.py`) that proxies chat 
 ### Quickstart
 
 ```bash
-make build_venv                # install Python deps
-make run_server                # start the local server
+make install                   # create venvs, install all deps
+make run                       # start the local server
 ```
 
 Or manually:
@@ -164,6 +167,7 @@ Or manually:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 python3 bin/wikioracle.py
 ```

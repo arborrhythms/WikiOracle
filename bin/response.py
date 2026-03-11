@@ -867,6 +867,8 @@ def _bundle_to_messages(bundle: ProviderBundle, provider: str) -> List[Dict[str,
     """Convert a ProviderBundle to provider-appropriate messages list."""
     if provider == "wikioracle":
         return to_nanochat_messages(bundle)
+    elif provider == "basicmodel":
+        return to_nanochat_messages(bundle)
     elif provider == "openai":
         return to_openai_messages(bundle)
     elif provider == "anthropic":
@@ -982,6 +984,14 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
     if not done:
         return f"[Error: NanoChat stream ended abnormally ({url}). Check server logs.]"
     return f"[Error: no response from NanoChat ({url}). Check server logs.]"
+
+
+def _call_basicmodel(cfg: Config, messages: List[Dict], temperature: float,
+                     max_tokens: int = 128, timeout: int = 120) -> str:
+    """Call BasicModel inference (stub — not yet implemented)."""
+    return ("[BasicModel is not yet available for inference. "
+            "This provider is under development. "
+            "Please select a different provider.]")
 
 
 def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -> str:
@@ -1225,6 +1235,14 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
         return _call_nanochat(cfg, nano_msgs, temperature,
                               max_tokens=int(cs.get("max_tokens", 128)),
                               timeout=int(cs.get("timeout", 120)))
+    elif provider == "basicmodel":
+        if DEBUG_MODE:
+            print(f"[DEBUG] → _call_basicmodel (stub)")
+        bm_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
+        cs = chat_settings or {}
+        return _call_basicmodel(cfg, bm_msgs, temperature,
+                                max_tokens=int(cs.get("max_tokens", 128)),
+                                timeout=int(cs.get("timeout", 120)))
     pcfg = PROVIDERS.get(provider)
     if not pcfg:
         return f"[Unknown provider: {provider}. Available: {', '.join(PROVIDERS.keys())}]"
@@ -1653,7 +1671,7 @@ def process_chat(
     context_text = strip_xhtml(providers_cfg.get("context", ""))
     print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
           f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
-          f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
+          f"api_key={'local' if provider in ('wikioracle', 'basicmodel') else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
     truth_count = len(state.get("truth") or [])
     truth_weight_flag = query_config.get("truthset", {}).get("truth_weight", "MISSING")
 

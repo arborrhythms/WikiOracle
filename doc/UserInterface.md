@@ -219,10 +219,8 @@ entries are visually distinguished with:
 * Reduced opacity (0.65)
 
 Server truth entries are injected from the `/chat` response's
-`server_truth` field and tagged with `_server_origin: true` in local
-state.  They are **automatically stripped from the TruthSet before
-sending queries** to prevent loopback — the server should never
-receive its own truth entries back from the client.
+`server_truth` field (debug mode only) and deduplicated by `id`
+on each refresh.
 
 ## User Interface Strings
 

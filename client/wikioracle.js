@@ -1072,8 +1072,7 @@ async function sendMessage() {
     };
     // Include pruned state (ancestor path only) + runtime_config
     const targetConvId = conversationId || branchFrom || state.selected_conversation;
-    // Strip server-origin truth entries before sending to avoid loopback
-    var _clientTruth = (state.truth || []).filter(function(e) { return !e._server_origin; });
+    var _clientTruth = state.truth || [];
     const prunedState = {
       version: state.version, schema: state.schema,
       time_creation: state.time_creation, time_lastModified: state.time_lastModified,
@@ -1113,13 +1112,14 @@ async function sendMessage() {
     }
     // ── Debug: inject server truth entries into local TruthSet ──
     // Server returns these as authority entries when debug mode is on.
-    // Tagged with _server_origin so they are stripped before sending
-    // queries back to the server (prevents loopback).
     if (data.server_truth && Array.isArray(data.server_truth)) {
       if (!Array.isArray(state.truth)) state.truth = [];
-      // Remove any previous server-origin entries
-      state.truth = state.truth.filter(function(e) { return !e._server_origin; });
-      // Add the new batch
+      // Deduplicate by id: remove entries whose id matches an incoming entry
+      var _incomingIds = {};
+      for (var si = 0; si < data.server_truth.length; si++) {
+        if (data.server_truth[si].id) _incomingIds[data.server_truth[si].id] = true;
+      }
+      state.truth = state.truth.filter(function(e) { return !e.id || !_incomingIds[e.id]; });
       for (var si = 0; si < data.server_truth.length; si++) {
         state.truth.push(data.server_truth[si]);
       }
@@ -1478,8 +1478,17 @@ function bindEvents() {
   document.getElementById("setTruthWeight").addEventListener("input", function() {
     document.getElementById("setTruthWeightVal").textContent = this.value;
   });
+  document.getElementById("setProviderTrust").addEventListener("input", function() {
+    document.getElementById("setProviderTrustVal").textContent = this.value;
+  });
   document.getElementById("setProvider").addEventListener("change", function() {
     _populateModelDropdown(this.value);
+    // Update trust slider to reflect the selected provider's trust
+    var pKey = this.value;
+    var pTrust = ((config.server.providers || {})[pKey] || {}).trust;
+    if (pTrust == null) pTrust = (pKey === "wikioracle") ? 1.0 : 0.6;
+    document.getElementById("setProviderTrust").value = pTrust;
+    document.getElementById("setProviderTrustVal").textContent = pTrust;
   });
   document.getElementById("btnSettingsClose").addEventListener("click", closeSettings);
 

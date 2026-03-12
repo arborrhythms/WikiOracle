@@ -509,6 +509,13 @@ function openSettings() {
   const tempSlider = document.getElementById("setTemp");
   tempSlider.value = eval_.temperature ?? 0.7;
   document.getElementById("setTempVal").textContent = tempSlider.value;
+  // Provider trust
+  var provKey = document.getElementById("setProvider").value;
+  var provTrust = ((config.server.providers || {})[provKey] || {}).trust;
+  if (provTrust == null) provTrust = (provKey === "wikioracle") ? 1.0 : 0.6;
+  var trustSlider = document.getElementById("setProviderTrust");
+  trustSlider.value = provTrust;
+  document.getElementById("setProviderTrustVal").textContent = provTrust;
   const mtSlider = document.getElementById("setMaxTokens");
   mtSlider.value = eval_.max_tokens ?? 128;
   document.getElementById("setMaxTokensVal").textContent = mtSlider.value;
@@ -547,6 +554,12 @@ async function saveSettings() {
   config.server.evaluation.max_tokens = parseInt(document.getElementById("setMaxTokens").value, 10);
   config.server.evaluation.timeout = parseInt(document.getElementById("setTimeout").value, 10);
   config.server.evaluation.url_fetch = document.getElementById("setUrlFetch").checked;
+
+  // Provider trust (store per-provider)
+  if (!config.server.providers) config.server.providers = {};
+  var selProv = document.getElementById("setProvider").value;
+  if (!config.server.providers[selProv]) config.server.providers[selProv] = {};
+  config.server.providers[selProv].trust = parseFloat(document.getElementById("setProviderTrust").value);
 
   // TruthSet settings (config.server.truthset)
   if (!config.server.truthset) config.server.truthset = {};

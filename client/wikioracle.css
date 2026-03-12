@@ -160,6 +160,12 @@ body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disa
 .msg-bubble ul, .msg-bubble ol { padding-left: 1.5em; }
 .msg-bubble pre { overflow-x: auto; }
 
+/* Structured truth tags inside message bubbles */
+.msg-bubble fact { display: block; margin: 0.4rem 0; padding: 0.35rem 0.6rem; border-left: 3px solid var(--accent); background: var(--accent-light); border-radius: 0 4px 4px 0; font-size: 0.9rem; }
+.msg-bubble feeling { display: block; margin: 0.4rem 0; padding: 0.35rem 0.6rem; border-left: 3px solid #8b5cf6; background: #ede9fe; border-radius: 0 4px 4px 0; font-size: 0.9rem; font-style: italic; }
+[data-theme="dark"] .msg-bubble fact { background: rgba(37, 99, 235, 0.15); }
+[data-theme="dark"] .msg-bubble feeling { background: rgba(139, 92, 246, 0.15); }
+
 /* Message interaction */
 .msg-bubble { cursor: pointer; }
 .msg-bubble.msg-selected { outline: 2px solid var(--accent); outline-offset: -1px; }

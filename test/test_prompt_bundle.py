@@ -68,7 +68,10 @@ class TestBuildProviderBundle(unittest.TestCase):
         self.assertIn("XHTML", bundle.system)
         self.assertEqual(bundle.history, [])
         self.assertEqual(bundle.sources, [])
-        self.assertEqual(bundle.output, "")
+        # Default output instruction tells LLM to produce structured tags
+        self.assertIn("<conversation>", bundle.output)
+        self.assertIn("<fact", bundle.output)
+        self.assertIn("<feeling>", bundle.output)
 
     def test_empty_context(self):
         state = _make_state(context="")
@@ -696,11 +699,12 @@ class TestProviderSourcesInBundle(unittest.TestCase):
 class TestOutputResolution(unittest.TestCase):
     """Test that bundle.output resolves from query_config.output."""
 
-    def test_no_output_yields_empty(self):
-        """No output in query_config yields empty string."""
+    def test_no_output_yields_default(self):
+        """No output in query_config yields DEFAULT_OUTPUT."""
         state = _make_state()
         bundle = build_query(state, "q", {})
-        self.assertEqual(bundle.output, "")
+        self.assertIn("<conversation>", bundle.output)
+        self.assertIn("<fact", bundle.output)
 
     def test_output_from_query_config(self):
         """When query_config.output is set, bundle uses it."""
@@ -709,12 +713,13 @@ class TestOutputResolution(unittest.TestCase):
         bundle = build_query(state, "q", qc)
         self.assertEqual(bundle.output, "Return JSON only.")
 
-    def test_empty_output_stays_empty(self):
-        """Empty output in query_config remains empty."""
+    def test_empty_output_yields_default(self):
+        """Empty output in query_config falls through to DEFAULT_OUTPUT."""
         state = _make_state()
         qc = {"output": ""}
         bundle = build_query(state, "q", qc)
-        self.assertEqual(bundle.output, "")
+        self.assertIn("<conversation>", bundle.output)
+        self.assertIn("<fact", bundle.output)
 
     def test_output_with_other_config(self):
         """Output from query_config works alongside other config keys."""

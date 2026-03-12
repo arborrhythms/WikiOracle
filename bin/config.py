@@ -352,14 +352,10 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
 
     providers: Dict[str, Dict[str, Any]] = {
         "wikioracle": {
-            "name": "WikiOracle NanoChat",
+            "name": "WikiOracle",
             "streaming": True,
             "sequence_len": 2048,
-        },
-        "basicmodel": {
-            "name": "WikiOracle BasicModel",
-            "streaming": False,
-            "sequence_len": 2048,
+            "trust": 1.0,
         },
         "openai": {
             "name": "OpenAI",
@@ -367,6 +363,7 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "api_key": os.getenv("OPENAI_API_KEY", ""),
             "default_model": os.getenv("OPENAI_MODEL", "gpt-4o"),
             "streaming": False,
+            "trust": 0.6,
         },
         "anthropic": {
             "name": "Anthropic",
@@ -374,6 +371,7 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "api_key": os.getenv("ANTHROPIC_API_KEY", ""),
             "default_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             "streaming": False,
+            "trust": 0.6,
         },
         "gemini": {
             "name": "Gemini",
@@ -381,6 +379,7 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "api_key": os.getenv("GEMINI_API_KEY", ""),
             "default_model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             "streaming": False,
+            "trust": 0.6,
         },
         "grok": {
             "name": "Grok",
@@ -388,6 +387,7 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "api_key": os.getenv("XAI_API_KEY", ""),
             "default_model": os.getenv("XAI_MODEL", "grok-3-mini"),
             "streaming": False,
+            "trust": 0.6,
         },
     }
 
@@ -413,6 +413,8 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             pcfg["timeout"] = ycfg["timeout"]
         if ycfg.get("sequence_len"):
             pcfg["sequence_len"] = int(ycfg["sequence_len"])
+        if ycfg.get("trust") is not None:
+            pcfg["trust"] = float(ycfg["trust"])
 
     return providers
 
@@ -428,6 +430,20 @@ DEFAULT_CONVERSATION_CONTEXT = (
     "Respond with truth statements as XHTML. "
     "Use <conversation> to answer the query, <fact> for verifiable claims "
     "or citations, and <feeling> for subjective opinions."
+)
+
+# Default output format instruction for the main provider.
+# Tells the LLM to structure its response with <conversation>, <fact>,
+# and <feeling> tags rather than returning plain text.
+DEFAULT_OUTPUT = (
+    "Structure your response as XHTML with the following tags:\n"
+    "- <conversation>Your main answer visible to the user.</conversation>\n"
+    "- <fact trust=\"0.8\">A verifiable claim (trust -1..+1).</fact>\n"
+    "- <feeling>A subjective opinion or emotional response.</feeling>\n"
+    "Place each verifiable claim in its own <fact> tag with a trust attribute "
+    "reflecting your confidence (-1 to +1). Use <feeling> for opinions, "
+    "hedged statements, or meta-commentary. The <conversation> block is "
+    "the narrative answer shown to the user."
 )
 
 
@@ -470,8 +486,9 @@ _PROVIDER_MODELS: Dict[str, list] = {
         "grok-code-fast-1",
         "grok-4.20-beta-0309-non-reasoning",
     ],
-    "basicmodel": [
-        "ergodic",
+    "wikioracle": [
+        "NanoChat",
+        "BasicModel",
     ],
 }
 
@@ -517,7 +534,7 @@ CONFIG_SCHEMA = [
     ("providers.output",            "Output format instructions for all providers"),
     ("providers.truth_context",     "System prompt context for truth-only providers"),
     ("providers.conversation_context", "System prompt context for conversational providers"),
-    ("providers.wikioracle.name",   "Display name for NanoChat provider"),
+    ("providers.wikioracle.name",   "Display name for WikiOracle provider"),
     ("providers.wikioracle.username", "API login / email"),
     ("providers.openai.name",       "Display name for OpenAI provider"),
     ("providers.openai.username",   "API login / email"),

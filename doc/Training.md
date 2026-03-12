@@ -675,18 +675,15 @@ TruthSet entries formatted as authority-tagged entries:
       "title": "...",
       "trust": 0.8,
       "content": "<fact>...</fact>",
-      "source": "wikioracle",
-      "_server_origin": true
+      "source": "wikioracle"
     }
   ]
 }
 ```
 
 The client displays these entries in the TruthSet with a visual
-marker (server badge, different border style).  Entries with
-`_server_origin: true` are **stripped from the TruthSet before
-sending queries** to prevent loopback — the client never sends server
-truth back to the server.
+marker (server badge, different border style).  Entries are
+deduplicated by `id` on each debug refresh.
 
 The `server_id` field in `config.xml` under `<server>` provides a
 stable identifier for this server instance (default: `"wikioracle"`).

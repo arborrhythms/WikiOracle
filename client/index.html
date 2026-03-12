@@ -28,7 +28,7 @@
 
     <label for="setProvider">Provider</label>
     <select id="setProvider">
-      <option value="wikioracle">WikiOracle NanoChat</option>
+      <option value="wikioracle">WikiOracle</option>
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic</option>
       <option value="gemini">Gemini</option>
@@ -37,6 +37,12 @@
 
     <label for="setModel">Model</label>
     <select id="setModel"></select>
+
+    <label for="setProviderTrust">Provider trust</label>
+    <div class="settings-row">
+      <input type="range" id="setProviderTrust" min="0" max="1" step="0.05" value="0.6">
+      <span class="range-val" id="setProviderTrustVal">0.6</span>
+    </div>
 
     <label for="setLayout">Layout</label>
     <select id="setLayout">

@@ -370,8 +370,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             # ── Debug mode: include server truth table as authority entries ──
             # When debug mode is enabled and online training is active, return
             # the server's truth entries so the client can display them.
-            # Entries are tagged with _server_origin so the client strips them
-            # before sending queries back (prevents loopback).
+            # Entries are returned so the client can display them.
             if config_mod.DEBUG_MODE:
                 ot = _CONFIG.get("server", {}).get("training", {})
                 if ot.get("enabled", False) and not config_mod.STATELESS_MODE:
@@ -389,7 +388,6 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                                 "trust": entry.get("trust", 0.5),
                                 "content": entry.get("content", ""),
                                 "source": _server_id,
-                                "_server_origin": True,
                             })
                         resp["server_truth"] = server_truth
                     except Exception as _st_exc:

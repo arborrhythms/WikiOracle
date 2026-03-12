@@ -6,6 +6,7 @@ General
 - Do not reformat unrelated sections just because they are nearby.
 - Prefer ASCII in new files unless the target file already uses Unicode.
 - Keep comments and prose concise and factual.
+- Dont touch Git: make locae changes that I can review against the last checkin
 
 Markdown (.md)
 - Align pipe tables by padding cells so the vertical bars line up cleanly.

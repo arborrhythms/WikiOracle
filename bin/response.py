@@ -26,7 +26,7 @@ import requests
 
 from config import (
     Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config, _PROVIDER_MODELS,
-    DEFAULT_TRUTH_CONTEXT, DEFAULT_CONVERSATION_CONTEXT,
+    DEFAULT_TRUTH_CONTEXT, DEFAULT_CONVERSATION_CONTEXT, DEFAULT_OUTPUT,
 )
 from sensation import preprocess_training_example
 from truth import (
@@ -143,7 +143,7 @@ def direct_truth_sources(
 
     Unlike ``static_truth()`` which also includes references, this filters
     to only ``<fact>`` and ``<feeling>`` entries — the direct propositional
-    content that beta providers receive as context.
+    content that truth providers receive as context.
     """
     sources: List[Source] = []
     for entry in trust_entries:
@@ -170,7 +170,7 @@ def _extract_direct_truths(
     provider_id: str,
     provider_trust: float,
 ) -> tuple:
-    """Parse ``<fact>``, ``<feeling>``, ``<conversation>`` from a beta response.
+    """Parse ``<fact>``, ``<feeling>``, ``<conversation>`` from a truth provider response.
 
     Returns ``(conversation_text, truth_sources)`` where:
       - *conversation_text* is the text inside ``<conversation>`` tags (or None)
@@ -184,13 +184,21 @@ def _extract_direct_truths(
     if conv_match:
         conversation_text = conv_match.group(1).strip()
 
-    # Extract <fact> entries
-    for i, m in enumerate(re.finditer(r"<fact[^>]*>(.*?)</fact>", response_text, re.DOTALL)):
+    # Extract <fact> entries — honour trust="..." attribute when present
+    for i, m in enumerate(re.finditer(r"<fact([^>]*)>(.*?)</fact>", response_text, re.DOTALL)):
+        attrs, body = m.group(1), m.group(2).strip()
+        fact_trust = provider_trust
+        trust_attr = re.search(r'trust\s*=\s*["\']([^"\']+)["\']', attrs)
+        if trust_attr:
+            try:
+                fact_trust = max(-1.0, min(1.0, float(trust_attr.group(1))))
+            except (ValueError, TypeError):
+                pass
         truth_sources.append(Source(
             source_id=f"{provider_id}_fact_{i}",
             title=f"{provider_id} fact",
-            trust=provider_trust,
-            content=m.group(1).strip(),
+            trust=fact_trust,
+            content=body,
             kind="fact",
         ))
 
@@ -217,7 +225,7 @@ def _build_provider_query_bundle(
     output: str,
     prelim_response: Optional[str] = None,
 ) -> ProviderBundle:
-    """Build a RAG-free bundle for a beta provider consultation.
+    """Build a RAG-free bundle for a truth provider consultation.
 
     .. deprecated::
         Legacy interface kept for backward compatibility.
@@ -244,11 +252,11 @@ def _build_truth_provider_bundle(
     query: str,
     output: str,
 ) -> ProviderBundle:
-    """Build a bundle for a truth-only beta (conversation=false).
+    """Build a bundle for a truth-only truth provider (conversation=false).
 
-    The beta sees the system context with direct truths (facts/feelings)
-    but no conversation history.  It is expected to return only ``<fact>``
-    and ``<feeling>`` elements.
+    The truth provider sees the system context with direct truths
+    (facts/feelings) but no conversation history.  It is expected to
+    return only ``<fact>`` and ``<feeling>`` elements.
     """
     return ProviderBundle(
         system=system_context,
@@ -267,11 +275,11 @@ def _build_conversation_provider_bundle(
     query: str,
     output: str,
 ) -> ProviderBundle:
-    """Build a bundle for a conversational beta (conversation=true).
+    """Build a bundle for a conversational truth provider (conversation=true).
 
-    The beta sees conversation history, direct truths, and the query.
-    It is expected to return a ``<conversation>`` answer plus optional
-    ``<fact>`` and ``<feeling>`` elements.
+    The truth provider sees conversation history, direct truths, and
+    the query.  It is expected to return a ``<conversation>`` answer
+    plus optional ``<fact>`` and ``<feeling>`` elements.
     """
     return ProviderBundle(
         system=system_context,
@@ -341,13 +349,14 @@ def evaluate_providers(
     truth_context: Optional[str] = None,
     conversation_context: Optional[str] = None,
 ) -> tuple:
-    """Evaluate <provider> trust entries as beta consultations.
+    """Evaluate <provider> trust entries as truth provider consultations.
 
     Each provider's ``conversation`` flag determines its role:
-      - **conversation=false** (default): beta contributes only direct truths
-        (``<fact>`` and ``<feeling>``).  Invisible to conversation tree.
-      - **conversation=true**: beta participates in the conversation and may
-        return a ``<conversation>`` answer plus truths.
+      - **conversation=false** (default): truth provider contributes only
+        direct truths (``<fact>`` and ``<feeling>``).  Invisible to
+        conversation tree.
+      - **conversation=true**: truth provider participates in the
+        conversation and may return a ``<conversation>`` answer plus truths.
 
     Args:
         provider_entries: list of (trust_entry, provider_config) pairs.
@@ -364,9 +373,10 @@ def evaluate_providers(
     Returns:
         ``(conversation_sources, truth_contributions)`` tuple:
           - *conversation_sources*: list of Source objects (kind="provider")
-            from conversation=true betas — visible in the conversation tree.
+            from conversation=true truth providers — visible in the
+            conversation tree.
           - *truth_contributions*: list of Source objects (kind="fact"/"feeling")
-            extracted from all beta responses.
+            extracted from all truth provider responses.
     """
     if not provider_entries:
         return [], []
@@ -416,7 +426,7 @@ def evaluate_providers(
             if not response or response.startswith("[Error"):
                 return None, []
 
-            # Extract structured truths from the beta's response
+            # Extract structured truths from the truth provider's response
             conv_text, extracted_truths = _extract_direct_truths(
                 response,
                 entry.get("id", ""),
@@ -630,7 +640,9 @@ def build_query(
     bundle.query = user_message or "(continue)"
 
     # 6) Structured output instructions (from config.providers.output)
-    bundle.output = query_config.get("output", "")
+    # Fall back to DEFAULT_OUTPUT so the main provider always knows to produce
+    # structured <conversation>/<fact>/<feeling> output.
+    bundle.output = query_config.get("output", "") or DEFAULT_OUTPUT
 
     return bundle
 
@@ -867,8 +879,6 @@ def _bundle_to_messages(bundle: ProviderBundle, provider: str) -> List[Dict[str,
     """Convert a ProviderBundle to provider-appropriate messages list."""
     if provider == "wikioracle":
         return to_nanochat_messages(bundle)
-    elif provider == "basicmodel":
-        return to_nanochat_messages(bundle)
     elif provider == "openai":
         return to_openai_messages(bundle)
     elif provider == "anthropic":
@@ -988,10 +998,21 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
 
 def _call_basicmodel(cfg: Config, messages: List[Dict], temperature: float,
                      max_tokens: int = 128, timeout: int = 120) -> str:
-    """Call BasicModel inference (stub — not yet implemented)."""
-    return ("[BasicModel is not yet available for inference. "
-            "This provider is under development. "
-            "Please select a different provider.]")
+    """Call BasicModel /chat/completions endpoint."""
+    url = PROVIDERS.get("wikioracle", {}).get("basicmodel_url", "http://127.0.0.1:8001/chat/completions")
+    payload = {"messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+    provider_timeout = max(PROVIDERS.get("wikioracle", {}).get("basicmodel_timeout") or timeout, 15)
+    try:
+        resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
+                             timeout=provider_timeout)
+        if resp.status_code >= 400:
+            return f"[Error from BasicModel: HTTP {resp.status_code}] {resp.text[:500]}"
+        return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "[No content]")
+    except requests.exceptions.ConnectionError:
+        return ("[BasicModel server is not running. "
+                "Start it with: python basicmodel/bin/serve.py]")
+    except Exception as exc:
+        return f"[Error from BasicModel: {exc}]"
 
 
 def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -> str:
@@ -1106,8 +1127,15 @@ def _call_anthropic(bundle: ProviderBundle | None, temperature: float, provider_
                     if url_val and url_val not in [c[1] for c in citations]:
                         citations.append((title, url_val))
     result = "".join(text_parts) or "[No content]"
+    # Wrap the main text in <conversation> and each citation as a <fact>
+    # so the extraction pipeline can harvest them into the truth table.
     if citations:
-        result += "\n\nSources:\n" + "\n".join(f"- {t}: {u}" for t, u in citations)
+        trust = provider_cfg.get("trust", 0.6)
+        citation_facts = "\n".join(
+            f'<fact trust="{trust}">{html_mod.escape(t)}: {html_mod.escape(u)}</fact>'
+            for t, u in citations
+        )
+        result = f"<conversation>{result}</conversation>\n{citation_facts}"
     return result
 
 
@@ -1214,7 +1242,12 @@ def _call_gemini(bundle: ProviderBundle | None, temperature: float,
             if web.get("uri"):
                 citations.append((web.get("title", web["uri"]), web["uri"]))
         if citations:
-            result += "\n\nSources:\n" + "\n".join(f"- {t}: {u}" for t, u in citations)
+            trust = provider_cfg.get("trust", 0.6)
+            citation_facts = "\n".join(
+                f'<fact trust="{trust}">{html_mod.escape(t)}: {html_mod.escape(u)}</fact>'
+                for t, u in citations
+            )
+            result = f"<conversation>{result}</conversation>\n{citation_facts}"
 
     return result
 
@@ -1228,21 +1261,21 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
     import config as config_mod
 
     if provider == "wikioracle":
-        if DEBUG_MODE:
-            print(f"[DEBUG] → _call_nanochat (127.0.0.1)")
-        nano_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
+        local_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
         cs = chat_settings or {}
-        return _call_nanochat(cfg, nano_msgs, temperature,
-                              max_tokens=int(cs.get("max_tokens", 128)),
-                              timeout=int(cs.get("timeout", 120)))
-    elif provider == "basicmodel":
-        if DEBUG_MODE:
-            print(f"[DEBUG] → _call_basicmodel (stub)")
-        bm_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
-        cs = chat_settings or {}
-        return _call_basicmodel(cfg, bm_msgs, temperature,
-                                max_tokens=int(cs.get("max_tokens", 128)),
-                                timeout=int(cs.get("timeout", 120)))
+        # Route to the appropriate model: BasicModel or NanoChat (default)
+        if client_model == "BasicModel":
+            if DEBUG_MODE:
+                print(f"[DEBUG] → _call_basicmodel")
+            return _call_basicmodel(cfg, local_msgs, temperature,
+                                    max_tokens=int(cs.get("max_tokens", 128)),
+                                    timeout=int(cs.get("timeout", 120)))
+        else:
+            if DEBUG_MODE:
+                print(f"[DEBUG] → _call_nanochat (127.0.0.1)")
+            return _call_nanochat(cfg, local_msgs, temperature,
+                                  max_tokens=int(cs.get("max_tokens", 128)),
+                                  timeout=int(cs.get("timeout", 120)))
     pcfg = PROVIDERS.get(provider)
     if not pcfg:
         return f"[Unknown provider: {provider}. Available: {', '.join(PROVIDERS.keys())}]"
@@ -1353,11 +1386,12 @@ def _call_dynamic_provider(
 
     api_key = _resolve_dynamic_api_key(raw_key, api_url)
 
+    trust = provider_config.get("trust", 0.6)
     api_url_lower = api_url.lower()
     if "anthropic.com" in api_url_lower:
-        return _call_dynamic_anthropic(api_url, api_key, model, messages, temperature, timeout, max_tokens)
+        return _call_dynamic_anthropic(api_url, api_key, model, messages, temperature, timeout, max_tokens, trust=trust)
     elif "googleapis.com" in api_url_lower:
-        return _call_dynamic_gemini(api_url, api_key, model, messages, temperature, timeout, max_tokens)
+        return _call_dynamic_gemini(api_url, api_key, model, messages, temperature, timeout, max_tokens, trust=trust)
     elif "127.0.0.1" in api_url_lower or "localhost" in api_url_lower:
         return _call_nanochat(cfg, messages, temperature)
     else:
@@ -1384,6 +1418,7 @@ def _call_dynamic_openai(
 def _call_dynamic_anthropic(
     api_url: str, api_key: str, model: str,
     messages: List[Dict], temperature: float, timeout: int, max_tokens: int,
+    *, trust: float = 0.6,
 ) -> str:
     """Call a dynamic Anthropic endpoint from a <provider> trust entry."""
     payload = _build_anthropic_payload_from_messages(
@@ -1400,12 +1435,31 @@ def _call_dynamic_anthropic(
     if resp.status_code >= 400:
         return f"[Error: HTTP {resp.status_code}] {resp.text[:300]}"
     blocks = resp.json().get("content", [])
-    return "".join(b.get("text", "") for b in blocks if b.get("type") == "text") or "[No content]"
+    text_parts = []
+    citations = []
+    for b in blocks:
+        if b.get("type") == "text":
+            text_parts.append(b.get("text", ""))
+            for cite in b.get("citations", []):
+                if cite.get("type") == "web_search_result_location":
+                    url_val = cite.get("url", "")
+                    title = cite.get("title", url_val)
+                    if url_val and url_val not in [c[1] for c in citations]:
+                        citations.append((title, url_val))
+    result = "".join(text_parts) or "[No content]"
+    if citations:
+        citation_facts = "\n".join(
+            f'<fact trust="{trust}">{html_mod.escape(t)}: {html_mod.escape(u)}</fact>'
+            for t, u in citations
+        )
+        result = f"<conversation>{result}</conversation>\n{citation_facts}"
+    return result
 
 
 def _call_dynamic_gemini(
     api_url: str, api_key: str, model: str,
     messages: List[Dict], temperature: float, timeout: int, max_tokens: int,
+    *, trust: float = 0.6,
 ) -> str:
     """Call a dynamic Gemini endpoint from a <provider> trust entry."""
     # Gemini URL format: {base}/{model}:generateContent
@@ -1436,7 +1490,23 @@ def _call_dynamic_gemini(
     if not candidates:
         return "[No response from Gemini]"
     parts = candidates[0].get("content", {}).get("parts", [])
-    return "".join(p.get("text", "") for p in parts if "text" in p) or "[No content]"
+    result = "".join(p.get("text", "") for p in parts if "text" in p) or "[No content]"
+    # Map grounding citations to <fact> tags
+    grounding = candidates[0].get("groundingMetadata", {})
+    chunks = grounding.get("groundingChunks", [])
+    if chunks:
+        citations = []
+        for chunk in chunks:
+            web = chunk.get("web", {})
+            if web.get("uri"):
+                citations.append((web.get("title", web["uri"]), web["uri"]))
+        if citations:
+            citation_facts = "\n".join(
+                f'<fact trust="{trust}">{html_mod.escape(t)}: {html_mod.escape(u)}</fact>'
+                for t, u in citations
+            )
+            result = f"<conversation>{result}</conversation>\n{citation_facts}"
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1451,10 +1521,10 @@ def _fan_out_and_aggregate(
     temperature: float = 0.7,
     call_chain: Optional[List[str]] = None,
 ) -> tuple:
-    """HME diamond vote: beta fan-out → alpha final.
+    """HME diamond vote: truth provider fan-out → main provider final.
 
-    1. Fan out to betas with Q + direct truths
-    2. Call the alpha with truth table + beta contributions → R_final
+    1. Fan out to truth providers with Q + direct truths
+    2. Call the main provider with truth table + truth provider contributions → R_final
     """
     trust_entries = state.get("truth") or []
     provider_entries = get_provider_entries(trust_entries)
@@ -1492,7 +1562,7 @@ def _fan_out_and_aggregate(
             direct_sources=d_sources,
         )
 
-    # ── Step 2: alpha final response ──
+    # ── Step 2: main provider final response ──
     all_provider_sources = conversation_sources + truth_contributions
     final_bundle = build_query(
         state, user_message, query_config,
@@ -1652,14 +1722,16 @@ def process_chat(
         if eid in derived and abs(derived[eid] - entry.get("trust", 0.0)) > 1e-9:
             entry["_derived_trust"] = derived[eid]
 
-    # ── Voting: beta fan-out → alpha final ──
+    # ── Voting: truth provider fan-out → main provider final ──
     #
     # When dynamic <provider> entries exist, the UI-selected provider
-    # acts as alpha and the dynamic providers act as betas.
+    # acts as the main provider and the dynamic providers act as truth
+    # providers.
     #
-    # Betas with conversation=true participate in the conversation tree
-    # (creating a diamond).  Betas with conversation=false only contribute
-    # direct truths (facts/feelings) invisibly.
+    # Truth providers with conversation=true participate in the
+    # conversation tree (creating a diamond).  Truth providers with
+    # conversation=false only contribute direct truths (facts/feelings)
+    # invisibly.
     #
     # When there are no dynamic providers, this collapses to a single call.
 
@@ -1671,7 +1743,7 @@ def process_chat(
     context_text = strip_xhtml(providers_cfg.get("context", ""))
     print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
           f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
-          f"api_key={'local' if provider in ('wikioracle', 'basicmodel') else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
+          f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
     truth_count = len(state.get("truth") or [])
     truth_weight_flag = query_config.get("truthset", {}).get("truth_weight", "MISSING")
 
@@ -1686,9 +1758,9 @@ def process_chat(
         rc_pcfg = rc_providers.get(provider, {})
         client_api_key = rc_pcfg.get("api_key", "")
 
-    # ── Step 1: beta fan-out ──
+    # ── Step 1: truth provider fan-out ──
     if dyn_providers:
-        print(f"[WikiOracle] Voting: fan out to {len(dyn_providers)} beta(s)")
+        print(f"[WikiOracle] Voting: fan out to {len(dyn_providers)} truth provider(s)")
         base_bundle = _build_bundle(state, user_msg, query_config, context_conv_id)
         d_sources = direct_truth_sources(truth_list)
         call_chain: list = []
@@ -1708,7 +1780,7 @@ def process_chat(
             conversation_context=providers_cfg.get("conversation_context"),
         )
 
-    # ── Step 2: alpha final response ──
+    # ── Step 2: main provider final response ──
     all_provider_sources = conversation_sources + truth_contributions
     bundle = build_query(state, user_msg, query_config,
                          conversation_id=context_conv_id,
@@ -1732,8 +1804,26 @@ def process_chat(
     llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
     llm_model = query_config.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
 
+    # ── Extract facts/feelings from the main provider response ──
+    # The main provider's response may contain <fact>, <feeling>, and
+    # <conversation> tags.  Extract structured truths and use the
+    # <conversation> portion (if present) as the display text shown
+    # to the user.
+    main_conv_text, main_truths = _extract_direct_truths(
+        response_text, provider, PROVIDERS.get(provider, {}).get("trust", 1.0),
+    )
+    if main_truths:
+        truth_contributions.extend(main_truths)
+        print(f"[WikiOracle] Main provider response: extracted {len(main_truths)} truth(s) "
+              f"({sum(1 for t in main_truths if t.kind == 'fact')} facts, "
+              f"{sum(1 for t in main_truths if t.kind == 'feeling')} feelings)")
+
+    # Use <conversation> text for display if the main provider produced structured
+    # output; otherwise fall back to the full response text.
+    display_text = main_conv_text if main_conv_text else response_text
+
     user_content = ensure_xhtml(user_msg) if user_msg else ""
-    assistant_content = ensure_xhtml(response_text)
+    assistant_content = ensure_xhtml(display_text)
     assistant_timestamp = utc_now_iso()
     user_display = state.get("client_name", "User")
     llm_display = llm_provider_name
@@ -1761,29 +1851,29 @@ def process_chat(
     client_owns_query = config_mod.STATELESS_MODE
 
     # ── Build conversation tree ──
-    # When conversation=true betas participated, build a diamond:
+    # When conversation=true truth providers participated, build a diamond:
     #
     #        root (query only)
     #       /    \
-    #     beta1  beta2        ← children of root
+    #     tp1    tp2          ← truth provider children of root
     #       \    /
-    #        final            ← child of every beta; parentId: [beta_ids]
+    #        final            ← child of every truth provider
     #
-    # The final node lives as a child of each beta (true DAG merge).
-    # The same final object appears in every beta's children list so
-    # that navigating down from *any* beta reaches it.  The XML
-    # serializer deduplicates by ID.
+    # The final node lives as a child of each truth provider (true DAG
+    # merge).  The same final object appears in every truth provider's
+    # children list so that navigating down from *any* truth provider
+    # reaches it.  The XML serializer deduplicates by ID.
     #
-    # Without conversation=true betas, it's a simple linear conversation:
-    #   conv: [user_query, alpha_response]
+    # Without conversation=true truth providers, it's a simple linear
+    # conversation: conv: [user_query, main_response]
 
     has_vote = bool(conversation_sources)
 
     if has_vote:
         first_words = strip_xhtml(user_content)[:50] if user_content else "(continue)"
 
-        # Final: alpha's final (synthesized) response
-        # Two parents: all betas (true diamond)
+        # Final: main provider's synthesized response
+        # Parents: all truth providers (true diamond)
         final_conv = {
             "title": f"{llm_display} (final)",
             "messages": [response_entry],
@@ -1792,8 +1882,9 @@ def process_chat(
         ensure_conversation_id(final_conv)
         final_normalized = normalize_conversation(final_conv)
 
-        # Beta children: one conversation per conversation=true beta response
-        # Each beta gets final_conv as a child (shared object = diamond)
+        # Truth provider children: one conversation per conversation=true
+        # truth provider response.  Each gets final_conv as a child
+        # (shared object = diamond).
         beta_convs = []
         for src in conversation_sources:
             beta_msg = {
@@ -1811,7 +1902,7 @@ def process_chat(
             ensure_conversation_id(beta_conv)
             beta_convs.append(beta_conv)
 
-        # Set final's parentId to all beta IDs
+        # Set final's parentId to all truth provider IDs
         beta_ids = [b["id"] for b in beta_convs]
         final_normalized["parentId"] = beta_ids
 
@@ -1899,6 +1990,22 @@ def process_chat(
 
     state["conversations"] = conversations
 
+    # ── Merge main provider-extracted truths into client truth table ──
+    # Facts and feelings extracted from the main provider response are
+    # added to the state's truth table so they accumulate across turns
+    # and participate in DoT computation and training.
+    if main_truths:
+        if "truth" not in state or not isinstance(state.get("truth"), list):
+            state["truth"] = []
+        for src in main_truths:
+            state["truth"].append({
+                "id": src.source_id,
+                "title": src.title,
+                "trust": src.trust,
+                "content": f"<{src.kind}>{src.content}</{src.kind}>",
+                "time": assistant_timestamp,
+            })
+
     # ── Post-response pipeline: DoT + truth merge + online training ──
     # These stages run after the user has received the response.
     symmetry_rejected: list[dict] = []
@@ -1948,11 +2055,6 @@ def process_chat(
                 "store_concrete", ts_cfg.get("store_concrete", False))
             if not _store_part:
                 client_truth = filter_knowledge_only(client_truth)
-            # Strip server-origin entries before merge (avoid loopback)
-            client_truth = [
-                e for e in client_truth
-                if not e.get("_server_origin")
-            ]
             client_truth = [
                 e for e in client_truth
                 if not detect_identifiability(e.get("content", ""))
@@ -2001,7 +2103,17 @@ def process_chat(
             # Stage 4: train NanoChat (online SFT, if provider is wikioracle)
             # Runs in a background thread so the chat response returns immediately —
             # CPU training on a non-GPU machine can take many seconds.
-            if provider == "wikioracle":
+            #
+            # Guard: for external providers, only train when the response
+            # produced structured facts (via native tags or citation mapping).
+            # This prevents training on unstructured text from providers that
+            # didn't produce truth claims we can verify against the truth table.
+            _has_main_facts = any(t.kind == "fact" for t in main_truths)
+            _is_local = provider == "wikioracle"
+            if not _is_local and not _has_main_facts:
+                print(f"[WikiOracle] Online training: skipped — external provider "
+                      f"'{provider}' produced no structured facts")
+            elif _is_local or _has_main_facts:
                 nanochat_url = cfg.base_url.rstrip("/")
                 # Build the full prompt messages for training
                 train_messages = _bundle_to_messages(bundle, provider)

@@ -109,12 +109,13 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         build_data build_tokenizer build_preprocess build_sft \
         train_pretrain train_finetune train \
         train_remote train_retrieve train_ssh train_status train_logs train_deploy \
-        test_eval test_unit \
+        test test_eval test_unit test_basicmodel \
         run_init run_server run_debug run_cli run_web parse \
         sync_remote sync_checkpoint_pull sync_checkpoint_push \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
-        basicmodel_status \
+        basic_data basic_train basic_test basic_run basic_build \
+        basic_start basic_stop basic_restart basic_status basic_logs \
         openclaw_setup openclaw_run openclaw_test \
         doc_report doc_pdf clean clean_all \
         remote remote_retrieve remote_ssh remote_status remote_logs \
@@ -170,7 +171,9 @@ help:
 	@echo "  make train_ssh/status/logs"
 	@echo ""
 	@echo "Test / Evaluation (test_*):"
-	@echo "  make test_unit          Run unit tests"
+	@echo "  make test               Run all tests (unit + basicmodel)"
+	@echo "  make test_unit          Run WikiOracle unit tests"
+	@echo "  make test_basicmodel    Run BasicModel tests"
 	@echo "  make test_eval          Evaluate model (ARCH=cpu|gpu)"
 	@echo ""
 	@echo "Run / Inference (run_*):"
@@ -184,10 +187,17 @@ help:
 	@echo "  make sync_remote                 Sync from running EC2 to WikiOracle"
 	@echo "  make sync_checkpoint_pull/push   Backup/restore fine-tuning weights"
 	@echo ""
-	@echo "Service control (nano_*/wo_*/basicmodel_*, HOST=local|remote):"
+	@echo "BasicModel (basic_*):"
+	@echo "  make basic_build            Full pipeline: data + train + test"
+	@echo "  make basic_data             Download FineWeb-EDU shards"
+	@echo "  make basic_train            Train sentence embeddings"
+	@echo "  make basic_test             Run BasicModel tests"
+	@echo "  make basic_run              Run BasicModel (BASIC_XML=data/simple.xml)"
+	@echo ""
+	@echo "Service control (nano_*/wo_*/basic_*, HOST=local|remote):"
 	@echo "  make nano_start/stop/restart/status/logs"
 	@echo "  make wo_start/stop/restart/status/logs"
-	@echo "  make basicmodel_status"
+	@echo "  make basic_start/stop/restart/status/logs"
 	@echo ""
 	@echo "Other:"
 	@echo "  make openclaw_setup/run/test"
@@ -676,9 +686,13 @@ run_server:
 run_debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
+test: test_unit test_basicmodel
+
 test_unit:
 	$(SHIM_ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
 		python3 test/run_tests.py
+
+test_basicmodel: basic_test
 
 run_cli:
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
@@ -722,13 +736,132 @@ sync_checkpoint_push:
 checkpoint_pull: sync_checkpoint_pull
 checkpoint_push: sync_checkpoint_push
 
-# --- BasicModel (stub — not yet implemented) ----------------------------------
-# BasicModel is a second local provider. Service control targets will be
-# added here once the inference server exists.
+# --- BasicModel (basic_*) -----------------------------------------------------
+# Mirrors nano_* structure for the BasicModel subsystem.
+#   Training:  basic_data, basic_train, basic_build
+#   Testing:   basic_test
+#   Execution: basic_run (foreground XML)
+#   Server:    basic_start, basic_stop, basic_restart, basic_status, basic_logs
 
-basicmodel_status:
-	@echo "BasicModel provider is registered but has no inference server yet."
-	@echo "Use the 'WikiOracle BasicModel' provider in settings to see the stub response."
+BASIC_DIR        := basicmodel
+BASIC_PYTHON     := cd $(BASIC_DIR) && PYTHONPATH=bin .venv/bin/python
+BASIC_XML        ?= data/simple.xml
+BASIC_SHARDS     ?= 1
+BASIC_MAX_DOCS   ?= 10000
+BASIC_VEC_SIZE   ?= 100
+BASIC_EPOCHS     ?= 1
+BASIC_MIN_COUNT  ?= 5
+BASIC_BATCH_SIZE ?= 256
+BASIC_PORT       ?= 8001
+BASIC_HOST       ?= 127.0.0.1
+BASIC_PID        := .basic.pid
+BASIC_LOG        ?= output/basicmodel.log
+
+basic_data:
+	cd $(BASIC_DIR) && PYTHONPATH=bin .venv/bin/python -c \
+		"from embed import get_shard_paths; paths = get_shard_paths('data/fineweb', $(BASIC_SHARDS)); print(f'{len(paths)} shard(s) ready')"
+
+basic_train: basic_data
+	$(BASIC_PYTHON) bin/embed.py \
+		--config data/sentence.cfg \
+		--output output/embeddings/sentence.pt \
+		--num-shards $(BASIC_SHARDS) --max-docs $(BASIC_MAX_DOCS) \
+		--vector-size $(BASIC_VEC_SIZE) --epochs $(BASIC_EPOCHS) \
+		--min-count $(BASIC_MIN_COUNT) \
+		--batch-size $(BASIC_BATCH_SIZE)
+
+basic_test:
+	$(MAKE) -C $(BASIC_DIR) test
+
+basic_run:
+	$(BASIC_PYTHON) bin/BasicModel.py $(BASIC_XML)
+
+basic_build: basic_data basic_train basic_test
+	@echo "BasicModel build complete."
+
+basic_start:
+ifeq ($(HOST),local)
+	@if [ -f $(BASIC_PID) ] && kill -0 $$(cat $(BASIC_PID)) 2>/dev/null; then \
+		echo "BasicModel already running (PID $$(cat $(BASIC_PID)), port $(BASIC_PORT))"; \
+	else \
+		rm -f $(BASIC_PID); \
+		if "$(CURDIR)/$(BASIC_DIR)/.venv/bin/python" "$(CURDIR)/bin/launch_background.py" \
+			--cwd "$(CURDIR)/$(BASIC_DIR)" \
+			--pid-file "$(BASIC_PID)" \
+			--log-file "$(BASIC_LOG)" \
+			--wait 1.0 \
+			--ready-url "http://127.0.0.1:$(BASIC_PORT)/health" \
+			--ready-timeout 30 \
+			--env PYTHONPATH=bin \
+			-- "$(CURDIR)/$(BASIC_DIR)/.venv/bin/python" bin/serve.py \
+				-p $(BASIC_PORT) \
+				--host $(BASIC_HOST) \
+			> /dev/null; then \
+			echo "BasicModel starting on port $(BASIC_PORT) (PID $$(cat $(BASIC_PID)))"; \
+		else \
+			echo "BasicModel failed to start. See $(BASIC_LOG)"; \
+			rm -f $(BASIC_PID); \
+			exit 1; \
+		fi; \
+	fi
+else
+	$(WO_SSH) "sudo systemctl start basicmodel"
+	@echo "BasicModel server started on $(WO_HOST)"
+endif
+
+basic_stop:
+ifeq ($(HOST),local)
+	@if [ -f $(BASIC_PID) ]; then \
+		kill $$(cat $(BASIC_PID)) 2>/dev/null && echo "BasicModel stopped" || echo "BasicModel not running"; \
+		rm -f $(BASIC_PID); \
+	else \
+		echo "No PID file found"; \
+	fi
+else
+	$(WO_SSH) "sudo systemctl stop basicmodel"
+	@echo "BasicModel server stopped on $(WO_HOST)"
+endif
+
+basic_restart:
+ifeq ($(HOST),local)
+	$(MAKE) basic_stop
+	$(MAKE) basic_start \
+		BASIC_PORT=$(BASIC_PORT) \
+		BASIC_HOST=$(BASIC_HOST) \
+		BASIC_PID=$(BASIC_PID) \
+		BASIC_LOG=$(BASIC_LOG)
+else
+	$(WO_SSH) "sudo systemctl restart basicmodel"
+	@echo "BasicModel server restarted on $(WO_HOST)"
+endif
+
+basic_status:
+ifeq ($(HOST),local)
+	@echo "BasicModel:"
+	@if [ -f $(BASIC_PID) ] && kill -0 $$(cat $(BASIC_PID)) 2>/dev/null; then \
+		echo "  Server: running (PID $$(cat $(BASIC_PID)), port $(BASIC_PORT))"; \
+	else \
+		echo "  Server: not running"; \
+	fi
+	@if [ -f $(BASIC_DIR)/output/embeddings/sentence.pt ]; then \
+		echo "  Embeddings: $(BASIC_DIR)/output/embeddings/sentence.pt (exists)"; \
+	else \
+		echo "  Embeddings: not built (run 'make basic_train')"; \
+	fi
+else
+	$(WO_SSH) "sudo systemctl status basicmodel --no-pager -l"
+endif
+
+basic_logs:
+ifeq ($(HOST),local)
+	@if [ -f $(BASIC_LOG) ]; then \
+		tail -f $(BASIC_LOG); \
+	else \
+		echo "No log file at $(BASIC_LOG). Start the server first."; \
+	fi
+else
+	$(WO_SSH) "sudo journalctl -u basicmodel -f --no-pager"
+endif
 
 # --- OpenClaw -----------------------------------------------------------------
 

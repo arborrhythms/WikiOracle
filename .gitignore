@@ -2,7 +2,7 @@
 *.pem
 *.xml
 *~
-.venv*/
+.venv/
 .ec2/
 .claude/
 output/

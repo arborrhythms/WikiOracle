@@ -5,6 +5,7 @@
 .venv/
 .ec2/
 .claude/
+.vscode/
 output/
 librechat/
 __pycache__/
@@ -17,3 +18,4 @@ __pycache__/
 .nano.pid
 .gitignore
 .wo.pid
+WikiOracle.code-workspace

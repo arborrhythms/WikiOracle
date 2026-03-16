@@ -107,7 +107,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         install build sync run \
         build_venv build_setup \
         build_data build_tokenizer build_preprocess build_sft \
-        train_pretrain train_finetune train \
+        train_pretrain train_finetune train nano_train \
         train_remote train_retrieve train_ssh train_status train_logs train_deploy \
         test test_eval test_unit test_basicmodel \
         run_init run_server run_debug run_cli run_web parse \
@@ -162,9 +162,10 @@ help:
 	@echo "  make all                Full pipeline: install + train + eval + report"
 	@echo ""
 	@echo "Training (train_*):"
-	@echo "  make train              Full pipeline: data + tok + pretrain + finetune"
-	@echo "  make train_pretrain     Pretrain base model (ARCH=cpu|gpu)"
-	@echo "  make train_finetune     Supervised fine-tuning (ARCH=cpu|gpu)"
+	@echo "  make train              Train BasicModel (embeddings + model)"
+	@echo "  make nano_train         Full NanoChat pipeline: data + tok + pretrain + finetune"
+	@echo "  make train_pretrain     Pretrain NanoChat base model (ARCH=cpu|gpu)"
+	@echo "  make train_finetune     NanoChat supervised fine-tuning (ARCH=cpu|gpu)"
 	@echo "  make train_remote       Launch EC2, copy repo, start training"
 	@echo "  make train_deploy       Launch EC2, train, deploy to WikiOracle"
 	@echo "  make train_retrieve     Pull artifacts, terminate EC2 instance"
@@ -324,6 +325,7 @@ else
 	@echo "=== Installing service files ==="
 	$(WO_SSH) "sudo cp $(WO_DEST)/data/wikioracle.service /etc/systemd/system/ && \
 		sudo cp $(WO_DEST)/data/nanochat.service /etc/systemd/system/ && \
+		sudo cp $(WO_DEST)/data/basicmodel.service /etc/systemd/system/ && \
 		sudo systemctl daemon-reload"
 	@echo "Sync complete. Run 'make up HOST=remote' to restart services."
 endif
@@ -647,8 +649,11 @@ endif
 
 # --- Full training pipeline ---------------------------------------------------
 
-train: build_data build_tokenizer train_pretrain train_finetune
-	@echo "$(ARCH) training pipeline complete."
+train: basic_train
+	@echo "BasicModel training pipeline complete."
+
+nano_train: build_data build_tokenizer train_pretrain train_finetune
+	@echo "$(ARCH) NanoChat training pipeline complete."
 
 # --- Test / Evaluation --------------------------------------------------------
 
@@ -745,7 +750,7 @@ checkpoint_push: sync_checkpoint_push
 
 BASIC_DIR        := basicmodel
 BASIC_PYTHON     := cd $(BASIC_DIR) && PYTHONPATH=bin .venv/bin/python
-BASIC_XML        ?= data/simple.xml
+BASIC_XML        ?= data/BasicModel.xml
 BASIC_SHARDS     ?= 1
 BASIC_MAX_DOCS   ?= 10000
 BASIC_VEC_SIZE   ?= 100
@@ -762,16 +767,23 @@ basic_data:
 		"from embed import get_shard_paths; paths = get_shard_paths('data/fineweb', $(BASIC_SHARDS)); print(f'{len(paths)} shard(s) ready')"
 
 basic_train: basic_data
-	$(BASIC_PYTHON) bin/embed.py \
-		--config data/sentence.cfg \
-		--output output/embeddings/sentence.pt \
-		--num-shards $(BASIC_SHARDS) --max-docs $(BASIC_MAX_DOCS) \
-		--vector-size $(BASIC_VEC_SIZE) --epochs $(BASIC_EPOCHS) \
-		--min-count $(BASIC_MIN_COUNT) \
-		--batch-size $(BASIC_BATCH_SIZE)
+	@if [ -f $(BASIC_DIR)/output/embeddings/sentence.pt ]; then \
+		echo "[BasicModel] Step 1/2: Embeddings already exist, skipping (delete to retrain)"; \
+	else \
+		echo "[BasicModel] Step 1/2: Training sentence embeddings..."; \
+		$(BASIC_PYTHON) bin/embed.py \
+			--config data/sentence.cfg \
+			--output output/embeddings/sentence.pt \
+			--num-shards $(BASIC_SHARDS) --max-docs $(BASIC_MAX_DOCS) \
+			--vector-size $(BASIC_VEC_SIZE) --epochs $(BASIC_EPOCHS) \
+			--min-count $(BASIC_MIN_COUNT) \
+			--batch-size $(BASIC_BATCH_SIZE); \
+	fi
+	@echo "[BasicModel] Step 2/2: Training model ($(BASIC_XML))..."
+	$(BASIC_PYTHON) bin/BasicModel.py $(BASIC_XML)
 
 basic_test:
-	$(MAKE) -C $(BASIC_DIR) test
+	BASICMODEL_DEVICE=cpu $(MAKE) -C $(BASIC_DIR) test
 
 basic_run:
 	$(BASIC_PYTHON) bin/BasicModel.py $(BASIC_XML)

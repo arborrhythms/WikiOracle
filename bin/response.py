@@ -1324,6 +1324,12 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
             print(f"[DEBUG] → _call_openai/grok ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
         oai_msgs = to_openai_messages(bundle) if bundle else (messages or [])
         return _call_openai(oai_msgs, temperature, effective_cfg)
+    if provider == "openrouter":
+        # OpenRouter is OpenAI-compatible — reuse the OpenAI adapter
+        if DEBUG_MODE:
+            print(f"[DEBUG] → _call_openai/openrouter ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
+        oai_msgs = to_openai_messages(bundle) if bundle else (messages or [])
+        return _call_openai(oai_msgs, temperature, effective_cfg)
     return f"[Provider '{provider}' not implemented]"
 
 
@@ -1821,6 +1827,13 @@ def process_chat(
     # Use <conversation> text for display if the main provider produced structured
     # output; otherwise fall back to the full response text.
     display_text = main_conv_text if main_conv_text else response_text
+
+    # Output safety filtering on the display text (all providers)
+    if detect_identifiability(display_text):
+        display_text = "[Response filtered: identifiable content]"
+    asym_reason = detect_asymmetric_claim(display_text)
+    if asym_reason:
+        display_text = "[Response filtered: asymmetric claim]"
 
     user_content = ensure_xhtml(user_msg) if user_msg else ""
     assistant_content = ensure_xhtml(display_text)

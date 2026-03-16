@@ -389,6 +389,14 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
             "streaming": False,
             "trust": 0.6,
         },
+        "openrouter": {
+            "name": "OpenRouter",
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "api_key": os.getenv("OPENROUTER_API_KEY", ""),
+            "default_model": os.getenv("OPENROUTER_MODEL", "google/gemma-3-4b-it:free"),
+            "streaming": False,
+            "trust": 0.6,
+        },
     }
 
     # Merge config.xml values (config overrides defaults; env vars still win)
@@ -485,6 +493,12 @@ _PROVIDER_MODELS: Dict[str, list] = {
         "grok-4-1-fast-reasoning",
         "grok-code-fast-1",
         "grok-4.20-beta-0309-non-reasoning",
+    ],
+    "openrouter": [
+        "google/gemma-3-4b-it:free",
+        "meta-llama/llama-4-scout:free",
+        "mistralai/mistral-small-3.1-24b-instruct:free",
+        "qwen/qwen3-4b:free",
     ],
     "wikioracle": [
         "NanoChat",

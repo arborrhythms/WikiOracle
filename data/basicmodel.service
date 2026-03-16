@@ -1,0 +1,26 @@
+# BasicModel — systemd service
+# Install: sudo cp basicmodel.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable basicmodel
+#
+# Internal-only: binds to 127.0.0.1:8001. WikiOracle calls it directly
+# via the wikioracle provider's BasicModel model selection.
+
+[Unit]
+Description=BasicModel Inference Server (Flask)
+After=network.target
+
+[Service]
+Type=simple
+User=bitnami
+WorkingDirectory=/opt/bitnami/wordpress/files/WikiOracle.org/client/basicmodel
+ExecStart=/opt/bitnami/wordpress/files/WikiOracle.org/client/basicmodel/.venv/bin/python3 \
+    bin/serve.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+# Set BASICMODEL_API_TOKEN to require bearer-token auth on all endpoints.
+# Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+#Environment=BASICMODEL_API_TOKEN=
+
+[Install]
+WantedBy=multi-user.target

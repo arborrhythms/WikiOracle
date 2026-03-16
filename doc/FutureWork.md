@@ -56,3 +56,14 @@ Mindfulness entails that negative entities do not manifest at the sentential lev
 * Simplicity is developing a cotinuous ND awareness within space. It requires continuity.
 * One Taste is about letting our attachment to feelings within that space be 1 everwhere, so that instead of adapting weight space to our thoughts, we adapt our feelings equanimously to our sensory space. It requires emotional symmetry.
 * Buddhahood is the perfection of these three.
+
+## A Group Based on the People that you Trust
+* Add a tie-in to identity that establishes a ZK proof of citizenship within a specific location. 
+* So the requirement for voting is not identifying yourself, but a ZK proof answer to “are you a citizen that pays taxes and has declared legal residency in Oregon?”. 
+* That allows you to participate in a network of trust which can determine how much the community trusts you. 
+* It is a dynamic and revokable Trust score determined by everyone else in Oregon. 
+* Even if you don’t have a high trust score overall, you may have a high trust score within a small population. 
+* You might have a bestie who trusts you entirely. 
+* And that will, to some degree, imply that they trust who you trust (assuming that you have allowed Transitivity). 
+* And that will buy you in to a trustworthy community, if you play your cards right, which can help you support your local group (where that group has a definition only for you).
+

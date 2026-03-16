@@ -85,6 +85,7 @@ from response import (
     process_chat,
     run_cli_merge,
 )
+from security import RateLimiter, guard_input
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +95,15 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     """Create and configure the WikiOracle Flask application instance."""
     log = logging.getLogger("wikioracle")
     app = Flask(__name__, static_folder=None)
+    app.config['MAX_CONTENT_LENGTH'] = cfg.max_state_bytes
+
+    # Rate limiting (disabled when env var is 0)
+    _chat_rpm = int(os.getenv("WIKIORACLE_RATE_LIMIT_CHAT", "30"))
+    _default_rpm = int(os.getenv("WIKIORACLE_RATE_LIMIT_DEFAULT", "120"))
+    _rate_limiter = RateLimiter(default_rpm=_default_rpm)
+    if _chat_rpm > 0:
+        _rate_limiter.set_limit(url_prefix + "/chat", _chat_rpm)
+
     startup_merge_report = _scan_and_merge_imports(cfg) if not config_mod.STATELESS_MODE else {}
 
     # Store url_prefix in module-level config so all modules can read it
@@ -168,6 +178,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if flask_request.method == "POST":
             if flask_request.headers.get("X-Requested-With") != "WikiOracle":
                 return jsonify({"ok": False, "error": "missing_csrf_header"}), 403
+        # Rate limiting (skip for health/OPTIONS)
+        if flask_request.endpoint != "health" and flask_request.method != "OPTIONS":
+            ip = flask_request.remote_addr or "unknown"
+            if not _rate_limiter.allow(ip, flask_request.path):
+                resp = jsonify({"ok": False, "error": "rate_limit_exceeded"})
+                resp.headers["Retry-After"] = "60"
+                return resp, 429
 
     @app.route(url_prefix + "/health", methods=["GET"])
     def health():
@@ -309,6 +326,20 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         user_msg = (body.get("message") or "").strip()
         conversation_id = body.get("conversation_id")
         branch_from = body.get("branch_from")
+
+        # Input length validation
+        _max_input_len = int(os.getenv("WIKIORACLE_MAX_INPUT_LEN", "50000"))
+        if len(user_msg) > _max_input_len:
+            return jsonify({"ok": False, "error": "input_too_long",
+                            "max_length": _max_input_len}), 400
+
+        # Prompt injection guard
+        injection_reason = guard_input(user_msg)
+        if injection_reason:
+            log.warning("Blocked input from %s: %s",
+                        flask_request.remote_addr, injection_reason)
+            return jsonify({"ok": False, "error": "input_rejected"}), 400
+
         # Empty sends are allowed: at root (new conversation), at terminal
         # nodes (continue), or via branch_from.  All three create valid turns.
 

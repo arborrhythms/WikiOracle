@@ -114,7 +114,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         sync_remote sync_checkpoint_pull sync_checkpoint_push \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
-        basic_data basic_train basic_test basic_run basic_build \
+        basic_data basic_smallTrain basic_train basic_test basic_run basic_build \
         basic_start basic_stop basic_restart basic_status basic_logs \
         openclaw_setup openclaw_run openclaw_test \
         doc_report doc_pdf clean clean_all \
@@ -191,7 +191,8 @@ help:
 	@echo "BasicModel (basic_*):"
 	@echo "  make basic_build            Full pipeline: data + train + test"
 	@echo "  make basic_data             Download FineWeb-EDU shards"
-	@echo "  make basic_train            Train sentence embeddings"
+	@echo "  make basic_train            Full train (10 shards, 100K docs)"
+	@echo "  make basic_smallTrain       Small train (1 shard, 10K docs)"
 	@echo "  make basic_test             Run BasicModel tests"
 	@echo "  make basic_run              Run BasicModel (BASIC_XML=data/simple.xml)"
 	@echo ""
@@ -754,9 +755,9 @@ BASIC_XML        ?= data/BasicModel.xml
 BASIC_SHARDS     ?= 1
 BASIC_MAX_DOCS   ?= 10000
 BASIC_VEC_SIZE   ?= 100
-BASIC_EPOCHS     ?= 1
+BASIC_EPOCHS     ?= 10
 BASIC_MIN_COUNT  ?= 5
-BASIC_BATCH_SIZE ?= 256
+BASIC_BATCH_SIZE ?= 32
 BASIC_PORT       ?= 8001
 BASIC_HOST       ?= 127.0.0.1
 BASIC_PID        := .basic.pid
@@ -766,12 +767,12 @@ basic_data:
 	cd $(BASIC_DIR) && PYTHONPATH=bin .venv/bin/python -c \
 		"from embed import get_shard_paths; paths = get_shard_paths('data/fineweb', $(BASIC_SHARDS)); print(f'{len(paths)} shard(s) ready')"
 
-basic_train: basic_data
+basic_embedding: basic_data
 	@if [ -f $(BASIC_DIR)/output/embeddings/sentence.pt ]; then \
-		echo "[BasicModel] Step 1/2: Embeddings already exist, skipping (delete to retrain)"; \
+		echo "[BasicModel] : Embeddings already exist, skipping (delete to retrain)"; \
 	else \
-		echo "[BasicModel] Step 1/2: Training sentence embeddings..."; \
-		$(BASIC_PYTHON) bin/embed.py \
+		echo "[BasicModel] : Training sentence embeddings..."; \
+		$(BASIC_PYTHON) bin/embed.py train \
 			--config data/sentence.cfg \
 			--output output/embeddings/sentence.pt \
 			--num-shards $(BASIC_SHARDS) --max-docs $(BASIC_MAX_DOCS) \
@@ -779,8 +780,13 @@ basic_train: basic_data
 			--min-count $(BASIC_MIN_COUNT) \
 			--batch-size $(BASIC_BATCH_SIZE); \
 	fi
-	@echo "[BasicModel] Step 2/2: Training model ($(BASIC_XML))..."
+
+basic_smallTrain: basic_embedding
+	@echo "[BasicModel] : Training model ($(BASIC_XML), small: $(BASIC_SHARDS) shard(s), $(BASIC_MAX_DOCS) docs)..."
 	$(BASIC_PYTHON) bin/BasicModel.py $(BASIC_XML)
+
+basic_train:
+	$(MAKE) basic_smallTrain BASIC_SHARDS=10 BASIC_MAX_DOCS=100000
 
 basic_test:
 	BASICMODEL_DEVICE=cpu $(MAKE) -C $(BASIC_DIR) test

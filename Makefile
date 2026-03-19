@@ -111,7 +111,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         train_remote train_retrieve train_ssh train_status train_logs train_deploy \
         test test_eval test_unit test_basicmodel \
         run_init run_server run_debug run_cli run_web parse \
-        sync_remote sync_checkpoint_pull sync_checkpoint_push \
+        sync_local sync_remote sync_checkpoint_pull sync_checkpoint_push \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
         basic_data basic_smallTrain basic_train basic_test basic_run basic_build \
@@ -278,6 +278,24 @@ endif
 		--target="$(EC2_TARGET)" \
 		--alert-email=$(ALERT_EMAIL) \
 		--deploy $(DEPLOY_ARGS)
+
+# Local development
+LOCAL_KEY_FILE       ?= ~/.ssh/id_ed25519_arbormini
+LOCAL_USER           ?= arogers
+LOCAL_HOST           ?= arbormini.local
+LOCAL_DEST           ?= ~/WikiOracle/
+LOCAL_SYNC_OPTS      ?= -av --progress \
+		--exclude .venv \
+		--exclude .git/ \
+		--exclude output/ \
+		--exclude config.xml \
+		--exclude state.xml \
+		--exclude '*.pem' \
+		--exclude __pycache__/ \
+		--exclude .DS_Store \
+
+sync_local:
+	rsync $(LOCAL_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
 
 sync_remote:
 	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)

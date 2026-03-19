@@ -12,3 +12,4 @@ vector_quantize_pytorch
 torchvision
 fastapi>=0.117.1
 uvicorn>=0.36.0
+pytest

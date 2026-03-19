@@ -14,15 +14,15 @@ After=network.target
 [Service]
 Type=simple
 User=bitnami
-WorkingDirectory=/opt/bitnami/wordpress/files/WikiOracle.org/nanochat
-ExecStart=/opt/bitnami/wordpress/files/WikiOracle.org/nanochat/.venv/bin/python3 \
+WorkingDirectory=/opt/bitnami/wordpress/files/WikiOracle.org/client/nanochat
+ExecStart=/opt/bitnami/wordpress/files/WikiOracle.org/client/nanochat/.venv/bin/python3 \
     /opt/bitnami/wordpress/files/WikiOracle.org/client/bin/nanochat_ext.py \
     --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/opt/bitnami/wordpress/files/WikiOracle.org/nanochat
-Environment=NANOCHAT_BASE_DIR=/opt/bitnami/wordpress/files/WikiOracle.org/nanochat
+Environment=PYTHONPATH=/opt/bitnami/wordpress/files/WikiOracle.org/client/nanochat
+Environment=NANOCHAT_BASE_DIR=/opt/bitnami/wordpress/files/WikiOracle.org/client/nanochat
 
 [Install]
 WantedBy=multi-user.target

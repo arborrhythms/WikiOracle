@@ -29,7 +29,7 @@ IDENTITY_DATA    := $(NANOCHAT_BASE)/identity_conversations.jsonl
 
 # Checkpoint backup (for rollback before/after online training)
 CHECKPOINT_BAK   := output/checkpoints
-WO_NANOCHAT      ?= /opt/bitnami/wordpress/files/WikiOracle.org/nanochat
+WO_NANOCHAT      ?= /opt/bitnami/wordpress/files/WikiOracle.org/client/nanochat
 WO_CHECKPOINT    := $(WO_NANOCHAT)/chatsft_checkpoints
 IDENTITY_URL     := https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
 
@@ -517,54 +517,6 @@ ifeq ($(HOST),local)
 	@echo "Local WikiOracle logs go to stdout. Use 'make run_server' for foreground mode."
 else
 	$(WO_SSH) "sudo journalctl -u wikioracle -f --no-pager"
-endif
-
-# --- Migration (chat/ → client/) ---------------------------------------------
-# Rename WikiOracle.org/chat to WikiOracle.org/client, preserving NanoChat
-# build derivatives (.venv, checkpoints) by pulling them locally first.
-#
-# Usage: make wo_migrate HOST=remote
-
-WO_BASE         := /opt/bitnami/wordpress/files/WikiOracle.org
-WO_OLD_CHAT     := $(WO_BASE)/chat
-
-wo_migrate:
-ifeq ($(HOST),local)
-	@echo "Migration is a remote-only operation. Use: make wo_migrate HOST=remote"
-	@exit 1
-else
-	@echo "╔══════════════════════════════════════════════════════════════╗"
-	@echo "║  WikiOracle Directory Migration                            ║"
-	@echo "║  WikiOracle.org/chat → WikiOracle.org/client               ║"
-	@echo "║  WikiOracle.org/nanochat (unchanged)                       ║"
-	@echo "╚══════════════════════════════════════════════════════════════╝"
-	@printf "Type YES to continue: " && read answer && [ "$$answer" = "YES" ] || { echo "Aborted."; exit 1; }
-
-	@echo ""
-	@echo "=== Step 1/4: Stop services ==="
-	$(WO_SSH) "sudo systemctl stop wikioracle nanochat || true"
-
-	@echo ""
-	@echo "=== Step 2/4: Copy chat → client on remote ==="
-	$(WO_SSH) "cp -a $(WO_OLD_CHAT) $(WO_BASE)/client"
-
-	@echo ""
-	@echo "=== Step 3/4: Deploy updated service files + app code ==="
-	$(MAKE) wo_deploy HOST=remote
-	$(MAKE) nano_deploy HOST=remote
-	$(WO_SSH) "cd $(WO_BASE)/client && rm -rf .venv && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
-
-	@echo ""
-	@echo "=== Step 4/4: Restart services and verify ==="
-	$(WO_SSH) "sudo systemctl daemon-reload && sudo systemctl start nanochat wikioracle"
-	@sleep 3
-	$(WO_SSH) "sudo systemctl status nanochat wikioracle --no-pager -l" || true
-
-	@echo ""
-	@echo "=== Done ==="
-	@echo "Migration complete. Old directory preserved at $(WO_OLD_CHAT)/"
-	@echo "Once verified, remove manually:"
-	@echo "  ssh -i $(WO_KEY_FILE) $(WO_USER)@$(WO_HOST) 'rm -rf $(WO_OLD_CHAT)'"
 endif
 
 # --- Install / Build / Run (top-level) ----------------------------------------

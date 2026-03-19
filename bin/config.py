@@ -140,11 +140,31 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _find_xml(project_root: Path, filename: str) -> Path | None:
+    """Return the first existing path for *filename* in the search order.
+
+    Search order:
+      1. ``project_root / filename``       (user override)
+      2. ``project_root / "data" / filename``  (shipped default)
+    """
+    for candidate in (project_root / filename,
+                      project_root / "data" / filename):
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def load_config() -> Config:
     """Build Config from environment variables with safe defaults."""
-    state_file = Path(
-        os.environ.get("WIKIORACLE_STATE_FILE", str(Path.cwd() / "state.xml"))
-    ).expanduser().resolve()
+    env_state = os.environ.get("WIKIORACLE_STATE_FILE")
+    if env_state:
+        state_file = Path(env_state).expanduser().resolve()
+    else:
+        found = _find_xml(_PROJECT_ROOT, "state.xml")
+        state_file = found if found else _PROJECT_ROOT / "state.xml"
 
     port = int(os.environ.get("WIKIORACLE_BIND_PORT", "8888"))
     allowed_origins_raw = os.environ.get(
@@ -329,14 +349,19 @@ def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
 def _load_config(project_root: Path | None = None) -> Dict[str, Any]:
     """Load configuration from config.xml.
 
+    Search order:
+      1. *project_root*/config.xml       (user override)
+      2. *project_root*/data/config.xml  (shipped default)
+
     *project_root* defaults to the parent of the bin/ directory (i.e. the
     repo root).
     """
     global _CONFIG_STATUS
     if project_root is None:
-        project_root = Path(__file__).resolve().parent.parent
-    xml_path = project_root / "config.xml"
-    if xml_path.exists():
+        project_root = _PROJECT_ROOT
+
+    xml_path = _find_xml(project_root, "config.xml")
+    if xml_path is not None:
         try:
             data = _load_config_xml(xml_path)
             if data:
@@ -347,7 +372,7 @@ def _load_config(project_root: Path | None = None) -> Dict[str, Any]:
         except Exception as exc:
             _CONFIG_STATUS = f"parse error: {exc}"
     else:
-        _CONFIG_STATUS = f"not found at {xml_path}"
+        _CONFIG_STATUS = "config.xml: not found"
     return {}
 
 

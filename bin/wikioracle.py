@@ -53,7 +53,9 @@ import config as config_mod
 from config import (
     Config,
     PROVIDERS,
+    _PROJECT_ROOT,
     _build_providers,
+    _find_xml,
     _normalize_config,
     _env_bool,
     _ensure_self_signed_cert,
@@ -122,9 +124,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     # Persist auto-generated server_id to config.xml if not already on disk
     if not config_mod.STATELESS_MODE:
-        _project_root = Path(__file__).resolve().parent.parent
-        _config_xml_path = _project_root / "config.xml"
-        if _config_xml_path.exists():
+        _config_xml_path = _find_xml(_PROJECT_ROOT, "config.xml")
+        if _config_xml_path is not None:
             _disk_cfg = config_mod._load_config_xml(_config_xml_path)
             if not _disk_cfg.get("server", {}).get("server_id"):
                 normalized = _normalize_config(config_mod._CONFIG)
@@ -507,9 +508,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             body = flask_request.get_json(force=True, silent=True) or {}
 
             try:
-                project_root = Path(__file__).resolve().parent.parent
-
-                cfg_xml = project_root / "config.xml"
+                cfg_xml = _find_xml(_PROJECT_ROOT, "config.xml") or _PROJECT_ROOT / "config.xml"
 
                 # Client sends { config: {...} } — the full config dict
                 if "config" not in body or not isinstance(body["config"], dict):
@@ -540,8 +539,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                 return jsonify({"ok": False, "error": "Configuration update failed"}), 400
 
     # Static file serving — all UI assets live in client/ subdirectory
-    project_root = Path(__file__).resolve().parent.parent
-    ui_dir = project_root / "client"
+    ui_dir = _PROJECT_ROOT / "client"
 
     @app.route(url_prefix + "/", methods=["GET"])
     def ui_index():

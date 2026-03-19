@@ -114,7 +114,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         sync_local sync_remote sync_checkpoint_pull sync_checkpoint_push \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
-        basic_data basic_smallTrain basic_train basic_test basic_run basic_build \
+        basic_data basic_smallTrain basic_train basic_remoteTrain basic_test basic_run basic_build \
         basic_start basic_stop basic_restart basic_status basic_logs \
         openclaw_setup openclaw_run openclaw_test \
         doc_report doc_pdf clean clean_all \
@@ -191,8 +191,9 @@ help:
 	@echo "BasicModel (basic_*):"
 	@echo "  make basic_build            Full pipeline: data + train + test"
 	@echo "  make basic_data             Download FineWeb-EDU shards"
-	@echo "  make basic_train            Full train (10 shards, 100K docs)"
-	@echo "  make basic_smallTrain       Small train (1 shard, 10K docs)"
+	@echo "  make basic_train            Train BasicModel (delegates to basicmodel/Makefile)"
+	@echo "  make basic_smallTrain       Micro train (500 docs, random shard)"
+	@echo "  make basic_remoteTrain      Train on ArborMini.local via SSH"
 	@echo "  make basic_test             Run BasicModel tests"
 	@echo "  make basic_run              Run BasicModel (BASIC_XML=data/simple.xml)"
 	@echo ""
@@ -799,12 +800,14 @@ basic_embedding: basic_data
 			--batch-size $(BASIC_BATCH_SIZE); \
 	fi
 
-basic_smallTrain: basic_embedding
-	@echo "[BasicModel] : Training model ($(BASIC_XML), small: $(BASIC_SHARDS) shard(s), $(BASIC_MAX_DOCS) docs)..."
-	$(BASIC_PYTHON) bin/BasicModel.py $(BASIC_XML)
-
 basic_train:
-	$(MAKE) basic_smallTrain BASIC_SHARDS=10 BASIC_MAX_DOCS=100000
+	$(MAKE) -C $(BASIC_DIR) train
+
+basic_smallTrain:
+	$(MAKE) -C $(BASIC_DIR) train_micro
+
+basic_remoteTrain:
+	$(MAKE) -C $(BASIC_DIR) train_remote
 
 basic_test:
 	BASICMODEL_DEVICE=cpu $(MAKE) -C $(BASIC_DIR) test

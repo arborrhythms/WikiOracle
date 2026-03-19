@@ -80,10 +80,10 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         cls._orig_env = os.environ.get("WIKIORACLE_STATE_FILE")
         cls._orig_stateless = config_mod.STATELESS_MODE
         cls._orig_debug = config_mod.DEBUG_MODE
-        cls._orig_wo_url = PROVIDERS.get("wikioracle", {}).get("url")
+        cls._orig_wo_url = PROVIDERS.get("WikiOracle", {}).get("url")
 
         # Point the wikioracle provider at the test server
-        PROVIDERS.setdefault("wikioracle", {})["url"] = f"{cls._nano_url}/chat/completions"
+        PROVIDERS.setdefault("WikiOracle", {})["url"] = f"{cls._nano_url}/chat/completions"
 
         # ── Set up fixtures ──
         cls._output_dir.mkdir(exist_ok=True)
@@ -120,7 +120,7 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         resp = client.post("/chat",
             json={
                 "message": "Lets have a vote on taxes. Should we raise them?",
-                "config": {"provider": "wikioracle"},
+                "config": {"provider": "WikiOracle"},
             },
             headers={"X-Requested-With": "WikiOracle"},
         )
@@ -158,9 +158,9 @@ class TestAlphaOutputDiamond(unittest.TestCase):
         if cls._orig_debug is not None:
             config_mod.DEBUG_MODE = cls._orig_debug
         if cls._orig_wo_url is not None:
-            PROVIDERS.setdefault("wikioracle", {})["url"] = cls._orig_wo_url
+            PROVIDERS.setdefault("WikiOracle", {})["url"] = cls._orig_wo_url
         else:
-            PROVIDERS.get("wikioracle", {}).pop("url", None)
+            PROVIDERS.get("WikiOracle", {}).pop("url", None)
 
     def test_diamond_in_output_alpha(self):
         if self._setup_error:

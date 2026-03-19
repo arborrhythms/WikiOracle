@@ -225,9 +225,8 @@ def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
     The XML structure uses a ``<config>`` root element with ``<server>``
     and ``<providers>`` sections. The server section contains subsections
     for ``<truthset>``, ``<evaluation>``, and ``<training>``. Provider
-    entries use ``<provider name="key">`` with child elements;
-    ``<display_name>`` is mapped to ``name`` in the returned dict (for
-    backward compat with the rest of the codebase).
+    entries use ``<provider>`` with ``<name>``, ``<type>``, and ``<model>``
+    child elements.  Providers are keyed by ``<name>`` in the returned dict.
 
     Boolean text ``true``/``false`` is coerced to Python bools; numeric
     text is coerced to int/float.
@@ -298,17 +297,30 @@ def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
         conversation_context_el = providers_el.find("conversation_context")
         if conversation_context_el is not None:
             providers["conversation_context"] = _parse_xhtml_content(conversation_context_el)
-        # Per-provider entries
+        # Per-provider entries — keyed by <name> child element
         for prov_el in providers_el.findall("provider"):
-            prov_key = prov_el.get("name", "")
             prov: Dict[str, Any] = {}
+            prov_name = None
             for child in prov_el:
                 tag = child.tag
-                # <display_name> maps to "name" for backward compat
+                # Legacy: skip <display_name>, ignore name= attribute
                 if tag == "display_name":
-                    tag = "name"
-                prov[tag] = _xml_coerce(_xml_text(child))
-            providers[prov_key] = prov
+                    continue
+                # Legacy: <default_model> → "model"
+                if tag == "default_model":
+                    tag = "model"
+                val = _xml_coerce(_xml_text(child))
+                if tag == "name":
+                    prov_name = str(val)
+                prov[tag] = val
+            # Legacy fallback: old format used name= attribute
+            if prov_name is None:
+                prov_name = prov_el.get("name", "")
+            # Legacy: old format had no <type>, infer from attribute
+            if "type" not in prov and prov_el.get("name"):
+                prov["type"] = prov_el.get("name")
+            if prov_name:
+                providers[prov_name] = prov
         data["providers"] = providers
 
     return data
@@ -347,73 +359,81 @@ _CONFIG: Dict[str, Any] = _load_config()
 # Provider configuration
 # ---------------------------------------------------------------------------
 def _build_providers() -> Dict[str, Dict[str, Any]]:
-    """Construct provider registry from defaults + config.xml overrides."""
+    """Construct provider registry from defaults + config.xml overrides.
+
+    Providers are keyed by **name** (user-facing label).  The ``type``
+    field identifies the API protocol (openai, anthropic, gemini, etc.)
+    and is used by ``_call_provider()`` to dispatch to the right adapter.
+    """
     cfg_providers = _CONFIG.get("providers", {})
 
+    # Hardcoded defaults — keyed by name
     providers: Dict[str, Dict[str, Any]] = {
-        "wikioracle": {
-            "name": "WikiOracle",
+        "WikiOracle": {
+            "type": "wikioracle",
             "streaming": True,
             "sequence_len": 2048,
             "trust": 1.0,
         },
-        "openai": {
-            "name": "OpenAI",
+        "OpenAI": {
+            "type": "openai",
             "url": "https://api.openai.com/v1/chat/completions",
             "api_key": os.getenv("OPENAI_API_KEY", ""),
-            "default_model": os.getenv("OPENAI_MODEL", "gpt-4o"),
+            "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
             "streaming": False,
             "trust": 0.6,
         },
-        "anthropic": {
-            "name": "Anthropic",
+        "Anthropic": {
+            "type": "anthropic",
             "url": "https://api.anthropic.com/v1/messages",
             "api_key": os.getenv("ANTHROPIC_API_KEY", ""),
-            "default_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+            "model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             "streaming": False,
             "trust": 0.6,
         },
-        "gemini": {
-            "name": "Gemini",
+        "Gemini": {
+            "type": "gemini",
             "url": "https://generativelanguage.googleapis.com/v1beta/models",
             "api_key": os.getenv("GEMINI_API_KEY", ""),
-            "default_model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             "streaming": False,
             "trust": 0.6,
         },
-        "grok": {
-            "name": "Grok",
+        "Grok": {
+            "type": "grok",
             "url": "https://api.x.ai/v1/chat/completions",
             "api_key": os.getenv("XAI_API_KEY", ""),
-            "default_model": os.getenv("XAI_MODEL", "grok-3-mini"),
+            "model": os.getenv("XAI_MODEL", "grok-3-mini"),
             "streaming": False,
             "trust": 0.6,
         },
-        "openrouter": {
-            "name": "OpenRouter",
+        "OpenRouter": {
+            "type": "openrouter",
             "url": "https://openrouter.ai/api/v1/chat/completions",
             "api_key": os.getenv("OPENROUTER_API_KEY", ""),
-            "default_model": os.getenv("OPENROUTER_MODEL", "google/gemma-3-4b-it:free"),
+            "model": os.getenv("OPENROUTER_MODEL", "google/gemma-3-4b-it:free"),
             "streaming": False,
             "trust": 0.6,
         },
     }
 
     # Merge config.xml values (config overrides defaults; env vars still win)
-    for key, ycfg in cfg_providers.items():
+    for name, ycfg in cfg_providers.items():
         if not isinstance(ycfg, dict):
             continue
-        if key not in providers:
-            providers[key] = {"name": key, "streaming": False}
-        pcfg = providers[key]
-        if ycfg.get("name"):
-            pcfg["name"] = ycfg["name"]
+        if name not in providers:
+            providers[name] = {"type": ycfg.get("type", "openai"), "streaming": False}
+        pcfg = providers[name]
+        if ycfg.get("type"):
+            pcfg["type"] = ycfg["type"]
         if ycfg.get("username"):
             pcfg["username"] = ycfg["username"]
         if ycfg.get("url"):
             pcfg["url"] = ycfg["url"]
-        if ycfg.get("default_model"):
-            pcfg.setdefault("default_model", ycfg["default_model"])
+        if ycfg.get("model"):
+            env_model_var = _MODEL_ENV_VARS.get(pcfg.get("type", ""))
+            if not env_model_var or not os.getenv(env_model_var):
+                pcfg["model"] = ycfg["model"]
         # Config api_key fills in when no env var is set
         if ycfg.get("api_key") and not pcfg.get("api_key"):
             pcfg["api_key"] = ycfg["api_key"]
@@ -453,6 +473,14 @@ DEFAULT_OUTPUT = (
     "hedged statements, or meta-commentary. The <conversation> block is "
     "the narrative answer shown to the user."
 )
+
+_MODEL_ENV_VARS: Dict[str, str] = {
+    "openai": "OPENAI_MODEL",
+    "anthropic": "ANTHROPIC_MODEL",
+    "gemini": "GEMINI_MODEL",
+    "grok": "XAI_MODEL",
+    "openrouter": "OPENROUTER_MODEL",
+}
 
 
 PROVIDERS: Dict[str, Dict[str, Any]] = _build_providers()
@@ -548,28 +576,27 @@ CONFIG_SCHEMA = [
     ("providers.output",            "Output format instructions for all providers"),
     ("providers.truth_context",     "System prompt context for truth-only providers"),
     ("providers.conversation_context", "System prompt context for conversational providers"),
-    ("providers.wikioracle.name",   "Display name for WikiOracle provider"),
-    ("providers.wikioracle.username", "API login / email"),
-    ("providers.openai.name",       "Display name for OpenAI provider"),
-    ("providers.openai.username",   "API login / email"),
-    ("providers.openai.url",        "API endpoint URL"),
-    ("providers.openai.api_key",    "API key (or set OPENAI_API_KEY env var)"),
-    ("providers.openai.default_model", "Default model"),
-    ("providers.anthropic.name",    "Display name for Anthropic provider"),
-    ("providers.anthropic.username", "API login / email"),
-    ("providers.anthropic.url",     "API endpoint URL"),
-    ("providers.anthropic.api_key", "API key (or set ANTHROPIC_API_KEY env var)"),
-    ("providers.anthropic.default_model", "Default model"),
-    ("providers.gemini.name",       "Display name for Gemini provider"),
-    ("providers.gemini.username",   "API login / email"),
-    ("providers.gemini.url",        "API endpoint URL"),
-    ("providers.gemini.api_key",    "API key (or set GEMINI_API_KEY env var)"),
-    ("providers.gemini.default_model", "Default model"),
-    ("providers.grok.name",         "Display name for Grok provider"),
-    ("providers.grok.username",     "API login / email"),
-    ("providers.grok.url",          "API endpoint URL"),
-    ("providers.grok.api_key",      "API key (or set XAI_API_KEY env var)"),
-    ("providers.grok.default_model", "Default model"),
+    ("providers.WikiOracle.username", "API login / email"),
+    ("providers.OpenAI.username",   "API login / email"),
+    ("providers.OpenAI.url",        "API endpoint URL"),
+    ("providers.OpenAI.api_key",    "API key (or set OPENAI_API_KEY env var)"),
+    ("providers.OpenAI.model",      "Default model"),
+    ("providers.Anthropic.username", "API login / email"),
+    ("providers.Anthropic.url",     "API endpoint URL"),
+    ("providers.Anthropic.api_key", "API key (or set ANTHROPIC_API_KEY env var)"),
+    ("providers.Anthropic.model",   "Default model"),
+    ("providers.Gemini.username",   "API login / email"),
+    ("providers.Gemini.url",        "API endpoint URL"),
+    ("providers.Gemini.api_key",    "API key (or set GEMINI_API_KEY env var)"),
+    ("providers.Gemini.model",      "Default model"),
+    ("providers.Grok.username",     "API login / email"),
+    ("providers.Grok.url",          "API endpoint URL"),
+    ("providers.Grok.api_key",      "API key (or set XAI_API_KEY env var)"),
+    ("providers.Grok.model",        "Default model"),
+    ("providers.OpenRouter.username", "API login / email"),
+    ("providers.OpenRouter.url",    "API endpoint URL"),
+    ("providers.OpenRouter.api_key", "API key (or set OPENROUTER_API_KEY env var)"),
+    ("providers.OpenRouter.model",  "Default model"),
 ]
 
 
@@ -600,8 +627,8 @@ def config_to_xml(data: dict) -> str:
     expects.  Uses ``xml.etree.ElementTree`` for construction and
     ``xml.dom.minidom`` for pretty-printing.
 
-    The dict key ``name`` inside each provider is written as
-    ``<display_name>`` in the XML (inverse of the load-time mapping).
+    Providers are written as ``<provider>`` elements with ``<name>``,
+    ``<type>``, and ``<model>`` child elements (no attributes).
     """
     if not isinstance(data, dict):
         return '<?xml version="1.0" encoding="UTF-8"?>\n<config/>\n'
@@ -696,24 +723,26 @@ def config_to_xml(data: dict) -> str:
                     _add_comment(providers_el, desc)
                 child = ET.SubElement(providers_el, section_key)
                 child.text = _val_str(val)
-        # Per-provider entries
-        for prov_key, prov_cfg in providers_data.items():
-            if prov_key in ("default", "context", "output", "truth_context", "conversation_context"):
+        # Per-provider entries — no attributes, all child elements
+        for prov_name, prov_cfg in providers_data.items():
+            if prov_name in ("default", "context", "output", "truth_context", "conversation_context"):
                 continue
             if not isinstance(prov_cfg, dict):
                 continue
-            desc = desc_map.get(f"providers.{prov_key}.name")
-            if desc:
-                _add_comment(providers_el, desc)
             prov_el = ET.SubElement(providers_el, "provider")
-            prov_el.set("name", prov_key)
+            # Write <name> first, then <type>, then remaining fields
+            name_el = ET.SubElement(prov_el, "name")
+            name_el.text = prov_name
+            if prov_cfg.get("type"):
+                type_el = ET.SubElement(prov_el, "type")
+                type_el.text = str(prov_cfg["type"])
             for field_key, field_val in prov_cfg.items():
-                # "name" in dict -> <display_name> in XML
-                xml_tag = "display_name" if field_key == "name" else field_key
-                desc = desc_map.get(f"providers.{prov_key}.{field_key}")
+                if field_key in ("name", "type"):
+                    continue
+                desc = desc_map.get(f"providers.{prov_name}.{field_key}")
                 if desc:
                     _add_comment(prov_el, desc)
-                child = ET.SubElement(prov_el, xml_tag)
+                child = ET.SubElement(prov_el, field_key)
                 child.text = _val_str(field_val)
 
     # Pretty-print with minidom
@@ -846,15 +875,17 @@ def _normalize_config(cfg_data: dict) -> dict:
     server.setdefault("allowed_urls", _default_allowed_urls())
     # --- providers ---
     prov = cfg.setdefault("providers", {})
-    prov.setdefault("default", "wikioracle")
+    prov.setdefault("default", "WikiOracle")
     # Non-secret provider metadata for UI dropdowns / key-status badges
     prov_meta = {}
-    for key, pcfg in PROVIDERS.items():
-        prov_meta[key] = {
-            "name": pcfg["name"],
+    for name, pcfg in PROVIDERS.items():
+        prov_type = pcfg.get("type", "")
+        prov_meta[name] = {
+            "name": name,
+            "type": prov_type,
             "streaming": pcfg.get("streaming", False),
-            "model": pcfg.get("default_model", ""),
-            "models": _PROVIDER_MODELS.get(key, []),
+            "model": pcfg.get("model", ""),
+            "models": _PROVIDER_MODELS.get(prov_type, []),
         }
     server["providers"] = prov_meta
     return cfg
@@ -893,15 +924,8 @@ def reload_config(path: str | Path | None = None) -> Dict[str, Any]:
 
 def _populate_providers() -> None:
     """Refresh the module-level PROVIDERS dict from _CONFIG."""
-    cfg_providers = _CONFIG.get("providers", {})
     PROVIDERS.clear()
-    for key, prov in cfg_providers.items():
-        PROVIDERS[key] = {
-            "name": prov.get("name", key),
-            "url": prov.get("url", ""),
-            "api_key": prov.get("api_key", ""),
-            "default_model": prov.get("default_model", ""),
-        }
+    PROVIDERS.update(_build_providers())
 
 
 def parse_args() -> argparse.Namespace:

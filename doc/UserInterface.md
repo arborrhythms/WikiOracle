@@ -139,20 +139,30 @@ preferences (layout, theme, confirm actions) are also saved in state.
 
 ### Settings Controls
 
-| Control              | ID                   | Type        | Config path                         | Default        | Description                                                       |
-| -------------------- | -------------------- | ----------- | ----------------------------------- | -------------- | ----------------------------------------------------------------- |
-| Username             | `setUsername`        | text        | `state.client_name`                 | `"User"`       | Display name shown in chat messages.                              |
-| Provider             | `setProvider`        | select      | `providers.default`                 | `"wikioracle"` | Active LLM provider.                                              |
-| Layout               | `setLayout`          | select      | `state.ui.layout`                   | `"flat"`       | Panel layout mode (`horizontal`, `vertical`, `flat`).             |
-| Theme                | `setTheme`           | select      | `state.ui.theme`                    | `"system"`     | Colour theme (`system`, `light`, `dark`).                         |
-| Temperature          | `setTemperature`     | range (0–2) | `server.evaluation.temperature`     | `0.7`          | Sampling temperature for the LLM.                                 |
-| Max tokens           | `setMaxTokens`       | number      | `server.evaluation.max_tokens`      | `128`          | Maximum tokens in the LLM response.                               |
-| Timeout              | `setTimeout`         | number      | `server.evaluation.timeout`         | `120`          | Request timeout in seconds.                                       |
-| Truth weight         | `setTruthWeight`     | range (0–1) | `server.truthset.truth_weight`      | `0.7`          | How much DoT gates the learning rate. See below.                  |
-| Max truth entries    | `setTruthMaxEntries` | number      | `server.training.truth_max_entries` | `1000`         | Maximum entries in the server TruthSet before trimming.           |
-| Store concrete facts | `setStoreConcrete`   | checkbox    | `server.truthset.store_concrete`    | `false`        | Store spatiotemporally-bound facts (news) in the server TruthSet. |
-| Fetch URLs           | `setUrlFetch`        | checkbox    | `server.evaluation.url_fetch`       | `false`        | Allow the assistant to fetch URL content.                         |
-| Confirm actions      | `setConfirmActions`  | checkbox    | `state.ui.confirm_actions`          | `false`        | Require confirmation before destructive operations.               |
+| Control                  | DOM id                 | Type          | Stored at                                   | Default / fallback                      | Description                                                       |
+| ------------------------ | ---------------------- | ------------- | ------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| Username                 | `setUsername`          | text          | `state.client_name`                         | `"User"`                                | Display name shown in chat messages.                              |
+| Provider                 | `setProvider`          | select        | `config.providers.default`                  | `"wikioracle"`                          | Active LLM provider.                                              |
+| Model                    | `setModel`             | select        | `state.ui.model`                            | provider metadata model or empty        | Explicit model override sent in `POST /chat` as `config.model`.   |
+| Provider trust           | `setProviderTrust`     | range (0–1)   | runtime `config.server.providers.<selected>.trust` | `1.0` for `wikioracle`, `0.6` otherwise | Per-provider trust weight used by the UI/runtime config bundle.   |
+| Layout                   | `setLayout`            | select        | `state.ui.layout`                           | saved value; legacy fallback `flat`     | Panel layout mode. The current selector exposes `horizontal` and `vertical`. |
+| Theme                    | `setTheme`             | select        | `state.ui.theme`                            | `"system"`                              | Colour theme (`system`, `light`, `dark`).                         |
+| Temperature              | `setTemp`              | range (0–2)   | `config.server.evaluation.temperature`      | `0.7`                                   | Sampling temperature for the LLM.                                 |
+| Max tokens               | `setMaxTokens`         | range         | `config.server.evaluation.max_tokens`       | `128`                                   | Maximum tokens in the LLM response.                               |
+| Timeout                  | `setTimeout`           | range         | `config.server.evaluation.timeout`          | `120`                                   | Request timeout in seconds.                                       |
+| Truth weight             | `setTruthWeight`       | range (0–1)   | `config.server.truthset.truth_weight`       | `0.7`                                   | How much DoT gates the learning rate. See below.                  |
+| Max truth entries        | `setTruthMaxEntries`   | number        | `config.server.training.truth_max_entries`  | `1000`                                  | Maximum entries in the server TruthSet before trimming.           |
+| Store particular facts   | `setStoreParticulars`  | checkbox      | `config.server.truthset.store_concrete`     | `false`                                 | Store spatiotemporally-bound facts in the server TruthSet.        |
+| Allow URL fetching       | `setUrlFetch`          | checkbox      | `config.server.evaluation.url_fetch`        | `false`                                 | Allow the assistant to fetch URL content.                         |
+| Confirm deletes / merges | `setConfirm`           | checkbox      | `state.ui.confirm_actions`                  | `false`                                 | Require confirmation before destructive operations.               |
+
+### Settings Persistence
+
+| Setting family | Authority | Stateful mode | Stateless mode |
+| -------------- | --------- | ------------- | -------------- |
+| `config.server.truthset`, `config.server.evaluation`, `config.server.training`, `config.providers.*` | server/config | Saved through `POST /config` into `config.xml` | Saved in browser storage via `wikioracle_config` |
+| `config.server.providers` | runtime metadata | Refreshed from `/config`; not written back to `config.xml` | Saved in browser storage as part of the normalized config bundle |
+| `state.client_name`, `state.ui.*` | client/state | Persisted in the state payload / exported XML | Saved in browser storage via `wikioracle_state` |
 
 ### Truth Weight Slider
 
@@ -277,4 +287,3 @@ strings hard-coded in `client/util.js` match the tables below.
 | Key           | Text                                                         |
 | ------------- | ------------------------------------------------------------ |
 | `truth_empty` | `No truth entries. Add truth here or Open a new state file.` |
-

@@ -5,8 +5,8 @@ Revision: 2026.02.27
 
 The system is governed by two file types:
 
-* **State files** (`.xml`): contains header information, conversations, and trust entries (validated by `data/state.xsd`).
-* **Config files** (`.xml`): contains provider credentials, chat and UI settings, and retrieval parameters (validated by `data/config.xsd`).
+* **State files** (`.xml`): contain client identity, UI preferences, conversations, and truth entries (validated by `data/state.xsd`).
+* **Config files** (`.xml`): contain provider defaults and credentials, server policy, and runtime defaults (validated by `data/config.xsd`).
 
 ## Client
 
@@ -14,23 +14,28 @@ The state of WikiOracle is maintained by the client.
 It has the following information:
 
 * **Client**: has information about the user and the file itself
-  * **Client Name**: client name
+  * **Client Name**: display name shown for user-role messages
   * **Client ID**: stable client identifier
   * **UI**: browser-side default interface settings
-    * **Layout**: horizontal, vertical, or flat layout
+    * **Layout**: horizontal or vertical layout, with legacy `flat` still supported
     * **Theme**: system, light, or dark
-* **Conversation**: consists of queries, responses, and sub-conversations
+    * **Model**: currently selected model override
+    * **Confirm Actions**: whether deletes and merges require confirmation
+    * **Splitter**: saved tree/chat panel split position
+* **Conversation**: consists of queries, responses, and sub-conversations arranged as a tree
   * **Query**: text from the user
-  * **Response**: text from the (main) provider or LLM
+  * **Response**: text from the selected main provider
+  * **Selection**: the currently selected conversation path
+  * **Branching**: child conversations can diverge from any earlier point
 * **TruthSet**: a set of beliefs, each of which has a Degree of Truth
   * **Direct Truth**: things that we know directly
-    * **Feeling**: statements which are beyond true or not true, like poetry
+    * **Feeling**: statements which are beyond true or not true, like poetry or opinion
     * **Fact**: concrete and abstract propositions about the world and language itself
-    * **Operator**: a set of logical operators (And, Or, Not, and Non)
+    * **Operator**: logical operators such as And, Or, Not, and Non
   * **Indirect Truth**: things that we know only indirectly
-    * **Reference**: a reference is basically a URL
-    * **Provider**: a provider is another oracle that can provide truth or even participate in the conversation.
-    * **Authority**: an authority is a reference to another set of conversations and truths
+    * **Reference**: a URL or citation that grounds a claim
+    * **Provider**: another oracle that can provide truth and optionally participate in the conversation
+    * **Authority**: a reference to another set of conversations and truths
 
 ## Server
 
@@ -39,25 +44,40 @@ The server executes the client state, based on a configuration file and a corpus
 The configuration file on the server has information such as the following:
 
 * **Server**: runtime and training parameters
-  * **Server Name**: server name
+  * **Server Name**: human-readable server name
   * **Server ID**: stable server identifier
+  * **Stateless**: whether the server is allowed to write to disk
+  * **URL Prefix**: optional route prefix for reverse-proxy deployments
   * **TruthSet**: parameters governing the server's TruthSet
     * **Truth Symmetry**: asymmetric-harm checking under identity exchange
     * **Store Concrete**: whether spatiotemporally-bound facts persist
     * **Truth Weight**: how much the TruthSet affects RAG and training
-  * **Evaluation**: 
+  * **Evaluation**:
     * **Temperature**: sampling temperature
     * **Max Tokens**: maximum response length
+    * **Timeout**: request timeout for provider calls
+    * **URL Fetch**: whether URL fetching is allowed during evaluation
   * **Training**: continuous learning subsystem
     * **Enabled**: master switch for post-response learning
     * **Truth Corpus Path**: path to the server TruthSet
     * **Truth Max Entries**: max server truth entries before trimming
+    * **Learning Rates**: `alpha_base`, `alpha_min`, `alpha_max`
+    * **Merge Rate**: moving-average merge speed for truth updates
+    * **Device**: `cpu`, `cuda`, or `auto`
+    * **Dissonance**: contradiction detection and penalty
+    * **Warmup / Clipping / Anchoring**: `warmup_steps`, `grad_clip`, `anchor_decay`
   * **Allowed URLs**: whitelist for authority and provider fetches
 * **Providers**: one or more upstream LLM provider definitions
+  * **Default Provider**: provider selected on startup when the request does not override it
+  * **Shared Prompt Fields**: `context`, `output`, `truth_context`, and `conversation_context`
   * **Provider**: a single provider entry keyed by name
+    * **Display Name**: label shown in assistant messages
     * **Username**: account login or email
+    * **URL**: API endpoint
     * **API Key**: authentication credential
-  * **Default Provider**: provider selected on startup
+    * **Default Model**: model used when none is selected explicitly
+    * **Timeout / Streaming**: per-provider request behavior
+  * **Built-in Providers**: WikiOracle, OpenAI, Anthropic, Gemini, Grok, and OpenRouter
 
 ## Conversation 
 

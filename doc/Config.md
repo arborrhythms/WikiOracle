@@ -68,12 +68,16 @@ Defaults for LLM inference. These were formerly in the top-level `chat` section.
 
 | Field         | Type            | Default | Description                                                                                    |
 | ------------- | --------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `temperature` | decimal 0.0–2.0 | `0.7`   | Sampling temperature. 0.0 is deterministic; 2.0 is maximum randomness.                         |
+| `temperature` | decimal 0.0–2.0 | `0.7`   | Sampling temperature. 0.0 is deterministic; 2.0 is maximum randomness.                        |
+| `max_tokens`  | positive int    | `128`   | Maximum tokens requested from the provider for a single response.                              |
+| `timeout`     | positive int    | `120`   | Request timeout in seconds for provider evaluation.                                            |
 | `url_fetch`   | boolean         | `false` | Allow the assistant to fetch and incorporate content from URLs referenced in the conversation. |
 
 ```xml
 <evaluation>
   <temperature>0.7</temperature>
+  <max_tokens>128</max_tokens>
+  <timeout>120</timeout>
   <url_fetch>false</url_fetch>
 </evaluation>
 ```
@@ -145,7 +149,7 @@ URL prefixes permitted for outbound HTTP(S) requests made by the server during a
 </allowed_urls>
 ```
 
-See [Security.md](./Security.md) §6 and [Authority.md](./Authority.md) for the security rationale.
+See [PrivacyAndSecurity.md](./PrivacyAndSecurity.md) for the security rationale.
 
 ## Providers
 
@@ -166,20 +170,21 @@ Each `<provider name="key">` block supports:
 | `display_name`  | string       | —          | Human-readable label tagging assistant messages (e.g. `chatGPT`, `claude`, `gemini`).                                                                 |
 | `username`      | string       | —          | API login / email associated with the provider account.                                                                                               |
 | `url`           | URI          | (built-in) | API endpoint URL. Built-in defaults exist for known providers.                                                                                        |
-| `api_key`       | string       | —          | API key. Prefer environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`) — see [Security.md](./Security.md) §2. |
+| `api_key`       | string       | —          | API key. Prefer environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`) — see [PrivacyAndSecurity.md](./PrivacyAndSecurity.md). |
 | `default_model` | string       | —          | Model identifier used when no model is explicitly selected (e.g. `gpt-4o`, `claude-sonnet-4-6`).                                                      |
 | `timeout`       | positive int | `120`      | Request timeout in seconds.                                                                                                                           |
 | `streaming`     | boolean      | `false`    | Use Server-Sent Events (SSE) for streamed responses.                                                                                                  |
 
 ### Built-in providers
 
-| Key          | Display name | Default model     | Env var for API key     |
-| ------------ | ------------ | ----------------- | ----------------------- |
-| `wikioracle` | oracle       | nanochat          | (local — no key needed) |
-| `openai`     | chatGPT      | gpt-4o            | `OPENAI_API_KEY`        |
-| `anthropic`  | claude       | claude-sonnet-4-6 | `ANTHROPIC_API_KEY`     |
-| `gemini`     | gemini       | gemini-2.5-flash  | `GEMINI_API_KEY`        |
-| `grok`       | grok         | grok-3-mini       | `XAI_API_KEY`           |
+| Key          | Built-in name | Built-in default model                    | API key env var         | Model env var         |
+| ------------ | ------------- | ----------------------------------------- | ----------------------- | --------------------- |
+| `wikioracle` | `WikiOracle`  | (none; template commonly sets `nanochat`) | —                       | —                     |
+| `openai`     | `OpenAI`      | `gpt-4o`                                  | `OPENAI_API_KEY`        | `OPENAI_MODEL`        |
+| `anthropic`  | `Anthropic`   | `claude-sonnet-4-6`                       | `ANTHROPIC_API_KEY`     | `ANTHROPIC_MODEL`     |
+| `gemini`     | `Gemini`      | `gemini-2.5-flash`                        | `GEMINI_API_KEY`        | `GEMINI_MODEL`        |
+| `grok`       | `Grok`        | `grok-3-mini`                             | `XAI_API_KEY`           | `XAI_MODEL`           |
+| `openrouter` | `OpenRouter`  | `google/gemma-3-4b-it:free`               | `OPENROUTER_API_KEY`    | `OPENROUTER_MODEL`    |
 
 Custom providers can be added by appending `<provider name="my_key">` blocks. Any `name` not in the built-in list creates a new provider entry.
 
@@ -207,7 +212,18 @@ Custom providers can be added by appending `<provider name="my_key">` blocks. An
 2. **`config.xml`** `api_key` field — convenient for local dev, but the config is served to the client via `/bootstrap` and `/config`.
 3. **Truth entry** `<provider><api_key>$ENV_VAR</api_key></provider>` — the `$` prefix triggers server-side env-var resolution; the literal key is never stored in state.
 
-The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) — never the key itself. See [Security.md](./Security.md) §2 for details.
+The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) — never the key itself. See [PrivacyAndSecurity.md](./PrivacyAndSecurity.md) for details.
+
+### Runtime precedence
+
+The effective runtime value for a provider setting may come from the request, `config.xml`, or environment variables.
+
+| Setting | Resolution order | Notes |
+| ------- | ---------------- | ----- |
+| Main provider | `POST /chat` `config.provider` → `providers.default` → built-in `wikioracle` | The server now honors `providers.default` when the request omits `config.provider`. |
+| Model | `POST /chat` `config.model` → provider-specific `*_MODEL` env var → `providers.<name>.default_model` → built-in default (when defined) | The browser usually sources `config.model` from `state.ui.model`. |
+| API key | provider-specific `*_API_KEY` env var → `providers.<name>.api_key` → missing | Dynamic truth-entry providers can additionally use `$ENV_VAR` indirection. |
+| Local WikiOracle upstream URL | `providers.wikioracle.url` → `WIKIORACLE_BASE_URL` + `WIKIORACLE_API_PATH` | `/nanochat_status` probes this resolved WikiOracle upstream. |
 
 ## Environment variables
 
@@ -237,6 +253,19 @@ Runtime configuration can also be set via environment variables. These override 
 | `ANTHROPIC_API_KEY`               | —                            | Anthropic API key.                                        |
 | `GEMINI_API_KEY`                  | —                            | Google Gemini API key.                                    |
 | `XAI_API_KEY`                     | —                            | xAI (Grok) API key.                                       |
+| `OPENROUTER_API_KEY`             | —                            | OpenRouter API key.                                       |
+
+### Provider-specific environment overrides
+
+These environment variables override provider-level defaults without editing `config.xml`.
+
+| Variable              | Provider      | Purpose                                 | Built-in fallback                |
+| --------------------- | ------------- | --------------------------------------- | -------------------------------- |
+| `OPENAI_MODEL`        | `openai`      | Override `providers.openai.default_model` | `gpt-4o`                         |
+| `ANTHROPIC_MODEL`     | `anthropic`   | Override `providers.anthropic.default_model` | `claude-sonnet-4-6`          |
+| `GEMINI_MODEL`        | `gemini`      | Override `providers.gemini.default_model` | `gemini-2.5-flash`             |
+| `XAI_MODEL`           | `grok`        | Override `providers.grok.default_model` | `grok-3-mini`                   |
+| `OPENROUTER_MODEL`    | `openrouter`  | Override `providers.openrouter.default_model` | `google/gemma-3-4b-it:free` |
 
 ## OpenClaw Plugin Config
 

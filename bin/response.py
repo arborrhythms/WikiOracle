@@ -28,6 +28,7 @@ from config import (
     Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config, _PROVIDER_MODELS,
     DEFAULT_TRUTH_CONTEXT, DEFAULT_CONVERSATION_CONTEXT, DEFAULT_OUTPUT,
 )
+from graph import apply_selection_flags
 from sensation import preprocess_training_example
 from truth import (
     _fetch_authority,
@@ -718,6 +719,30 @@ def to_openai_messages(bundle: ProviderBundle) -> List[Dict[str, str]]:
     return messages
 
 
+def to_openrouter_messages(bundle: ProviderBundle) -> List[Dict[str, str]]:
+    """Convert a ProviderBundle to OpenRouter chat/completions messages.
+
+    OpenRouter is OpenAI-compatible at the transport layer, but some routed
+    models reject ``system`` / developer-style instructions. Build the normal
+    OpenAI messages first, then fold the system content into the first user
+    turn so the request stays model-compatible without losing context.
+    """
+    messages = to_openai_messages(bundle)
+    if not messages or messages[0]["role"] != "system":
+        return messages
+
+    system_content = messages[0]["content"]
+    flattened = [dict(msg) for msg in messages[1:]]
+
+    for msg in flattened:
+        if msg["role"] == "user":
+            msg["content"] = f"{system_content}\n\n{msg['content']}"
+            return flattened
+
+    flattened.insert(0, {"role": "user", "content": system_content})
+    return flattened
+
+
 def to_anthropic_payload(
     bundle: ProviderBundle,
     model: str = "claude-sonnet-4-6",
@@ -877,11 +902,14 @@ def _build_bundle(
 
 def _bundle_to_messages(bundle: ProviderBundle, provider: str) -> List[Dict[str, str]]:
     """Convert a ProviderBundle to provider-appropriate messages list."""
-    if provider == "wikioracle":
+    prov_type = PROVIDERS.get(provider, {}).get("type", provider)
+    if prov_type == "wikioracle":
         return to_nanochat_messages(bundle)
-    elif provider == "openai":
+    elif prov_type == "openai":
         return to_openai_messages(bundle)
-    elif provider == "anthropic":
+    elif prov_type == "openrouter":
+        return to_openrouter_messages(bundle)
+    elif prov_type == "anthropic":
         # For Anthropic we return OpenAI-format messages; the caller
         # uses to_anthropic_payload() directly for the full payload.
         return to_openai_messages(bundle)
@@ -953,16 +981,16 @@ def _trim_nanochat_messages(
 def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
                    max_tokens: int = 128, timeout: int = 120) -> str:
     """Call NanoChat /chat/completions (SSE streaming, buffered)."""
-    seq_len = PROVIDERS.get("wikioracle", {}).get("sequence_len", 2048)
+    seq_len = PROVIDERS.get("WikiOracle", {}).get("sequence_len", 2048)
     messages = _trim_nanochat_messages(messages, max_tokens, seq_len)
-    url = PROVIDERS.get("wikioracle", {}).get("url") or (cfg.base_url + cfg.api_path)
+    url = PROVIDERS.get("WikiOracle", {}).get("url") or (cfg.base_url + cfg.api_path)
     if DEBUG_MODE:
         print(f"[DEBUG] NanoChat → {url}")
         print(f"[DEBUG] NanoChat messages ({len(messages)}):")
         for i, m in enumerate(messages):
             print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
     payload = {"messages": messages, "temperature": temperature, "max_tokens": max_tokens}
-    provider_timeout = max(PROVIDERS.get("wikioracle", {}).get("timeout") or timeout, 15)
+    provider_timeout = max(PROVIDERS.get("WikiOracle", {}).get("timeout") or timeout, 15)
     resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
                          timeout=provider_timeout, stream=True)
     if resp.status_code >= 400:
@@ -999,9 +1027,9 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
 def _call_basicmodel(cfg: Config, messages: List[Dict], temperature: float,
                      max_tokens: int = 128, timeout: int = 120) -> str:
     """Call BasicModel /chat/completions endpoint."""
-    url = PROVIDERS.get("wikioracle", {}).get("basicmodel_url", "http://127.0.0.1:8001/chat/completions")
+    url = PROVIDERS.get("WikiOracle", {}).get("basicmodel_url", "http://127.0.0.1:8001/chat/completions")
     payload = {"messages": messages, "temperature": temperature, "max_tokens": max_tokens}
-    provider_timeout = max(PROVIDERS.get("wikioracle", {}).get("basicmodel_timeout") or timeout, 15)
+    provider_timeout = max(PROVIDERS.get("WikiOracle", {}).get("basicmodel_timeout") or timeout, 15)
     try:
         resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
                              timeout=provider_timeout)
@@ -1019,7 +1047,7 @@ def _call_openai(messages: List[Dict], temperature: float, provider_cfg: Dict) -
     """Call an OpenAI-compatible chat/completions endpoint and return text."""
     url = provider_cfg.get("url", "https://api.openai.com/v1/chat/completions")
     payload = {
-        "model": provider_cfg.get("default_model", "gpt-4o"),
+        "model": provider_cfg.get("model", "gpt-4o"),
         "messages": messages, "temperature": temperature, "max_tokens": 2048,
     }
     if DEBUG_MODE:
@@ -1081,14 +1109,14 @@ def _call_anthropic(bundle: ProviderBundle | None, temperature: float, provider_
     if bundle is not None:
         payload = to_anthropic_payload(
             bundle,
-            model=provider_cfg.get("default_model", "claude-sonnet-4-6"),
+            model=provider_cfg.get("model", "claude-sonnet-4-6"),
             max_tokens=2048,
             temperature=temperature,
         )
     else:
         payload = _build_anthropic_payload_from_messages(
             messages or [],
-            model=provider_cfg.get("default_model", "claude-sonnet-4-6"),
+            model=provider_cfg.get("model", "claude-sonnet-4-6"),
             max_tokens=2048,
             temperature=temperature,
         )
@@ -1190,7 +1218,7 @@ def to_gemini_payload(
 def _call_gemini(bundle: ProviderBundle | None, temperature: float,
                  provider_cfg: Dict, messages: List[Dict] | None = None) -> str:
     """Call Google Gemini API with optional Google Search grounding."""
-    model = provider_cfg.get("default_model", "gemini-2.5-flash")
+    model = provider_cfg.get("model", "gemini-2.5-flash")
     base_url = provider_cfg.get("url", "https://generativelanguage.googleapis.com/v1beta/models")
     api_key = provider_cfg.get("api_key", "")
     url = f"{base_url}/{model}:generateContent"
@@ -1260,7 +1288,17 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
     """Call a provider using a ProviderBundle (preferred) or legacy messages."""
     import config as config_mod
 
-    if provider == "wikioracle":
+    pcfg = PROVIDERS.get(provider)
+    if not pcfg:
+        return f"[Unknown provider: {provider}. Available: {', '.join(PROVIDERS.keys())}]"
+    prov_type = pcfg.get("type", "")
+    # WikiOracle requires an API key. "StrongDemocracy" is a public
+    # passphrase that grants access without a personal key.
+    _PUBLIC_PASSPHRASE = "StrongDemocracy"
+    effective_key = client_api_key or pcfg.get("api_key", "")
+    if prov_type == "wikioracle" and not effective_key:
+        return f"[No API key for {provider}. Enter your key in settings.]"
+    if prov_type == "wikioracle":
         local_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
         cs = chat_settings or {}
         # Route to the appropriate model: BasicModel or NanoChat (default)
@@ -1276,13 +1314,10 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
             return _call_nanochat(cfg, local_msgs, temperature,
                                   max_tokens=int(cs.get("max_tokens", 128)),
                                   timeout=int(cs.get("timeout", 120)))
-    pcfg = PROVIDERS.get(provider)
-    if not pcfg:
-        return f"[Unknown provider: {provider}. Available: {', '.join(PROVIDERS.keys())}]"
     # Build effective config: merge client + server keys
     effective_cfg = dict(pcfg)
     if client_model:
-        effective_cfg["default_model"] = client_model
+        effective_cfg["model"] = client_model
     # Key precedence:
     #   Stateless mode: client key → server key (client owns state)
     #   Server mode:    server key → hot-reload → client key (server owns state)
@@ -1305,32 +1340,34 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
                     PROVIDERS[provider]["api_key"] = fresh_key
         if not effective_cfg.get("api_key"):
             return f"[No API key for {provider}. Add it to config.xml.]"
-    if provider == "openai":
+    if prov_type == "openai":
         if DEBUG_MODE:
-            print(f"[DEBUG] → _call_openai ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
+            print(f"[DEBUG] → _call_openai ({effective_cfg.get('url', '?')}, model={effective_cfg.get('model')})")
         oai_msgs = to_openai_messages(bundle) if bundle else (messages or [])
         return _call_openai(oai_msgs, temperature, effective_cfg)
-    if provider == "anthropic":
+    if prov_type == "anthropic":
         if DEBUG_MODE:
-            print(f"[DEBUG] → _call_anthropic ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
+            print(f"[DEBUG] → _call_anthropic ({effective_cfg.get('url', '?')}, model={effective_cfg.get('model')})")
         return _call_anthropic(bundle, temperature, effective_cfg, messages=messages)
-    if provider == "gemini":
+    if prov_type == "gemini":
         if DEBUG_MODE:
-            print(f"[DEBUG] → _call_gemini (model={effective_cfg.get('default_model')})")
+            print(f"[DEBUG] → _call_gemini (model={effective_cfg.get('model')})")
         return _call_gemini(bundle, temperature, effective_cfg, messages=messages)
-    if provider == "grok":
+    if prov_type == "grok":
         # Grok (xAI) is OpenAI-compatible — reuse the OpenAI adapter
         if DEBUG_MODE:
-            print(f"[DEBUG] → _call_openai/grok ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
+            print(f"[DEBUG] → _call_openai/grok ({effective_cfg.get('url', '?')}, model={effective_cfg.get('model')})")
         oai_msgs = to_openai_messages(bundle) if bundle else (messages or [])
         return _call_openai(oai_msgs, temperature, effective_cfg)
-    if provider == "openrouter":
-        # OpenRouter is OpenAI-compatible — reuse the OpenAI adapter
+    if prov_type == "openrouter":
+        # OpenRouter is OpenAI-compatible, but some models reject system-role
+        # instructions. Use the OpenRouter formatter to fold system text into
+        # the first user turn.
         if DEBUG_MODE:
-            print(f"[DEBUG] → _call_openai/openrouter ({effective_cfg.get('url', '?')}, model={effective_cfg.get('default_model')})")
-        oai_msgs = to_openai_messages(bundle) if bundle else (messages or [])
+            print(f"[DEBUG] → _call_openai/openrouter ({effective_cfg.get('url', '?')}, model={effective_cfg.get('model')})")
+        oai_msgs = to_openrouter_messages(bundle) if bundle else (messages or [])
         return _call_openai(oai_msgs, temperature, effective_cfg)
-    return f"[Provider '{provider}' not implemented]"
+    return f"[Provider '{provider}' (type={prov_type}) not implemented]"
 
 
 # ---------------------------------------------------------------------------
@@ -1690,7 +1727,10 @@ def process_chat(
 
     server_eval = runtime_cfg.get("server", {}).get("evaluation", {})
     server_ts = runtime_cfg.get("server", {}).get("truthset", {})
-    provider = query_config.get("provider", "wikioracle")
+    provider = (
+        (query_config.get("provider") or runtime_cfg.get("providers", {}).get("default"))
+        .strip()
+    )
     client_model = (query_config.get("model") or "").strip()
     print(f"[WikiOracle] Chat request: provider='{provider}' (from client config), "
           f"truth_weight={query_config.get('truthset', {}).get('truth_weight', '?')}")
@@ -1747,7 +1787,7 @@ def process_chat(
 
     providers_cfg = runtime_cfg.get("providers", {})
     context_text = strip_xhtml(providers_cfg.get("context", ""))
-    print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('default_model', '?')}', "
+    print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('model', '?')}', "
           f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
           f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
     truth_count = len(state.get("truth") or [])
@@ -1807,8 +1847,8 @@ def process_chat(
                                     chat_settings=query_config.get("evaluation"))
     if config_mod.DEBUG_MODE:
         print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
-    llm_provider_name = PROVIDERS.get(provider, {}).get("name", provider)
-    llm_model = query_config.get("model", PROVIDERS.get(provider, {}).get("default_model", provider))
+    llm_provider_name = provider
+    llm_model = query_config.get("model", PROVIDERS.get(provider, {}).get("model", provider))
 
     # ── Extract facts/feelings from the main provider response ──
     # The main provider's response may contain <fact>, <feeling>, and
@@ -2002,6 +2042,14 @@ def process_chat(
                 state["selected_conversation"] = new_conv["id"]
 
     state["conversations"] = conversations
+    # Reset stale selection metadata from the previously active branch before
+    # strict state normalization runs on save.
+    state["selected_message"] = None
+    apply_selection_flags(
+        state["conversations"],
+        state.get("selected_conversation"),
+        state.get("selected_message"),
+    )
 
     # ── Merge main provider-extracted truths into client truth table ──
     # Facts and feelings extracted from the main provider response are
@@ -2122,7 +2170,7 @@ def process_chat(
             # This prevents training on unstructured text from providers that
             # didn't produce truth claims we can verify against the truth table.
             _has_main_facts = any(t.kind == "fact" for t in main_truths)
-            _is_local = provider == "wikioracle"
+            _is_local = PROVIDERS.get(provider, {}).get("type") == "wikioracle"
             if not _is_local and not _has_main_facts:
                 print(f"[WikiOracle] Online training: skipped — external provider "
                       f"'{provider}' produced no structured facts")

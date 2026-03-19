@@ -53,8 +53,6 @@ import config as config_mod
 from config import (
     Config,
     PROVIDERS,
-    _CONFIG,
-    _CONFIG_STATUS,
     _build_providers,
     _normalize_config,
     _env_bool,
@@ -195,9 +193,14 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     def nanochat_status():
         """Probe the upstream NanoChat server and return its status."""
         import requests as _req
-        url = cfg.base_url.rstrip("/")
+        chat_url = PROVIDERS.get("WikiOracle", {}).get("url") or (cfg.base_url + cfg.api_path)
+        api_suffix = cfg.api_path or "/chat/completions"
+        if isinstance(chat_url, str) and chat_url.endswith(api_suffix):
+            url = chat_url[:-len(api_suffix)].rstrip("/")
+        else:
+            url = str(chat_url).rstrip("/")
         try:
-            health_timeout = PROVIDERS.get("wikioracle", {}).get("timeout") or 15
+            health_timeout = PROVIDERS.get("WikiOracle", {}).get("timeout") or 15
             resp = _req.get(url + "/health", timeout=health_timeout, verify=False)
             if resp.ok:
                 return jsonify({"ok": True, "url": url, "status": "online"})
@@ -210,7 +213,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     @app.route(url_prefix + "/server_info", methods=["GET"])
     def server_info():
         """Expose server-mode flags that do not require state access."""
-        tr = _CONFIG.get("server", {}).get("training", {})
+        tr = config_mod._CONFIG.get("server", {}).get("training", {})
         return jsonify({
             "stateless": config_mod.STATELESS_MODE,
             "url_prefix": url_prefix,
@@ -403,13 +406,13 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             # the server's truth entries so the client can display them.
             # Entries are returned so the client can display them.
             if config_mod.DEBUG_MODE:
-                ot = _CONFIG.get("server", {}).get("training", {})
+                ot = config_mod._CONFIG.get("server", {}).get("training", {})
                 if ot.get("enabled", False) and not config_mod.STATELESS_MODE:
                     try:
                         from truth import load_server_truth
                         _st_path = Path(ot.get("truth_corpus_path", "data/truth.xml"))
                         _st_entries = load_server_truth(_st_path)
-                        _server_id = _CONFIG.get("server", {}).get("server_id", "wikioracle")
+                        _server_id = config_mod._CONFIG.get("server", {}).get("server_id", "wikioracle")
                         server_truth = []
                         for entry in _st_entries:
                             server_truth.append({
@@ -616,22 +619,23 @@ def main() -> int:
     if url_prefix:
         print(f"  URL prefix : {url_prefix}")
     prov_info = []
-    for k, p in PROVIDERS.items():
-        model = p.get("default_model", "")
+    for name, p in PROVIDERS.items():
+        model = p.get("model", "")
         url = p.get("url", "")
-        status = "ok" if bool(p.get("api_key")) or k == "wikioracle" else "no key"
+        prov_type = p.get("type", "")
+        status = "ok" if bool(p.get("api_key")) or prov_type == "wikioracle" else "no key"
         parts = [status]
         if model:
             parts.append(model)
         if url:
             parts.append(url)
-        prov_info.append(f"{k}({', '.join(parts)})")
+        prov_info.append(f"{name}({', '.join(parts)})")
     print(f"  Providers  :")
     for pi in prov_info:
         print(f"    {pi}")
-    print(f"  Config     : {_CONFIG_STATUS}")
+    print(f"  Config     : {config_mod._CONFIG_STATUS}")
     print(f"  Stateless  : {'ON' if config_mod.STATELESS_MODE else 'off'}")
-    ot_cfg = _CONFIG.get("server", {}).get("training", {})
+    ot_cfg = config_mod._CONFIG.get("server", {}).get("training", {})
     ot_on = ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE
     ot_device = ot_cfg.get("device", "cpu")
     if ot_on:

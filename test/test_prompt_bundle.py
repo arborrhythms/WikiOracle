@@ -19,6 +19,7 @@ from response import (
     to_anthropic_payload,
     to_nanochat_messages,
     to_openai_messages,
+    to_openrouter_messages,
 )
 
 
@@ -311,6 +312,45 @@ class TestToOpenAIMessages(unittest.TestCase):
         msgs = to_openai_messages(bundle)
         system = msgs[0]
         self.assertIn("Format: answer + evidence", system["content"])
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter adapter
+# ---------------------------------------------------------------------------
+class TestToOpenRouterMessages(unittest.TestCase):
+    """Test to_openrouter_messages() output."""
+
+    def test_system_folded_into_first_user_message(self):
+        bundle = ProviderBundle(system="You are helpful.", query="Hi")
+        msgs = to_openrouter_messages(bundle)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["role"], "user")
+        self.assertIn("You are helpful.", msgs[0]["content"])
+        self.assertIn("Hi", msgs[0]["content"])
+
+    def test_no_system_role_messages(self):
+        bundle = ProviderBundle(system="Project rules", query="What now?", output="Answer yes or no only.")
+        msgs = to_openrouter_messages(bundle)
+        self.assertTrue(msgs)
+        self.assertTrue(all(m["role"] != "system" for m in msgs))
+        self.assertIn("Project rules", msgs[0]["content"])
+        self.assertIn("Answer yes or no only.", msgs[0]["content"])
+
+    def test_history_preserved(self):
+        bundle = ProviderBundle(
+            system="Project rules",
+            history=[
+                {"role": "user", "content": "First"},
+                {"role": "assistant", "content": "Reply"},
+            ],
+            query="latest?",
+            output="",
+        )
+        msgs = to_openrouter_messages(bundle)
+        self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])
+        self.assertIn("Project rules", msgs[0]["content"])
+        self.assertIn("First", msgs[0]["content"])
+        self.assertEqual(msgs[-1]["content"], "latest?")
 
 
 # ---------------------------------------------------------------------------

@@ -992,16 +992,8 @@ class TestDiamondConversationTree(unittest.TestCase):
         cfg = Config(state_file=Path("/tmp/test.xml"))
         body = {"message": "Should we raise taxes?"}
         runtime_cfg = {
-            "providers": {
-                "gemini": {
-                    "name": "gemini",
-                    "url": "http://test/alpha",
-                    "api_key": "k",
-                    "default_model": "test",
-                },
-            },
             "server": {"evaluation": {}, "truthset": {"truth_weight": 0.7}},
-            "providers": {"default": "gemini"},
+            "providers": {"default": "Gemini"},
         }
 
         call_count = {"n": 0}
@@ -1025,11 +1017,11 @@ class TestDiamondConversationTree(unittest.TestCase):
 
         with mock.patch("response.requests.post", side_effect=mock_provider_call), \
              mock.patch("response.PROVIDERS", {
-                "gemini": {
-                    "name": "gemini",
+                "Gemini": {
+                    "type": "gemini",
                     "api_key": "k",
                     "url": "http://test/alpha",
-                    "default_model": "test",
+                    "model": "test",
                 },
              }), \
              mock.patch("config.STATELESS_MODE", True), \
@@ -1116,16 +1108,8 @@ class TestDiamondConversationTree(unittest.TestCase):
         cfg = Config(state_file=Path("/tmp/test.xml"))
         body = {"message": "Hello"}
         runtime_cfg = {
-            "providers": {
-                "gemini": {
-                    "name": "gemini",
-                    "url": "http://test/alpha",
-                    "api_key": "k",
-                    "default_model": "test",
-                },
-            },
             "server": {"evaluation": {}, "truthset": {"truth_weight": 0.7}},
-            "providers": {"default": "gemini"},
+            "providers": {"default": "Gemini"},
         }
 
         def mock_call(url, **kwargs):
@@ -1144,11 +1128,11 @@ class TestDiamondConversationTree(unittest.TestCase):
 
         with mock.patch("response.requests.post", side_effect=mock_call), \
              mock.patch("response.PROVIDERS", {
-                "gemini": {
-                    "name": "gemini",
+                "Gemini": {
+                    "type": "gemini",
                     "api_key": "k",
                     "url": "http://test/alpha",
-                    "default_model": "test",
+                    "model": "test",
                 },
              }), \
              mock.patch("config.STATELESS_MODE", True), \
@@ -1183,16 +1167,8 @@ class TestDiamondConversationTree(unittest.TestCase):
         cfg = Config(state_file=Path("/tmp/test.xml"))
         body = {"message": "Hello"}
         runtime_cfg = {
-            "providers": {
-                "gemini": {
-                    "name": "gemini",
-                    "url": "http://test/alpha",
-                    "api_key": "k",
-                    "default_model": "test",
-                },
-            },
             "server": {"evaluation": {}, "truthset": {"truth_weight": 0.7}},
-            "providers": {"default": "gemini"},
+            "providers": {"default": "Gemini"},
         }
 
         def mock_call(url, **kwargs):
@@ -1212,11 +1188,11 @@ class TestDiamondConversationTree(unittest.TestCase):
 
         with mock.patch("response.requests.post", side_effect=mock_call), \
              mock.patch("response.PROVIDERS", {
-                "gemini": {
-                    "name": "gemini",
+                "Gemini": {
+                    "type": "gemini",
                     "api_key": "k",
                     "url": "http://test/alpha",
-                    "default_model": "test",
+                    "model": "test",
                 },
              }), \
              mock.patch("config.STATELESS_MODE", True), \

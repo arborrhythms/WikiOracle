@@ -19,7 +19,7 @@ let config = {
             truthset: { truth_symmetry: true, store_concrete: false, truth_weight: 0.7 },
             evaluation: { temperature: 0.7, max_tokens: 128, timeout: 120, url_fetch: false },
             training: { enabled: false } },
-  providers: { default: "wikioracle" },
+  providers: { default: "WikiOracle" },
 };
 
 // ─── Storage persistence (sessionStorage + localStorage mirror) ───
@@ -75,7 +75,7 @@ function _normalizeConfig(cfg) {
   if (cfg.server.evaluation.url_fetch === undefined) cfg.server.evaluation.url_fetch = false;
   // --- providers ---
   if (!cfg.providers) cfg.providers = {};
-  if (!cfg.providers.default) cfg.providers.default = "wikioracle";
+  if (!cfg.providers.default) cfg.providers.default = "WikiOracle";
   return cfg;
 }
 
@@ -143,7 +143,7 @@ function configToXml(obj) {
     lines.push("  </server>");
   }
 
-  // providers — section-level elements + <provider name="key">
+  // providers — section-level elements + <provider> with child elements
   var provs = obj.providers;
   if (provs && typeof provs === "object") {
     lines.push("  <providers>");
@@ -154,17 +154,18 @@ function configToXml(obj) {
         lines.push("    <" + sk + ">" + _xmlEsc(_xmlValStr(provs[sk])) + "</" + sk + ">");
       }
     });
-    // Per-provider entries
+    // Per-provider entries — no attributes, all child elements
     for (var pk in provs) {
       if (!provs.hasOwnProperty(pk)) continue;
       if (sectionKeys.indexOf(pk) !== -1) continue;
       var prov = provs[pk];
       if (!prov || typeof prov !== "object") continue;
-      lines.push('    <provider name="' + _xmlEsc(pk) + '">');
+      lines.push("    <provider>");
+      // Write <name> first (the dict key is the name)
+      lines.push("      <name>" + _xmlEsc(pk) + "</name>");
       for (var fk in prov) {
-        if (!prov.hasOwnProperty(fk)) continue;
-        var xmlTag = fk === "name" ? "display_name" : fk;
-        lines.push("      <" + xmlTag + ">" + _xmlEsc(_xmlValStr(prov[fk])) + "</" + xmlTag + ">");
+        if (!prov.hasOwnProperty(fk) || fk === "name") continue;
+        lines.push("      <" + fk + ">" + _xmlEsc(_xmlValStr(prov[fk])) + "</" + fk + ">");
       }
       lines.push("    </provider>");
     }
@@ -226,17 +227,25 @@ function xmlToConfig(text) {
         var el = provsEl.querySelector(":scope > " + sk);
         if (el) data.providers[sk] = (sk === "default") ? el.textContent.trim() : el.textContent.trim();
       });
-      // Per-provider entries
+      // Per-provider entries — keyed by <name> child element
       var provEls = provsEl.querySelectorAll("provider");
       provEls.forEach(function(pel) {
-        var key = pel.getAttribute("name") || "";
         var prov = {};
+        var provName = null;
         for (var i = 0; i < pel.children.length; i++) {
           var child = pel.children[i];
-          var tag = child.tagName === "display_name" ? "name" : child.tagName;
-          prov[tag] = _xmlCoerce(child.textContent);
+          var tag = child.tagName;
+          // Legacy: <display_name> → skip, <default_model> → "model"
+          if (tag === "display_name") continue;
+          if (tag === "default_model") tag = "model";
+          var val = _xmlCoerce(child.textContent);
+          if (tag === "name") provName = String(val);
+          prov[tag] = val;
         }
-        data.providers[key] = prov;
+        // Legacy fallback: old format used name= attribute
+        if (!provName) provName = pel.getAttribute("name") || "";
+        if (!prov.type && pel.getAttribute("name")) prov.type = pel.getAttribute("name");
+        if (provName) data.providers[provName] = prov;
       });
     }
 
@@ -268,7 +277,7 @@ async function _migrateOldPrefs() {
   // Build XML-shaped config from old prefs (user name migrates to state, not config)
   const migrated = _normalizeConfig({
     providers: {
-      default: oldPrefs.provider || "wikioracle",
+      default: oldPrefs.provider || "WikiOracle",
     },
   });
   // Store old username in state (will be picked up by _initStateful/_initStateless)

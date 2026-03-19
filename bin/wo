@@ -75,7 +75,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--provider",
         default=None,
-        help="Provider name override (e.g. openai, anthropic, wikioracle)",
+        help="Provider name override (e.g. openai, anthropic, openrouter, wikioracle)",
     )
     p.add_argument(
         "--model",

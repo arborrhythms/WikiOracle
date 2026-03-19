@@ -497,7 +497,7 @@ function _toggleOutputEditor() {
 // ─── Settings panel ───
 function openSettings() {
   document.getElementById("setUsername").value = state.client_name || "User";
-  document.getElementById("setProvider").value = config.providers.default || "wikioracle";
+  document.getElementById("setProvider").value = config.providers.default || "WikiOracle";
   _populateModelDropdown(config.providers.default);
   var currentModel = state.ui.model || (config.server.providers[config.providers.default] || {}).model || "";
   if (currentModel) document.getElementById("setModel").value = currentModel;
@@ -512,7 +512,8 @@ function openSettings() {
   // Provider trust
   var provKey = document.getElementById("setProvider").value;
   var provTrust = ((config.server.providers || {})[provKey] || {}).trust;
-  if (provTrust == null) provTrust = (provKey === "wikioracle") ? 1.0 : 0.6;
+  var provType = ((config.server.providers || {})[provKey] || {}).type;
+  if (provTrust == null) provTrust = (provType === "wikioracle") ? 1.0 : 0.6;
   var trustSlider = document.getElementById("setProviderTrust");
   trustSlider.value = provTrust;
   document.getElementById("setProviderTrustVal").textContent = provTrust;

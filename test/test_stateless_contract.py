@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,9 +24,10 @@ sys.path.insert(0, str(_project))
 sys.path.insert(0, str(_project / "bin"))
 
 import config as config_mod
+import wikioracle as wikioracle_mod
 from config import Config
 from wikioracle import create_app
-from state import SCHEMA_URL, STATE_VERSION, ensure_minimal_state
+from state import SCHEMA_URL, STATE_VERSION, ensure_minimal_state, load_state_file
 
 
 def _make_state(**overrides):
@@ -57,7 +59,7 @@ def _make_runtime_config(**overrides):
                 "truth_weight": 0.7,
             },
         },
-        "providers": {"default": "wikioracle"},
+        "providers": {"default": "WikiOracle"},
     }
     base.update(overrides)
     return base
@@ -116,7 +118,7 @@ class TestStatelessChatValidation(StatelessContractBase):
         resp = self.client.post("/chat", json={
             "message": "hello",
             "runtime_config": _make_runtime_config(),
-            "config": {"provider": "wikioracle"},
+            "config": {"provider": "WikiOracle"},
         })
         self.assertEqual(resp.status_code, 400)
         data = resp.get_json()
@@ -127,7 +129,7 @@ class TestStatelessChatValidation(StatelessContractBase):
         resp = self.client.post("/chat", json={
             "message": "hello",
             "state": _make_state(),
-            "config": {"provider": "wikioracle"},
+            "config": {"provider": "WikiOracle"},
         })
         self.assertEqual(resp.status_code, 400)
         data = resp.get_json()
@@ -137,7 +139,7 @@ class TestStatelessChatValidation(StatelessContractBase):
         """POST /chat without state or runtime_config → 400."""
         resp = self.client.post("/chat", json={
             "message": "hello",
-            "config": {"provider": "wikioracle"},
+            "config": {"provider": "WikiOracle"},
         })
         self.assertEqual(resp.status_code, 400)
 
@@ -147,7 +149,7 @@ class TestStatelessChatValidation(StatelessContractBase):
             "message": "hello",
             "state": "not a dict",
             "runtime_config": _make_runtime_config(),
-            "config": {"provider": "wikioracle"},
+            "config": {"provider": "WikiOracle"},
         })
         self.assertEqual(resp.status_code, 400)
 
@@ -157,7 +159,7 @@ class TestStatelessChatValidation(StatelessContractBase):
             "message": "hello",
             "state": _make_state(),
             "runtime_config": "not a dict",
-            "config": {"provider": "wikioracle"},
+            "config": {"provider": "WikiOracle"},
         })
         self.assertEqual(resp.status_code, 400)
 
@@ -175,7 +177,7 @@ class TestStatelessChatNoDiskWrites(StatelessContractBase):
                 "message": "hello",
                 "state": _make_state(),
                 "runtime_config": _make_runtime_config(),
-                "config": {"provider": "wikioracle"},
+                "config": {"provider": "WikiOracle"},
             })
 
         # Should succeed (502 means provider error which is OK to catch separately)
@@ -197,7 +199,7 @@ class TestStatelessChatNoDiskWrites(StatelessContractBase):
                 "message": "hello",
                 "state": _make_state(),
                 "runtime_config": _make_runtime_config(),
-                "config": {"provider": "wikioracle"},
+                "config": {"provider": "WikiOracle"},
             })
 
         if had_config:
@@ -218,7 +220,7 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
                 "message": "hi",
                 "state": client_state,
                 "runtime_config": _make_runtime_config(),
-                "config": {"provider": "wikioracle"},
+                "config": {"provider": "WikiOracle"},
             })
 
         if resp.status_code == 200:
@@ -237,7 +239,7 @@ class TestStatelessChatUsesRequestPayload(StatelessContractBase):
                 "message": "hi",
                 "state": st,
                 "runtime_config": _make_runtime_config(),
-                "config": {"provider": "wikioracle"},
+                "config": {"provider": "WikiOracle"},
             })
 
         if resp.status_code == 200:
@@ -275,8 +277,8 @@ class TestBootstrapEndpoint(StatelessContractBase):
         data = resp.get_json()
         self.assertNotIn("providers", data)  # no longer a top-level key
         provs = data["config"]["server"]["providers"]
-        self.assertIn("wikioracle", provs)
-        self.assertIn("name", provs["wikioracle"])
+        self.assertIn("WikiOracle", provs)
+        self.assertIn("name", provs["WikiOracle"])
 
     def test_bootstrap_config_has_expected_keys(self):
         """Config in bootstrap response has expected nested keys."""
@@ -294,6 +296,102 @@ class TestBootstrapEndpoint(StatelessContractBase):
         self.assertIn("stateless", c["server"])
         self.assertIn("url_prefix", c["server"])
         self.assertIn("server_id", c["server"])
+
+
+class TestConfigDrivenRuntimeBehavior(StatelessContractBase):
+    """Verify request/runtime config affects server behavior."""
+
+    def test_chat_uses_runtime_default_provider_when_request_omits_provider(self):
+        with patch(
+            "response._call_provider",
+            return_value="<conversation>reply</conversation>",
+        ) as mock_call:
+            resp = self.client.post("/chat", json={
+                "message": "hi",
+                "state": _make_state(),
+                "runtime_config": _make_runtime_config(
+                    providers={"default": "openai"},
+                ),
+                "config": {},
+            })
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_call.call_args[0][3], "openai")
+
+
+class TestNanoChatStatusEndpoint(StatelessContractBase):
+    """Verify the NanoChat status route uses the configured provider URL."""
+
+    def test_status_uses_wikioracle_provider_url(self):
+        with patch.dict(
+            wikioracle_mod.PROVIDERS,
+            {
+                "WikiOracle": {
+                    "type": "wikioracle",
+                    "url": "http://127.0.0.1:9999/chat/completions",
+                    "timeout": 7,
+                },
+            },
+            clear=False,
+        ):
+            mock_resp = type("Resp", (), {"ok": True})()
+            with patch("requests.get", return_value=mock_resp) as mock_get:
+                resp = self.client.get("/nanochat_status")
+
+        self.assertEqual(resp.status_code, 200)
+        mock_get.assert_called_once_with(
+            "http://127.0.0.1:9999/health",
+            timeout=7,
+            verify=False,
+        )
+        data = resp.get_json()
+        self.assertEqual(data.get("url"), "http://127.0.0.1:9999")
+        self.assertEqual(data.get("status"), "online")
+
+
+class TestServerInfoUsesLiveConfig(unittest.TestCase):
+    """Verify routes read config_mod._CONFIG after it is rebound."""
+
+    def setUp(self):
+        self._orig_stateless = config_mod.STATELESS_MODE
+        self._orig_debug = config_mod.DEBUG_MODE
+        self._orig_config = config_mod._CONFIG
+        config_mod.STATELESS_MODE = False
+        config_mod.DEBUG_MODE = False
+
+        self._tmpdir = tempfile.mkdtemp()
+        self._state_path = Path(self._tmpdir) / "state.xml"
+        initial = ensure_minimal_state({}, strict=False)
+        from state import atomic_write_xml
+        atomic_write_xml(self._state_path, initial, reject_symlinks=False)
+
+        self.cfg = Config(state_file=self._state_path)
+        self.app = create_app(self.cfg, url_prefix="")
+        self.app.testing = True
+        self.client = _CsrfClient(self.app.test_client())
+
+    def tearDown(self):
+        config_mod._CONFIG = self._orig_config
+        config_mod.STATELESS_MODE = self._orig_stateless
+        config_mod.DEBUG_MODE = self._orig_debug
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_server_info_reads_rebound_config(self):
+        old_cfg = config_mod._CONFIG
+        old_cfg.setdefault("server", {}).setdefault("training", {})["enabled"] = False
+        config_mod._CONFIG = {
+            "server": {
+                "training": {
+                    "enabled": True,
+                },
+            },
+        }
+
+        resp = self.client.get("/server_info")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIs(resp.get_json()["training"], True)
 
 
 class TestStatefulChatUnaffected(unittest.TestCase):
@@ -327,7 +425,7 @@ class TestStatefulChatUnaffected(unittest.TestCase):
         with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
-                "config": {"provider": "wikioracle"},
+                "config": {"provider": "WikiOracle"},
             })
         # Should not return 400 for missing state/runtime_config
         self.assertNotEqual(resp.status_code, 400)
@@ -335,20 +433,61 @@ class TestStatefulChatUnaffected(unittest.TestCase):
     def test_stateful_chat_writes_to_disk(self):
         """In stateful mode, /chat should write state to disk."""
         mtime_before = self._state_path.stat().st_mtime
-
-        import time
         time.sleep(0.05)  # ensure mtime granularity
 
         with patch("response._call_nanochat", return_value="reply"):
             resp = self.client.post("/chat", json={
                 "message": "hello",
-                "config": {"provider": "wikioracle"},
+                "config": {"provider": "WikiOracle"},
             })
 
         if resp.status_code == 200:
             mtime_after = self._state_path.stat().st_mtime
             self.assertGreater(mtime_after, mtime_before,
                                "State file was NOT written during stateful chat")
+
+    def test_stateful_chat_rewrites_selection_flags_before_save(self):
+        """Stateful chat should not fail when the previously selected root changes."""
+        existing_conv = {
+            "id": "conv_existing",
+            "title": "Existing root",
+            "messages": [
+                {
+                    "role": "user",
+                    "username": "User",
+                    "time": "2026-02-24T00:00:00Z",
+                    "content": "<p>old question</p>",
+                },
+                {
+                    "role": "assistant",
+                    "username": "WikiOracle",
+                    "time": "2026-02-24T00:00:01Z",
+                    "content": "<p>old answer</p>",
+                },
+            ],
+            "children": [],
+        }
+        seeded = ensure_minimal_state(_make_state(
+            conversations=[existing_conv],
+            selected_conversation="conv_existing",
+        ), strict=False)
+        from state import atomic_write_xml
+        atomic_write_xml(self._state_path, seeded, reject_symlinks=False)
+
+        with patch("response._call_nanochat", return_value="reply"):
+            resp = self.client.post("/chat", json={
+                "message": "new root",
+                "config": {"provider": "WikiOracle"},
+            })
+
+        self.assertEqual(
+            resp.status_code,
+            200,
+            f"Expected 200, got {resp.status_code}: {resp.get_data(as_text=True)[:300]}",
+        )
+        persisted = load_state_file(self._state_path, strict=True)
+        self.assertEqual(len(persisted.get("conversations", [])), 2)
+        self.assertNotEqual(persisted.get("selected_conversation"), "conv_existing")
 
 
 class TestStatelessExistingEndpoints(StatelessContractBase):
@@ -363,7 +502,7 @@ class TestStatelessExistingEndpoints(StatelessContractBase):
         self.assertEqual(resp.status_code, 403)
 
     def test_config_post_returns_403(self):
-        resp = self.client.post("/config", json={"provider": "wikioracle"})
+        resp = self.client.post("/config", json={"provider": "WikiOracle"})
         self.assertEqual(resp.status_code, 403)
 
 

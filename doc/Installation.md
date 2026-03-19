@@ -37,12 +37,12 @@ make build_tokenizer
 | Variable                | Default                  | Purpose                                                  |
 | ----------------------- | ------------------------ | -------------------------------------------------------- |
 | `WIKIORACLE_STATE_FILE` | `state.xml`              | Path to local state file (WikiOracle State XML)          |
-| `WIKIORACLE_BASE_URL`   | `https://wikioracle.org` | Upstream base URL                                        |
-| `WIKIORACLE_API_PATH`   | `/chat/chat/completions` | Upstream chat path                                       |
+| `WIKIORACLE_BASE_URL`   | `http://127.0.0.1:8000`  | Upstream NanoChat-compatible base URL                    |
+| `WIKIORACLE_API_PATH`   | `/chat/completions`      | Upstream chat path                                       |
 | `WIKIORACLE_STATELESS`  | (unset)                  | Set truthy to disable all writes and use in-memory state |
 | `WIKIORACLE_URL_PREFIX` | (unset)                  | Optional reverse-proxy path prefix                       |
 | `WIKIORACLE_BIND_HOST`  | `127.0.0.1`              | Network interface to bind                                |
-| `WIKIORACLE_PORT`       | `8888`                   | Server port                                              |
+| `WIKIORACLE_BIND_PORT`  | `8888`                   | Server port                                              |
 
 
 ## The Makefile: Running and Building
@@ -51,12 +51,13 @@ All local and remote workflows are orchestrated through the Makefile.
 
 ### Top-level targets
 
-These are the primary entry points. Contributors need `install` → `build` → `run`. Maintainers additionally use `sync` and `up`/`down` to manage the production server.
+These are the primary entry points. For a local WikiOracle + NanoChat stack, use `install`, then the `nano_*` and `wo_*` service targets. `build` is still present, but it delegates to `train`, which currently runs the BasicModel training pipeline.
 
 | Target                 | Purpose                                                        |
 | ---------------------- | -------------------------------------------------------------- |
 | `make install`         | Create `.venv` (shim + NanoChat), install all deps             |
-| `make build`           | Train the model (alias for `make train`, `ARCH=cpu\|gpu`)      |
+| `make build`           | Alias for `make train` (currently the BasicModel pipeline)     |
+| `make nano_train`      | Full NanoChat training pipeline                                |
 | `make sync HOST=remote`| Sync app + checkpoints to/from production server               |
 | `make run`             | Start WikiOracle Flask shim locally (foreground)               |
 | `make up HOST=remote`  | Restart both services on production                            |
@@ -67,7 +68,8 @@ These are the primary entry points. Contributors need `install` → `build` → 
 
 | Target                | Purpose                                               |
 | --------------------- | ----------------------------------------------------- |
-| `make train`          | Full pipeline: data + tokenizer + pretrain + finetune |
+| `make train`          | BasicModel training pipeline                          |
+| `make nano_train`     | Full NanoChat pipeline: data + tokenizer + SFT model  |
 | `make train_pretrain` | Pretrain base model (`ARCH=cpu\|gpu`)                 |
 | `make train_finetune` | Supervised fine-tuning (`ARCH=cpu\|gpu`)              |
 | `make train_remote`   | Launch EC2 GPU instance, copy repo, start training    |
@@ -91,8 +93,8 @@ These are the primary entry points. Contributors need `install` → `build` → 
 | `make run`        | Start WikiOracle local shim (foreground) |
 | `make run_debug`  | Start WikiOracle local shim (debug mode) |
 | `make run_init`   | Remove state files for a fresh start     |
-| `make run_cli`    | Chat with the model (CLI)                |
-| `make run_web`    | Chat with the model (Web UI + /train)    |
+| `make run_cli`    | Chat with NanoChat directly (CLI)        |
+| `make run_web`    | Run the NanoChat web extension           |
 
 ### Sync (`sync_*`)
 
@@ -105,15 +107,25 @@ These are the primary entry points. Contributors need `install` → `build` → 
 
 ### Service control (`nano_*`, `wo_*`, `basicmodel_*`)
 
-NanoChat and WikiOracle support local (PID file) and remote (systemctl) operation, controlled by `HOST=local|remote`. BasicModel is registered but does not yet have an inference server.
+NanoChat and WikiOracle support local (PID file + background process) and remote (`systemctl`) operation, controlled by `HOST=local|remote`. BasicModel is registered but does not yet have an inference server.
 
 | Target                                           | Purpose                          |
 | ------------------------------------------------ | -------------------------------- |
-| `make nano_start` / `nano_stop` / `nano_restart` | Manage NanoChat server           |
-| `make nano_status` / `nano_logs`                 | Check NanoChat server            |
-| `make wo_start` / `wo_stop` / `wo_restart`       | Manage WikiOracle server         |
-| `make wo_status` / `wo_logs`                     | Check WikiOracle server          |
+| `make nano_start` / `nano_stop` / `nano_restart` | Manage local or remote NanoChat  |
+| `make nano_status` / `nano_logs`                 | Check NanoChat PID/service state |
+| `make wo_start` / `wo_stop` / `wo_restart`       | Manage local or remote WikiOracle |
+| `make wo_status` / `wo_logs`                     | Check WikiOracle PID/service state |
 | `make basicmodel_status`                         | Check BasicModel status (stub)   |
+
+For local debugging, the typical workflow is:
+
+```bash
+make nano_restart NANO_MODEL_TAG=d26 NANO_DEVICE_TYPE=cpu NANO_DTYPE=float32
+make wo_restart
+make nano_status wo_status
+```
+
+This starts an unchanged local NanoChat backend on port `8000` and the WikiOracle shim on port `8888`. `NANO_MODEL_TAG` selects the checkpoint, `NANO_DEVICE_TYPE` selects `cpu` or `cuda`, and `NANO_DTYPE` controls the runtime dtype.
 
 ### Other targets
 
@@ -130,7 +142,12 @@ NanoChat and WikiOracle support local (PID file) and remote (systemctl) operatio
 | ----------- | ------- | ------------------------------------------------------- |
 | `ARCH`      | `cpu`   | Target architecture (`cpu` or `gpu`)                    |
 | `HOST`      | `local` | Target host for `up`/`down`/`nano_*`/`wo_*`             |
+| `NANO_MODEL_TAG` | `d26` | NanoChat checkpoint tag used by `nano_start` / `nano_restart` |
+| `NANO_SOURCE` | `sft` | NanoChat input family passed to `scripts.chat_web`      |
+| `NANO_DTYPE` | `float32` | NanoChat inference dtype                              |
+| `NANO_DEVICE_TYPE` | `cpu` | NanoChat device type (`cpu` or `cuda`)             |
 | `NANO_PORT` | `8000`  | NanoChat server port                                    |
+| `WO_BIND_HOST` | `127.0.0.1` | WikiOracle bind host                             |
 | `WO_PORT`   | `8888`  | WikiOracle server port                                  |
 | `NPROC`     | `1`     | GPUs per node for torchrun                              |
 
@@ -139,7 +156,7 @@ NanoChat and WikiOracle support local (PID file) and remote (systemctl) operatio
 
 ### Architecture
 
-WikiOracle runs as a local Flask server (`bin/wikioracle.py`) that proxies chat requests to any LLM provider (NanoChat, OpenAI, Anthropic, Gemini, Grok) while keeping all conversation state on the local filesystem. The remote server at `wikiOracle.org` operates in stateless mode.
+WikiOracle runs as a local Flask server (`bin/wikioracle.py`) that proxies chat requests to any LLM provider (NanoChat, OpenAI, Anthropic, Gemini, Grok, OpenRouter) while keeping all conversation state on the local filesystem. The remote server at `wikiOracle.org` operates in stateless mode.
 
 ### Key files
 
@@ -159,7 +176,23 @@ WikiOracle runs as a local Flask server (`bin/wikioracle.py`) that proxies chat 
 
 ```bash
 make install                   # create venvs, install all deps
-make run                       # start the local server
+make nano_restart NANO_MODEL_TAG=d26 NANO_DEVICE_TYPE=cpu NANO_DTYPE=float32
+make wo_restart
+make nano_status wo_status
+```
+
+Open `https://127.0.0.1:8888` in a browser and accept the self-signed certificate.
+
+For a short CLI smoke test against the local stack:
+
+```bash
+./.venv/bin/python ./bin/wo -k --provider wikioracle --model nanochat "Yes or no only?"
+```
+
+If you only want the WikiOracle shim in the foreground, use:
+
+```bash
+make run
 ```
 
 Or manually:
@@ -171,8 +204,6 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 python3 bin/wikioracle.py
 ```
-
-Open `https://127.0.0.1:8888` in a browser (accept the self-signed certificate).
 
 ### Configuration
 

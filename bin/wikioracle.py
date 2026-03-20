@@ -53,6 +53,7 @@ import config as config_mod
 from config import (
     Config,
     PROVIDERS,
+    TheConfig,
     _PROJECT_ROOT,
     _build_providers,
     _find_xml,
@@ -60,6 +61,7 @@ from config import (
     _env_bool,
     _ensure_self_signed_cert,
     _load_config,
+    _load_config_xml,
     config_to_xml,
     load_config,
     parse_args,
@@ -116,9 +118,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         survive disk reloads.  ``allowed_urls`` is left as-is since it
         is authoritative from disk (admin-only).
         """
-        srv = config_mod._CONFIG.setdefault("server", {})
-        srv["stateless"] = config_mod.STATELESS_MODE
-        srv["url_prefix"] = url_prefix
+        TheConfig.set("server.stateless", config_mod.STATELESS_MODE)
+        TheConfig.set("server.url_prefix", url_prefix)
 
     _inject_server_runtime()
 
@@ -126,9 +127,9 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     if not config_mod.STATELESS_MODE:
         _config_xml_path = _find_xml(_PROJECT_ROOT, "config.xml")
         if _config_xml_path is not None:
-            _disk_cfg = config_mod._load_config_xml(_config_xml_path)
+            _disk_cfg = _load_config_xml(_config_xml_path)
             if not _disk_cfg.get("server", {}).get("server_id"):
-                normalized = _normalize_config(config_mod._CONFIG)
+                normalized = _normalize_config(TheConfig.data)
                 new_sid = normalized.get("server", {}).get("server_id")
                 if new_sid:
                     _disk_cfg.setdefault("server", {})["server_id"] = new_sid
@@ -231,11 +232,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     @app.route(url_prefix + "/server_info", methods=["GET"])
     def server_info():
         """Expose server-mode flags that do not require state access."""
-        tr = config_mod._CONFIG.get("server", {}).get("training", {})
         return jsonify({
             "stateless": config_mod.STATELESS_MODE,
             "url_prefix": url_prefix,
-            "training": tr.get("enabled", False) and not config_mod.STATELESS_MODE,
+            "training": TheConfig.get("server.training.enabled")
+                        and not config_mod.STATELESS_MODE,
         })
 
     @app.route(url_prefix + "/bootstrap", methods=["GET"])
@@ -254,9 +255,9 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         # Normalized config (with defaults + runtime server fields)
         fresh = _load_config()
         if fresh:
-            config_mod._CONFIG = fresh
+            TheConfig.replace(fresh)
             _inject_server_runtime()
-        result["config"] = _normalize_config(config_mod._CONFIG)
+        result["config"] = _normalize_config(TheConfig.data)
 
         return jsonify(result)
 
@@ -377,9 +378,9 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         else:
             fresh = _load_config()
             if fresh:
-                config_mod._CONFIG = fresh
+                TheConfig.replace(fresh)
                 _inject_server_runtime()
-            runtime_cfg = config_mod._CONFIG
+            runtime_cfg = TheConfig.data
 
         path_only = isinstance(body.get("state"), dict) and body["state"].get("_path_only", False)
 
@@ -424,13 +425,12 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             # the server's truth entries so the client can display them.
             # Entries are returned so the client can display them.
             if config_mod.DEBUG_MODE:
-                ot = config_mod._CONFIG.get("server", {}).get("training", {})
-                if ot.get("enabled", False) and not config_mod.STATELESS_MODE:
+                if TheConfig.get("server.training.enabled") and not config_mod.STATELESS_MODE:
                     try:
                         from truth import load_server_truth
-                        _st_path = Path(ot.get("truth_corpus_path", "data/truth.xml"))
+                        _st_path = Path(TheConfig.get("server.training.truth_corpus_path"))
                         _st_entries = load_server_truth(_st_path)
-                        _server_id = config_mod._CONFIG.get("server", {}).get("server_id", "wikioracle")
+                        _server_id = TheConfig.get("server.server_id")
                         server_truth = []
                         for entry in _st_entries:
                             server_truth.append({
@@ -513,11 +513,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         # Re-read config to pick up hot-reloads
         fresh = _load_config()
         if fresh:
-            config_mod._CONFIG = fresh
+            TheConfig.replace(fresh)
             _inject_server_runtime()
 
         if flask_request.method == "GET":
-            return jsonify({"config": _normalize_config(config_mod._CONFIG)})
+            return jsonify({"config": _normalize_config(TheConfig.data)})
         else:
             if config_mod.STATELESS_MODE:
                 return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
@@ -537,7 +537,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
                     data["server"].pop("providers", None)
                 # Preserve the on-disk allowed_urls — clients must not
                 # override this server-level security setting.
-                disk_allowed = config_mod._CONFIG.get("server", {}).get("allowed_urls")
+                disk_allowed = TheConfig.get("server.allowed_urls", None)
                 if isinstance(data.get("server"), dict):
                     data["server"].pop("allowed_urls", None)
                 if disk_allowed is not None:
@@ -545,11 +545,11 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
                 cfg_xml.write_text(config_to_xml(data), encoding="utf-8")
 
-                config_mod._CONFIG = _load_config()
+                TheConfig.replace(_load_config())
                 _inject_server_runtime()
                 PROVIDERS.clear()
                 PROVIDERS.update(_build_providers())
-                normalized = _normalize_config(config_mod._CONFIG)
+                normalized = _normalize_config(TheConfig.data)
                 return jsonify({"ok": True, "config": normalized})
             except Exception as exc:
                 log.exception("POST /config failed")
@@ -595,7 +595,7 @@ def main() -> int:
     if args.stateless:
         config_mod.STATELESS_MODE = True
     else:
-        cfg_stateless = config_mod._CONFIG.get("server", {}).get("stateless")
+        cfg_stateless = TheConfig.get("server.stateless", None)
         if cfg_stateless is not None:
             config_mod.STATELESS_MODE = bool(cfg_stateless)
         else:
@@ -650,9 +650,8 @@ def main() -> int:
         print(f"    {pi}")
     print(f"  Config     : {config_mod._CONFIG_STATUS}")
     print(f"  Stateless  : {'ON' if config_mod.STATELESS_MODE else 'off'}")
-    ot_cfg = config_mod._CONFIG.get("server", {}).get("training", {})
-    ot_on = ot_cfg.get("enabled", False) and not config_mod.STATELESS_MODE
-    ot_device = ot_cfg.get("device", "cpu")
+    ot_on = TheConfig.get("server.training.enabled") and not config_mod.STATELESS_MODE
+    ot_device = TheConfig.get("server.training.device")
     if ot_on:
         print(f"  Online trn : \033[32mON\033[0m (device={ot_device})")
     else:

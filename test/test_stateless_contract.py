@@ -9,6 +9,7 @@ These tests verify the sessionStorage-authority contract:
   - Stateful mode is unaffected (no regression)
 """
 
+import copy
 import json
 import os
 import sys
@@ -350,12 +351,12 @@ class TestNanoChatStatusEndpoint(StatelessContractBase):
 
 
 class TestServerInfoUsesLiveConfig(unittest.TestCase):
-    """Verify routes read config_mod._CONFIG after it is rebound."""
+    """Verify routes read TheConfig after it is rebound."""
 
     def setUp(self):
         self._orig_stateless = config_mod.STATELESS_MODE
         self._orig_debug = config_mod.DEBUG_MODE
-        self._orig_config = config_mod._CONFIG
+        self._orig_config = copy.deepcopy(config_mod.TheConfig.data)
         config_mod.STATELESS_MODE = False
         config_mod.DEBUG_MODE = False
 
@@ -371,22 +372,20 @@ class TestServerInfoUsesLiveConfig(unittest.TestCase):
         self.client = _CsrfClient(self.app.test_client())
 
     def tearDown(self):
-        config_mod._CONFIG = self._orig_config
+        config_mod.TheConfig.replace(self._orig_config)
         config_mod.STATELESS_MODE = self._orig_stateless
         config_mod.DEBUG_MODE = self._orig_debug
         import shutil
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_server_info_reads_rebound_config(self):
-        old_cfg = config_mod._CONFIG
-        old_cfg.setdefault("server", {}).setdefault("training", {})["enabled"] = False
-        config_mod._CONFIG = {
+        config_mod.TheConfig.replace({
             "server": {
                 "training": {
                     "enabled": True,
                 },
             },
-        }
+        })
 
         resp = self.client.get("/server_info")
 

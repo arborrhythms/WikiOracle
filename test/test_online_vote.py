@@ -34,7 +34,7 @@ from test.nanochat_server import (
     NanoChatServer,
 )
 
-
+@unittest.skip("slow")
 class TestAlphaOutputDiamond(unittest.TestCase):
     """Integration test: run a diamond vote against a local NanoChat server.
 

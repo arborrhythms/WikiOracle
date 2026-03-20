@@ -29,6 +29,88 @@ from xml.dom import minidom
 
 
 # ---------------------------------------------------------------------------
+# XMLConfig — dot-path wrapper for parsed XML dicts
+# ---------------------------------------------------------------------------
+
+_MISSING = object()   # sentinel for required config lookups
+
+
+class XMLConfig:
+    """Centralized XML configuration store with dot-path access.
+
+    Same API as basicmodel.util.XMLConfig but without the torch
+    dependency — suitable for the wikioracle server process.
+
+    Wraps a nested dict (typically produced by ``_load_config_xml``)
+    and provides ``get``/``set``/``section`` helpers.
+
+    ``get()`` raises ``KeyError`` when the path is absent and no
+    *default* is supplied — so missing configuration is surfaced
+    immediately rather than propagating ``None`` through the system.
+    """
+
+    def __init__(self, data=None):
+        self._data = data if data is not None else {}
+        self._sources: list = []
+
+    # --- Access ---
+
+    def get(self, dotted_path: str, default=_MISSING):
+        """Dot-path lookup: ``cfg.get('server.training.enabled')``.
+
+        Raises ``KeyError`` when the path is absent and no *default*
+        is supplied.  Pass an explicit *default* (including ``None``)
+        for genuinely optional / nullable config keys.
+        """
+        keys = dotted_path.split(".")
+        node = self._data
+        for k in keys:
+            if isinstance(node, dict) and k in node:
+                node = node[k]
+            else:
+                if default is _MISSING:
+                    raise KeyError(
+                        f"Config key not found: {dotted_path!r} "
+                        f"(missing at {k!r})"
+                    )
+                return default
+        return node
+
+    def set(self, dotted_path: str, value) -> None:
+        """Dot-path setter: ``cfg.set('server.stateless', True)``."""
+        keys = dotted_path.split(".")
+        node = self._data
+        for k in keys[:-1]:
+            if k not in node or not isinstance(node[k], dict):
+                node[k] = {}
+            node = node[k]
+        node[keys[-1]] = value
+
+    def section(self, name: str) -> dict:
+        """Return a top-level section dict.
+
+        Raises ``KeyError`` when the section is absent.
+        """
+        if name not in self._data:
+            raise KeyError(f"Config section not found: {name!r}")
+        return self._data[name]
+
+    @property
+    def data(self) -> dict:
+        """Raw dict access (backward compat with code expecting a plain dict)."""
+        return self._data
+
+    def replace(self, data: dict) -> None:
+        """Replace internal data in-place (preserves dict identity for aliases)."""
+        self._data.clear()
+        self._data.update(data if data is not None else {})
+
+    def __repr__(self):
+        n = len(self._data)
+        return f"XMLConfig({n} key{'s' if n != 1 else ''})"
+
+
+# ---------------------------------------------------------------------------
 # TLS certificate helpers
 # ---------------------------------------------------------------------------
 _DEFAULT_SSL_DIR = Path.home() / ".ssl"
@@ -376,8 +458,27 @@ def _load_config(project_root: Path | None = None) -> Dict[str, Any]:
     return {}
 
 
-_CONFIG: Dict[str, Any] = _load_config()
+TheConfig: XMLConfig = XMLConfig(_load_config())
+_CONFIG: Dict[str, Any] = TheConfig.data       # backward-compat alias (same dict object)
 
+# Client settings from state.xml — populated at startup by init_settings().
+TheSettings: XMLConfig = XMLConfig()
+
+
+def init_settings(state_data: dict) -> None:
+    """Populate ``TheSettings`` from a parsed state dict.
+
+    Extracts the ``client`` metadata fields (version, title, ui prefs,
+    client_name, etc.) from the full state dict.
+    """
+    settings: Dict[str, Any] = {}
+    for key in ("client_name", "client_id", "user_guid",
+                "version", "schema", "title"):
+        if key in state_data:
+            settings[key] = state_data[key]
+    if "ui" in state_data:
+        settings["ui"] = state_data["ui"]
+    TheSettings.replace(settings)
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +491,10 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
     field identifies the API protocol (openai, anthropic, gemini, etc.)
     and is used by ``_call_provider()`` to dispatch to the right adapter.
     """
-    cfg_providers = _CONFIG.get("providers", {})
+    try:
+        cfg_providers = TheConfig.section("providers")
+    except KeyError:
+        cfg_providers = {}
 
     # Hardcoded defaults — keyed by name
     providers: Dict[str, Dict[str, Any]] = {
@@ -808,12 +912,12 @@ def _default_allowed_urls() -> list:
 def get_allowed_urls() -> list:
     """Return the allowed URL prefixes for authority/provider fetches.
 
-    Checks the in-memory ``_CONFIG`` first, then falls back to
+    Checks the in-memory ``TheConfig`` first, then falls back to
     re-reading config.xml from disk (so admin edits take effect without
     a server restart).  If neither source has ``allowed_urls``, returns
     the built-in defaults.
     """
-    urls = _CONFIG.get("server", {}).get("allowed_urls")
+    urls = TheConfig.get("server.allowed_urls", None)
     if not urls:
         # Re-read disk in case config.xml was edited after server start.
         fresh = _load_config()
@@ -931,25 +1035,24 @@ URL_PREFIX: str = ""
 def reload_config(path: str | Path | None = None) -> Dict[str, Any]:
     """Reload configuration from *path* (or the default config.xml).
 
-    Replaces the module-level ``_CONFIG`` and re-populates
-    ``PROVIDERS`` so the server picks up the new file immediately.
+    Updates ``TheConfig`` in-place and re-populates ``PROVIDERS`` so
+    the server picks up the new file immediately.
     Returns the new config dict.
     """
-    global _CONFIG
     if path is not None:
         p = Path(path)
         if p.suffix == ".xml" and p.is_file():
-            _CONFIG = _load_config_xml(p)
+            TheConfig.replace(_load_config_xml(p))
         else:
-            _CONFIG = _load_config(p.resolve().parent if p.is_file() else p.resolve())
+            TheConfig.replace(_load_config(p.resolve().parent if p.is_file() else p.resolve()))
     else:
-        _CONFIG = _load_config()
+        TheConfig.replace(_load_config())
     _populate_providers()
-    return _CONFIG
+    return TheConfig.data
 
 
 def _populate_providers() -> None:
-    """Refresh the module-level PROVIDERS dict from _CONFIG."""
+    """Refresh the module-level PROVIDERS dict from TheConfig."""
     PROVIDERS.clear()
     PROVIDERS.update(_build_providers())
 

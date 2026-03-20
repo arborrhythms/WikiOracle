@@ -120,7 +120,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         build_data build_tokenizer build_preprocess build_sft \
         train_pretrain train_finetune train nano_train \
         train_remote train_retrieve train_ssh train_status train_logs train_deploy \
-        test test_eval test_unit test_basicmodel \
+        test test_all test_eval test_unit test_basicmodel basic_test_all \
         run_init run_server run_debug run_cli run_web parse \
         sync_local sync_remote sync_checkpoint_pull sync_checkpoint_push \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
@@ -184,6 +184,7 @@ help:
 	@echo ""
 	@echo "Test / Evaluation (test_*):"
 	@echo "  make test               Run all tests (unit + basicmodel)"
+	@echo "  make test_all           Run all tests using subsystem test_all targets"
 	@echo "  make test_unit          Run WikiOracle unit tests"
 	@echo "  make test_basicmodel    Run BasicModel tests"
 	@echo "  make test_eval          Evaluate model (ARCH=cpu|gpu)"
@@ -676,6 +677,8 @@ run_debug:
 
 test: test_unit test_basicmodel
 
+test_all: test_unit basic_test_all
+
 test_unit:
 	$(SHIM_ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
 		python3 test/run_tests.py
@@ -774,6 +777,9 @@ basic_remoteTrain:
 
 basic_test:
 	BASICMODEL_DEVICE=cpu $(MAKE) -C $(BASIC_DIR) test
+
+basic_test_all:
+	BASICMODEL_DEVICE=cpu $(MAKE) -C $(BASIC_DIR) test_all
 
 basic_run:
 	$(BASIC_PYTHON) bin/BasicModel.py $(BASIC_XML)

@@ -311,33 +311,33 @@ class TestBuildProviders(unittest.TestCase):
     """Test provider registry construction from config + env."""
 
     def setUp(self):
-        self._orig_config = copy.deepcopy(config_mod._CONFIG)
+        self._orig_config = copy.deepcopy(config_mod.TheConfig.data)
 
     def tearDown(self):
-        config_mod._CONFIG = self._orig_config
+        config_mod.TheConfig.replace(self._orig_config)
 
     def test_config_model_overrides_builtin_default(self):
-        config_mod._CONFIG = {
+        config_mod.TheConfig.replace({
             "providers": {
                 "OpenAI": {
                     "type": "openai",
                     "model": "gpt-4.1-mini",
                 },
             },
-        }
+        })
         with patch.dict(os.environ, {}, clear=True):
             providers = _build_providers()
         self.assertEqual(providers["OpenAI"]["model"], "gpt-4.1-mini")
 
     def test_model_env_var_still_wins_over_config(self):
-        config_mod._CONFIG = {
+        config_mod.TheConfig.replace({
             "providers": {
                 "OpenAI": {
                     "type": "openai",
                     "model": "gpt-4.1-mini",
                 },
             },
-        }
+        })
         with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5-mini"}, clear=True):
             providers = _build_providers()
         self.assertEqual(providers["OpenAI"]["model"], "gpt-5-mini")

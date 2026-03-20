@@ -396,6 +396,7 @@ def _build_providers() -> Dict[str, Dict[str, Any]]:
     providers: Dict[str, Dict[str, Any]] = {
         "WikiOracle": {
             "type": "wikioracle",
+            "api_key": "StrongDemocracy",
             "streaming": True,
             "sequence_len": 2048,
             "trust": 1.0,

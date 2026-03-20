@@ -30,7 +30,9 @@ Environment=WIKIORACLE_API_PATH=/chat/completions
 Environment=WIKIORACLE_STATE_FILE=/opt/bitnami/wordpress/files/WikiOracle.org/client/state.xml
 # Bearer-token auth on all endpoints (except /health).
 # Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-Environment=WIKIORACLE_API_TOKEN=CHANGEME
+# Provider-level API key (StrongDemocracy) is checked in response.py.
+# Server-level bearer auth is not needed.
+#Environment=WIKIORACLE_API_TOKEN=
 
 [Install]
 WantedBy=multi-user.target

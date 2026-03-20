@@ -78,7 +78,7 @@ The `<ui>` block inside `<client>` stores client-owned UI preferences.
 | `layout`               | string  | Layout mode (e.g. `horizontal`).                |
 | `theme`                | string  | Color theme (`system`, `light`, `dark`).        |
 | `model`                | string  | Preferred model identifier (may be empty).      |
-| `splitter_pct`         | integer | Splitter position as a percentage (`0`--`100`). |
+| `divider_pos`          | integer | Divider position as a percentage (`0`--`100`).  |
 | `swipe_nav_horizontal` | boolean | Enable horizontal swipe navigation.             |
 | `swipe_nav_vertical`   | boolean | Enable vertical swipe navigation.               |
 | `confirm_actions`      | boolean | Whether to prompt before destructive actions.   |
@@ -96,7 +96,7 @@ The `<ui>` block inside `<client>` stores client-owned UI preferences.
     <layout>horizontal</layout>
     <theme>system</theme>
     <model></model>
-    <splitter_pct>0</splitter_pct>
+    <divider_pos>0</divider_pos>
     <swipe_nav_horizontal>true</swipe_nav_horizontal>
     <swipe_nav_vertical>false</swipe_nav_vertical>
     <confirm_actions>false</confirm_actions>
@@ -275,7 +275,7 @@ per-node `selected` flags and also derives helper fields such as
       <layout>horizontal</layout>
       <theme>system</theme>
       <model></model>
-      <splitter_pct>0</splitter_pct>
+      <divider_pos>0</divider_pos>
       <swipe_nav_horizontal>true</swipe_nav_horizontal>
       <swipe_nav_vertical>false</swipe_nav_vertical>
       <confirm_actions>false</confirm_actions>

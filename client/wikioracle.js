@@ -104,16 +104,14 @@ function _persistState() {
 
 function applyLayout(layout) {
   const tree = document.getElementById("treeContainer");
-  document.body.classList.remove("layout-flat", "layout-vertical");
-  if (layout === "flat") {
-    document.body.classList.add("layout-flat");
-  } else if (layout === "vertical") {
+  document.body.classList.remove("layout-vertical");
+  if (layout === "vertical") {
     document.body.classList.add("layout-vertical");
     tree.style.height = "";
     if (!tree.style.width) tree.style.width = "280px";
   } else {
     // horizontal — CSS default (height: 40%) applies unless overridden by
-    // saved splitter position; no need to set an explicit pixel fallback.
+    // saved divider position; no need to set an explicit pixel fallback.
     tree.style.width = "";
   }
   if (typeof renderMessages === "function") renderMessages();
@@ -780,6 +778,24 @@ function renderMessages() {
       ncStatus.classList.add("status-offline");
     });
 
+    var bmStatus = document.createElement("div");
+    bmStatus.className = "root-status-line";
+    bmStatus.textContent = "BasicModel: checking\u2026";
+    summary.appendChild(bmStatus);
+    api("GET", "/basicmodel_status").then(function(data) {
+      if (data && data.ok) {
+        bmStatus.textContent = "BasicModel: online";
+        bmStatus.classList.add("status-online");
+      } else {
+        bmStatus.textContent = "BasicModel: " + (data && data.status ? data.status : "offline");
+        bmStatus.classList.add("status-offline");
+      }
+      if (data && data.url) bmStatus.title = data.url;
+    }).catch(function() {
+      bmStatus.textContent = "BasicModel: unknown";
+      bmStatus.classList.add("status-offline");
+    });
+
     // Online training status (from /server_info)
     var otStatus = document.createElement("div");
     otStatus.className = "root-status-line";
@@ -824,27 +840,6 @@ function renderMessages() {
     }
     summary.appendChild(grid);
 
-    // Context preview (clickable — opens context editor)
-    var ctxSection = document.createElement("div");
-    ctxSection.className = "root-summary-section";
-    ctxSection.style.cursor = "pointer";
-    var ctxH3 = document.createElement("h3");
-    ctxH3.textContent = "Context";
-    ctxSection.appendChild(ctxH3);
-    var ctxP = document.createElement("p");
-    ctxP.className = "root-summary-context";
-    var XHTML_DEFAULT = "Return strictly valid XHTML: no Markdown, close all tags, escape entities, one root element.";
-    if (contextText && contextText !== "<div/>") {
-      ctxP.textContent = truncate(contextText, 200);
-    } else {
-      ctxP.textContent = XHTML_DEFAULT;
-      ctxP.classList.add("root-summary-default");
-    }
-    ctxSection.appendChild(ctxP);
-    ctxSection.addEventListener("click", function() {
-      if (typeof _toggleContextEditor === "function") _toggleContextEditor();
-    });
-    summary.appendChild(ctxSection);
 
     // Truth entries (clickable — opens truth editor)
     var truthSection = document.createElement("div");
@@ -1203,7 +1198,7 @@ function bindEvents() {
       if (state.ui.layout) xml += '      <layout>' + esc(state.ui.layout) + '</layout>\n';
       if (state.ui.theme) xml += '      <theme>' + esc(state.ui.theme) + '</theme>\n';
       if (state.ui.model) xml += '      <model>' + esc(state.ui.model) + '</model>\n';
-      if (state.ui.splitter_pct !== undefined) xml += '      <splitter_pct>' + esc(state.ui.splitter_pct) + '</splitter_pct>\n';
+      if (state.ui.divider_pos !== undefined) xml += '      <divider_pos>' + esc(state.ui.divider_pos) + '</divider_pos>\n';
       if (state.ui.swipe_nav_horizontal !== undefined) xml += '      <swipe_nav_horizontal>' + esc(state.ui.swipe_nav_horizontal) + '</swipe_nav_horizontal>\n';
       if (state.ui.swipe_nav_vertical !== undefined) xml += '      <swipe_nav_vertical>' + esc(state.ui.swipe_nav_vertical) + '</swipe_nav_vertical>\n';
       if (state.ui.confirm_actions !== undefined) xml += '      <confirm_actions>' + esc(state.ui.confirm_actions) + '</confirm_actions>\n';
@@ -1353,7 +1348,7 @@ function bindEvents() {
         var _uiEl = hdr?.querySelector("ui");
         if (_uiEl) {
           importState.ui = {};
-          var _uiFields = ["layout", "theme", "model", "splitter_pct", "swipe_nav_horizontal", "swipe_nav_vertical", "confirm_actions"];
+          var _uiFields = ["layout", "theme", "model", "divider_pos", "swipe_nav_horizontal", "swipe_nav_vertical", "confirm_actions"];
           _uiFields.forEach(function(f) {
             var el = _uiEl.querySelector(f);
             if (el) importState.ui[f] = _xmlCoerce(el.textContent);
@@ -1694,24 +1689,18 @@ async function init() {
     applyTheme(state.ui.theme);
     _updatePlaceholder();
 
-    // Restore splitter position from config (percentage of viewport).
-    // Guard: splitter_pct === 0 means the tree was fully collapsed in a
-    // previous session.  Restore to a usable default (30%) so the tree
-    // is always visible on load — the user can still collapse it manually.
-    if (state.ui.splitter_pct != null) {
+    // Restore divider position from state (percentage 0–100).
+    // 0 = tree fully collapsed, 100 = tree fills viewport.
+    if (state.ui.divider_pos != null) {
       const tree = document.getElementById("treeContainer");
       if (tree) {
-        var pct = state.ui.splitter_pct;
-        if (pct <= 0) {
-          pct = 30;
-          state.ui.splitter_pct = pct;
-        }
+        var pct = Math.max(0, Math.min(100, state.ui.divider_pos));
         if (document.body.classList.contains("layout-vertical")) {
           tree.style.width = (pct / 100 * window.innerWidth) + "px";
         } else {
           tree.style.height = (pct / 100 * window.innerHeight) + "px";
         }
-        tree.classList.remove("tree-collapsed");
+        tree.classList.toggle("tree-collapsed", pct === 0);
       }
     }
 
@@ -1988,7 +1977,7 @@ init();
     var size = isVertical() ? tree.clientWidth : tree.clientHeight;
     var viewport = isVertical() ? window.innerWidth : window.innerHeight;
     var pct = size < 4 ? 0 : Math.round(size / viewport * 1000) / 10;
-    state.ui.splitter_pct = pct;
+    state.ui.divider_pos = pct;
     // Toggle collapsed state for border hiding
     tree.classList.toggle("tree-collapsed", pct === 0);
     _persistConfig();
@@ -2028,7 +2017,7 @@ init();
       tree.style.height = pct === 0 ? "0px" : (pct / 100 * window.innerHeight) + "px";
     }
     tree.classList.toggle("tree-collapsed", pct === 0);
-    state.ui.splitter_pct = pct;
+    state.ui.divider_pos = pct;
     _persistConfig();
     if (typeof renderMessages === "function") renderMessages();
   });
@@ -2036,7 +2025,7 @@ init();
   // Reapply splitter percentage on window resize (e.g. maximize/restore)
   window.addEventListener("resize", function() {
     if (dragging) return; // don't fight with an active drag
-    var pct = state.ui.splitter_pct;
+    var pct = state.ui.divider_pos;
     if (pct == null) return;
     if (isVertical()) {
       tree.style.width = pct === 0 ? "0px" : (pct / 100 * window.innerWidth) + "px";

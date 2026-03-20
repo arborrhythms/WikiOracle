@@ -1296,8 +1296,11 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
     # passphrase that grants access without a personal key.
     _PUBLIC_PASSPHRASE = "StrongDemocracy"
     effective_key = client_api_key or pcfg.get("api_key", "")
-    if prov_type == "wikioracle" and not effective_key:
-        return f"[No API key for {provider}. Enter your key in settings.]"
+    if prov_type == "wikioracle":
+        if not effective_key:
+            return f"[No API key for {provider}. Enter your key in settings.]"
+        if effective_key != _PUBLIC_PASSPHRASE:
+            return f"[Invalid API key for {provider}.]"
     if prov_type == "wikioracle":
         local_msgs = to_nanochat_messages(bundle) if bundle else (messages or [])
         cs = chat_settings or {}
@@ -1879,7 +1882,7 @@ def process_chat(
     assistant_content = ensure_xhtml(display_text)
     assistant_timestamp = utc_now_iso()
     user_display = state.get("client_name", "User")
-    llm_display = llm_provider_name
+    llm_display = f"{llm_provider_name} ({llm_model})" if llm_model else llm_provider_name
 
     if user_msg:
         query_entry = {

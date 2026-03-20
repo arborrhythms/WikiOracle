@@ -167,9 +167,10 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     @app.before_request
     def auth_check():
         """Enforce bearer-token auth (if configured) and CSRF header on POSTs."""
-        # Bearer-token auth — skip for OPTIONS and /health
+        # Bearer-token auth — skip for OPTIONS, /health, and static UI serving
+        _PUBLIC_ENDPOINTS = {"health", "ui_index", "static_files", "nanochat_status", "basicmodel_status"}
         if cfg.api_token and flask_request.method != "OPTIONS":
-            if flask_request.endpoint != "health":
+            if flask_request.endpoint not in _PUBLIC_ENDPOINTS:
                 auth = flask_request.headers.get("Authorization", "")
                 if auth != f"Bearer {cfg.api_token}":
                     return jsonify({"ok": False, "error": "unauthorized"}), 401
@@ -203,6 +204,22 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         try:
             health_timeout = PROVIDERS.get("WikiOracle", {}).get("timeout") or 15
             resp = _req.get(url + "/health", timeout=health_timeout, verify=False)
+            if resp.ok:
+                return jsonify({"ok": True, "url": url, "status": "online"})
+            return jsonify({"ok": False, "url": url, "status": f"HTTP {resp.status_code}"})
+        except _req.ConnectionError:
+            return jsonify({"ok": False, "url": url, "status": "offline"})
+        except Exception as exc:
+            return jsonify({"ok": False, "url": url, "status": str(exc)})
+
+    @app.route(url_prefix + "/basicmodel_status", methods=["GET"])
+    def basicmodel_status():
+        """Probe the BasicModel inference server and return its status."""
+        import requests as _req
+        url = PROVIDERS.get("WikiOracle", {}).get("basicmodel_url", "http://127.0.0.1:8001")
+        url = url.rstrip("/")
+        try:
+            resp = _req.get(url + "/health", timeout=5, verify=False)
             if resp.ok:
                 return jsonify({"ok": True, "url": url, "status": "online"})
             return jsonify({"ok": False, "url": url, "status": f"HTTP {resp.status_code}"})

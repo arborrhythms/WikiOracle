@@ -15,7 +15,18 @@
 
 SHELL := /bin/bash
 
-include /bits/projects/Make.mk
+# --- PDF generation options (inlined from Make.mk) ----------------------------
+PD_TEMPLATE := /bits/projects/custom_template.tex
+PDFOPTS := --pdf-engine=xelatex \
+          -V geometry:margin=1in \
+          --template=$(PD_TEMPLATE) \
+          -V header-includes="\usepackage{unicode-math} \hyphenpenalty=10000 \exhyphenpenalty=10000 \makeatletter \renewcommand\section{\@startsection{section}{1}{\z@}{-3.5ex}{2.3ex}{\normalfont\Large\bfseries\centering}} \makeatother"
+
+MAKE_PDF = pandoc $(PDFOPTS) \
+          --from=gfm+smart \
+          --metadata title="$(TITLE)" \
+          --toc --toc-depth=3 \
+          --resource-path=doc
 
 # --- Configuration -----------------------------------------------------------
 
@@ -217,9 +228,9 @@ help:
 
 all: install train test_eval doc_report
 
-up: nano_restart wo_restart
+up: nano_restart wo_restart basic_restart
 
-down: nano_stop wo_stop
+down: nano_stop wo_stop basic_stop
 
 deploy: up
 

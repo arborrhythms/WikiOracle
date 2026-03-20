@@ -501,7 +501,7 @@ function openSettings() {
   _populateModelDropdown(config.providers.default);
   var currentModel = state.ui.model || (config.server.providers[config.providers.default] || {}).model || "";
   if (currentModel) document.getElementById("setModel").value = currentModel;
-  document.getElementById("setLayout").value = state.ui.layout || "flat";
+  document.getElementById("setLayout").value = state.ui.layout || "horizontal";
   document.getElementById("setTheme").value = state.ui.theme || "system";
 
   // Evaluation settings

@@ -2,8 +2,8 @@
 """Tests for TreeView display and conversation branching.
 
 TreeView display:
-  - splitter_pct=0 guard: init must restore tree to a visible height
-  - config normalization must not silently zero the splitter
+  - divider_pos=0 guard: init must restore tree to a visible height
+  - config normalization must not silently zero the divider
 
 Branching:
   - Branch from a node with one child must create a SECOND child
@@ -169,37 +169,14 @@ class _BranchTestBase(unittest.TestCase):
 class TestTreeDisplayConfig(unittest.TestCase):
     """Verify tree display safeguards."""
 
-    def test_splitter_pct_zero_is_config_bug(self):
-        """config.xml should never have splitter_pct=0 after init guard.
-
-        The JavaScript guard in wikioracle.js:init() restores splitter_pct
-        from 0 → 30.  This test verifies the config.xml shipped value is
-        not 0, which would cause the tree to start collapsed.
-        """
-        cfg_path = _project / "config.xml"
-        if not cfg_path.exists():
-            self.skipTest("config.xml not present")
-        text = cfg_path.read_text()
-        # Look for <splitter_pct>0</splitter_pct>
-        import re
-        match = re.search(r"<splitter_pct>\s*(\d+(?:\.\d+)?)\s*</splitter_pct>", text)
-        if match:
-            pct = float(match.group(1))
-            self.assertGreater(pct, 0,
-                "config.xml has splitter_pct=0 which collapses the tree panel")
-
-    def test_js_guard_restores_zero_splitter(self):
-        """The JS init guard should restore splitter_pct=0 to 30%.
-
-        This is a code-level check: verify the guard exists in wikioracle.js.
-        """
+    def test_js_clamps_divider_pos(self):
+        """The JS init guard should clamp divider_pos to 0–100."""
         js_path = _project / "client" / "wikioracle.js"
         text = js_path.read_text()
-        # The guard should check for pct <= 0 and set to 30
-        self.assertIn("pct <= 0", text,
-            "wikioracle.js should guard against splitter_pct <= 0")
-        self.assertIn("pct = 30", text,
-            "wikioracle.js should restore collapsed tree to 30%")
+        self.assertIn("Math.max(0", text,
+            "wikioracle.js should clamp divider_pos lower bound to 0")
+        self.assertIn("Math.min(100", text,
+            "wikioracle.js should clamp divider_pos upper bound to 100")
 
 
 # ---------------------------------------------------------------------------

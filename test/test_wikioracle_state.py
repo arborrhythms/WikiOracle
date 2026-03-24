@@ -42,6 +42,9 @@ from truth import (
 )
 
 
+_HME_XML_PATH = Path(__file__).resolve().parent / "hme.xml"
+
+
 def _make_state(**overrides):
     """Create a minimal valid v2 state dict with optional overrides."""
     base = {
@@ -201,13 +204,10 @@ class TestXMLRoundTrip(unittest.TestCase):
         self.assertEqual(root["children"][0]["id"], "c_2")
         self.assertEqual(restored["selected_conversation"], "c_2")
 
+    @unittest.skipIf(not _HME_XML_PATH.exists(), "test/hme.xml not found")
     def test_hme_xml_roundtrip(self):
         """test/hme.xml survives load -> serialize -> reload with all trust entries intact."""
-        spec_path = Path(__file__).resolve().parent / "hme.xml"
-        if not spec_path.exists():
-            self.skipTest("test/hme.xml not found")
-
-        original = load_state_file(spec_path, strict=True)
+        original = load_state_file(_HME_XML_PATH, strict=True)
 
         # Verify initial parse has expected trust entries
         trust = original.get("truth", [])

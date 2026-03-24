@@ -26,6 +26,7 @@ from pathlib import Path
 
 _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project / "bin"))
+_RUN_SLOW = os.getenv("RUN_SLOW") == "1"
 
 from test.nanochat_server import (
     DEFAULT_TEST_NANO_PORT,
@@ -34,7 +35,7 @@ from test.nanochat_server import (
     NanoChatServer,
 )
 
-@unittest.skip("slow")
+@unittest.skipIf(not _RUN_SLOW, "slow — set RUN_SLOW=1")
 class TestAlphaOutputDiamond(unittest.TestCase):
     """Integration test: run a diamond vote against a local NanoChat server.
 

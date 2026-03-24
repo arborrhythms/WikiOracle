@@ -16,6 +16,7 @@ from pathlib import Path
 _project = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project))
 sys.path.insert(0, str(_project / "bin"))
+_RUN_SLOW = os.getenv("RUN_SLOW") == "1"
 
 import config as config_mod
 from config import Config, _load_config
@@ -43,6 +44,18 @@ def _has_provider_key(provider: str) -> bool:
     if not cfg:
         return False
     return bool(cfg.get("providers", {}).get(provider, {}).get("api_key"))
+
+
+def _provider_skip_reason(provider: str) -> str | None:
+    if not _RUN_SLOW:
+        return "online provider test — set RUN_SLOW=1"
+    if not _has_provider_key(provider):
+        return f"No {provider.capitalize()} API key in config.xml"
+    return None
+
+
+_OPENAI_SKIP = _provider_skip_reason("openai")
+_ANTHROPIC_SKIP = _provider_skip_reason("anthropic")
 
 
 class _CsrfClient:
@@ -109,7 +122,7 @@ class _OnlineLLMBase(unittest.TestCase):
 class TestStatefulOpenAI(_OnlineLLMBase):
     STATELESS = False
 
-    @unittest.skipUnless(_has_provider_key("openai"), "No OpenAI API key in config.xml")
+    @unittest.skipIf(_OPENAI_SKIP is not None, _OPENAI_SKIP or "")
     def test_chat_openai(self):
         """Stateful: send a message via OpenAI and get a real response."""
         resp = self.client.post("/chat", json={
@@ -122,7 +135,7 @@ class TestStatefulOpenAI(_OnlineLLMBase):
 class TestStatefulAnthropic(_OnlineLLMBase):
     STATELESS = False
 
-    @unittest.skipUnless(_has_provider_key("anthropic"), "No Anthropic API key in config.xml")
+    @unittest.skipIf(_ANTHROPIC_SKIP is not None, _ANTHROPIC_SKIP or "")
     def test_chat_anthropic(self):
         """Stateful: send a message via Anthropic and get a real response."""
         resp = self.client.post("/chat", json={
@@ -138,7 +151,7 @@ class TestStatefulAnthropic(_OnlineLLMBase):
 class TestStatelessOpenAI(_OnlineLLMBase):
     STATELESS = True
 
-    @unittest.skipUnless(_has_provider_key("openai"), "No OpenAI API key in config.xml")
+    @unittest.skipIf(_OPENAI_SKIP is not None, _OPENAI_SKIP or "")
     def test_chat_openai_stateless(self):
         """Stateless: send a message via OpenAI with client-supplied state."""
         runtime_config = _load_config() or {}
@@ -158,7 +171,7 @@ class TestStatelessOpenAI(_OnlineLLMBase):
 class TestStatelessAnthropic(_OnlineLLMBase):
     STATELESS = True
 
-    @unittest.skipUnless(_has_provider_key("anthropic"), "No Anthropic API key in config.xml")
+    @unittest.skipIf(_ANTHROPIC_SKIP is not None, _ANTHROPIC_SKIP or "")
     def test_chat_anthropic_stateless(self):
         """Stateless: send a message via Anthropic with client-supplied state."""
         runtime_config = _load_config() or {}

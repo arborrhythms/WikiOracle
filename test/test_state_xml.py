@@ -19,6 +19,12 @@ from state import (
 )
 
 
+_DATA_DIR = Path(__file__).resolve().parent
+_ALPHA_XML = _DATA_DIR / "alpha.xml"
+_HME_XML = _DATA_DIR / "hme.xml"
+_LLM_XML = _DATA_DIR / "llm.xml"
+
+
 # =====================================================================
 #  Helpers
 # =====================================================================
@@ -518,34 +524,25 @@ class TestAtomicWriteXml(unittest.TestCase):
 class TestMigrationRoundtrip(unittest.TestCase):
     """Test that XML fixture files load correctly."""
 
-    def _get_data_dir(self):
-        return Path(__file__).resolve().parent
-
+    @unittest.skipIf(not _ALPHA_XML.exists(), "alpha.xml not yet migrated")
     def test_alpha_xml_exists_and_loads(self):
-        path = self._get_data_dir() / "alpha.xml"
-        if not path.exists():
-            self.skipTest("alpha.xml not yet migrated")
-        state = load_state_file(path, strict=False)
+        state = load_state_file(_ALPHA_XML, strict=False)
         self.assertEqual(state["title"], "Alpha Vote Test")
         # Should have truth entries
         self.assertTrue(len(state["truth"]) >= 2)
 
+    @unittest.skipIf(not _HME_XML.exists(), "hme.xml not yet migrated")
     def test_hme_xml_exists_and_loads(self):
-        path = self._get_data_dir() / "hme.xml"
-        if not path.exists():
-            self.skipTest("hme.xml not yet migrated")
-        state = load_state_file(path, strict=False)
+        state = load_state_file(_HME_XML, strict=False)
         self.assertEqual(state["title"], "HME Test")
         # Should have axioms, operators, references, providers, authority
         ids = {e["id"] for e in state["truth"]}
         self.assertIn("axiom_01", ids)
         self.assertIn("op_socrates_mortal", ids)
 
+    @unittest.skipIf(not _LLM_XML.exists(), "llm.xml not yet migrated")
     def test_llm_xml_exists_and_loads(self):
-        path = self._get_data_dir() / "llm.xml"
-        if not path.exists():
-            self.skipTest("llm.xml not yet migrated")
-        state = load_state_file(path, strict=False)
+        state = load_state_file(_LLM_XML, strict=False)
         self.assertEqual(state["title"], "WikiOracle")
 
 

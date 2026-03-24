@@ -183,8 +183,8 @@ help:
 	@echo "  make train_ssh/status/logs"
 	@echo ""
 	@echo "Test / Evaluation (test_*):"
-	@echo "  make test               Run all tests (unit + basicmodel)"
-	@echo "  make test_all           Run all tests using subsystem test_all targets"
+	@echo "  make test               Run WikiOracle tests only"
+	@echo "  make test_all           Run WikiOracle + subsystem test_all targets"
 	@echo "  make test_unit          Run WikiOracle unit tests"
 	@echo "  make test_basicmodel    Run BasicModel tests"
 	@echo "  make test_eval          Evaluate model (ARCH=cpu|gpu)"
@@ -675,7 +675,7 @@ run_server:
 run_debug:
 	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
 
-test: test_unit test_basicmodel
+test: test_unit
 
 test_all: test_unit basic_test_all
 

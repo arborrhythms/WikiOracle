@@ -1025,10 +1025,20 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
 
 
 def _call_basicmodel(cfg: Config, messages: List[Dict], temperature: float,
-                     max_tokens: int = 128, timeout: int = 120) -> str:
-    """Call BasicModel /chat/completions endpoint."""
+                     max_tokens: int = 128, timeout: int = 120,
+                     truth_entries: Optional[List[Dict]] = None) -> str:
+    """Call BasicModel /chat/completions endpoint.
+
+    Args:
+        truth_entries: optional list of ``{"content": str, "trust": float}``
+            dicts from the WikiOracle TruthSet.  When provided, BasicModel
+            encodes each entry and stores it in its LogicLayer before
+            running inference.
+    """
     url = PROVIDERS.get("WikiOracle", {}).get("basicmodel_url", "http://127.0.0.1:8001/chat/completions")
     payload = {"messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+    if truth_entries:
+        payload["truth"] = truth_entries
     provider_timeout = max(PROVIDERS.get("WikiOracle", {}).get("basicmodel_timeout") or timeout, 15)
     try:
         resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
@@ -1284,7 +1294,8 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
                     provider: str, client_api_key: str = "",
                     client_model: str = "",
                     messages: List[Dict] | None = None,
-                    chat_settings: Dict | None = None) -> str:
+                    chat_settings: Dict | None = None,
+                    truth_entries: Optional[List[Dict]] = None) -> str:
     """Call a provider using a ProviderBundle (preferred) or legacy messages."""
     import config as config_mod
 
@@ -1310,7 +1321,8 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
                 print(f"[DEBUG] → _call_basicmodel")
             return _call_basicmodel(cfg, local_msgs, temperature,
                                     max_tokens=int(cs.get("max_tokens", 128)),
-                                    timeout=int(cs.get("timeout", 120)))
+                                    timeout=int(cs.get("timeout", 120)),
+                                    truth_entries=truth_entries)
         else:
             if DEBUG_MODE:
                 print(f"[DEBUG] → _call_nanochat (127.0.0.1)")
@@ -1846,8 +1858,18 @@ def process_chat(
             role = m.get("role", "?")
             content = m.get("content", "")
             print(f"  [{i}] {role}: {content[:200]}{'...' if len(content) > 200 else ''}")
+    # Build simplified truth entries for BasicModel's LogicLayer
+    bm_truth = None
+    if client_model == "BasicModel" and truth_list:
+        bm_truth = []
+        for entry in static_truth(truth_list):
+            text = strip_xhtml(entry.get("content", ""))
+            trust = entry.get("trust")
+            if text and trust is not None:
+                bm_truth.append({"content": text, "trust": trust})
     response_text = _call_provider(cfg, bundle, temperature, provider, client_api_key, client_model,
-                                    chat_settings=query_config.get("evaluation"))
+                                    chat_settings=query_config.get("evaluation"),
+                                    truth_entries=bm_truth or None)
     if config_mod.DEBUG_MODE:
         print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
     llm_provider_name = provider

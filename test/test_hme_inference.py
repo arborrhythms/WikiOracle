@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """HME logical inference tests.
 
 Loads test/hme.xml and verifies that the query pipeline produces

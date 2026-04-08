@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """Integration tests that verify end-to-end chat with online LLM providers.
 
 These tests make REAL network calls to OpenAI and Anthropic APIs using

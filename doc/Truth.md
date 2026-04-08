@@ -19,7 +19,7 @@ WikiOracle should not aim to speak with a single authoritative voice. It aims to
 * Explain why disagreement exists.
 * Make uncertainty explicit.
 
-Truth is strongest when its mechainsm of trust is transparent, not when it is uniform.
+Truth is strongest when its mechanism of trust is transparent, not when it is uniform.
 
 ## The Problem With Current Model Development
 

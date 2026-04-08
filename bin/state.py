@@ -306,6 +306,21 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raw_truth = []
     state["truth"] = [_normalize_trust_entry(v) for v in raw_truth]
 
+    # UI preferences — ensure defaults so bootstrap always provides divider_pos
+    _default_ui = {
+        "layout": "horizontal",
+        "divider_pos": 0,
+        "theme": "light",
+        "swipe_nav_horizontal": True,
+        "swipe_nav_vertical": False,
+        "confirm_actions": False,
+    }
+    if "ui" not in state or not isinstance(state.get("ui"), dict):
+        state["ui"] = _default_ui
+    else:
+        for k, v in _default_ui.items():
+            state["ui"].setdefault(k, v)
+
     # Client identity — flat client_name/client_id in state.
     # Backward compat: old nested user block → flat fields.
     if "user_guid" in state:

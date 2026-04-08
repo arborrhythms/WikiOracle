@@ -301,7 +301,7 @@ LOCAL_SYNC_OPTS      ?= -av --progress \
 		--exclude .venv \
 		--exclude .git/ \
 		--exclude output/ \
-		--exclude config.xml \
+		--exclude /config.xml \
 		--exclude state.xml \
 		--exclude '*.pem' \
 		--exclude __pycache__/ \
@@ -340,7 +340,7 @@ else
 		--exclude .git/ \
 		--exclude output/ \
 		--exclude nanochat/ \
-		--exclude config.xml \
+		--exclude /config.xml \
 		--exclude state.xml \
 		--exclude '*.pem' \
 		--exclude __pycache__/ \

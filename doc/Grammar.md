@@ -570,6 +570,39 @@ This is why `<is>` is preserving. The sentence does not introduce a third object
 much as stabilize a correspondence between two existing representations. Definitions,
 classifications, and predications are all variants of that same alignment problem.
 
+#### Lift
+
+`lift` is the **verb application** operator. It selects a learned [D, D] verb
+matrix from a codebook via cosine similarity with the verb embedding, then
+applies that matrix to the subject concepts. Two arities are supported:
+
+| Rule              | Arity | Semantics                       |
+|-------------------|-------|---------------------------------|
+| `lift(C, C)`      | 2     | Intransitive: self-application  |
+| `lift(C, C, C)`   | 3     | Transitive: S V O               |
+
+**Binary (intransitive):** The verb selects a matrix from the codebook
+and applies it reflexively to the subject: `S' = S + VP_eff @ S`.
+
+**Ternary (transitive):** The object restricts which symbols the verb
+activates. Verb and object concept activations are projected to symbolic
+space via PiLayer, intersected (element-wise min — the monotonic
+analogue of conjunction), then projected back to conceptual activations.
+These restricted activations weight the verb content to produce a query
+that selects the verb matrix, which is then applied to the subject:
+
+```
+verb_act, obj_act  →  PiLayer  →  min(verb_syms, obj_syms)
+     →  PiLayer.reverse  →  weight verb content  →  _select_vp
+     →  vp_eff [D,D]  →  S + bmm(S, vp_eff)
+```
+
+The ternary rule is dispatched when the Grammar's C-tier soft composition
+loop finds three consecutive leaves. A variable-step loop consumes two
+leaves for ternary rules and one for binary rules. The Grammar stores the
+most recent `(S, V, O)` triple for universality evaluation (see
+[Ethics.md](./Ethics.md)).
+
 ### Symbolic Space
 
 Conjunction, Disjunction, Not, Non, and Is all perform symbolic logic operations within a Symbolic Space, wherein the 0-D symbols have a bijective mapping to concepts.

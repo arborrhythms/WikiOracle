@@ -115,6 +115,41 @@ This is the core of the Truth Symmetry enforcement described above.
 If swapping identity references makes a claim contradictory or
 indefensible, it reveals an ethical inconsistency that the system flags.
 
+## Universality (Golden Rule) — architectural enforcement
+
+The symmetry tests described above operate at truth admission time.
+Universality operates during model training, enforcing the Golden Rule
+at the level of gradient updates.
+
+When the Grammar recognizes a transitive verb via `lift(C, C, C)`,
+the model evaluates **universality**: the change in luminosity when
+both the original action (SVO) and its dual (OVS) are applied.
+
+```
+universality = luminosity(truths + SVO + OVS) - luminosity(truths)
+```
+
+- **Positive**: the action preserves or increases illumination (kind).
+  The loss is left unchanged or reduced.
+- **Negative**: the action diminishes illumination (unkind).
+  The loss is increased, penalizing the proposition.
+
+The loss modification formula:
+
+```
+totalLoss = totalLoss * (1 + LuminosityWeight * (1 - luminosity)
+                           + UniversalityWeight * (1 - universality))
+```
+
+This makes unkind propositions harder to learn — not by filtering
+output, but by making them structurally costly during training.
+Moral axioms (e.g. "causing harm leads to suffering") enter as
+regular TruthSet entries; no special API is needed.
+
+See [Config.md](./Config.md) for the `LuminosityWeight` and
+`UniversalityWeight` parameters. See [Grammar.md](./Grammar.md) for the
+ternary LIFT rule that identifies subject, verb, and object.
+
 ## Truth improves ethics
 
 We wish to predict Truth. 

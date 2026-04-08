@@ -471,6 +471,30 @@ cross-entropy loss value; the key name indicates the semantic direction.
 
 See [Config.md](./Config.md) §Server for the full configuration reference.
 
+#### Truth-Modulated Loss (MentalModel)
+
+In the basicModel's `MentalModel`, the training loss is further modulated
+by **luminosity** and **universality** to prevent learning irrational or
+unkind propositions:
+
+```
+totalLoss = totalLoss * (1 + LuminosityWeight * (1 - luminosity)
+                           + UniversalityWeight * (1 - universality))
+```
+
+- **Luminosity** measures truth set coherence (see [Logic.md](./Logic.md)
+  §Luminosity). Low luminosity increases loss.
+- **Universality** measures the Golden Rule via SVO/OVS swap (see
+  [Ethics.md](./Ethics.md) §Universality). Low universality increases loss.
+
+Both weights default to 0.1, making the effect gentle. This operates
+independently of the DoT-annealed training described above — DoT
+gates the learning rate, while luminosity/universality modulate the
+loss magnitude.
+
+See [Config.md](./Config.md) §MentalModel Configuration for the XML
+parameters.
+
 ### SFT Corpus Preparation
 
 The `prepare_sft_corpus()` function in `bin/sensation.py` provides

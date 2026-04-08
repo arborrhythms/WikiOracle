@@ -267,6 +267,38 @@ These environment variables override provider-level defaults without editing `co
 | `XAI_MODEL`           | `grok`        | Override `providers.grok.default_model` | `grok-3-mini`                   |
 | `OPENROUTER_MODEL`    | `openrouter`  | Override `providers.openrouter.default_model` | `google/gemma-3-4b-it:free` |
 
+## MentalModel Configuration
+
+The basicModel's `MentalModel.xml` defines the neural architecture.
+Three parameters control the TruthLayer integration (truth bias during
+inference and loss modification during training). All are optional;
+omitting them defaults to 0.1.
+
+| Parameter            | Type    | Default | Description                                                        |
+|----------------------|---------|---------|--------------------------------------------------------------------|
+| `truthBiasScale`     | decimal | `0.1`   | Strength of luminosity-based bias on concept input during forward. |
+| `LuminosityWeight`   | decimal | `0.1`   | Loss penalty weight for low luminosity (incoherent truths).        |
+| `UniversalityWeight` | decimal | `0.1`   | Loss penalty weight for low universality (unkind propositions).    |
+
+```xml
+<architecture>
+  <truthBiasScale>0.1</truthBiasScale>
+  <LuminosityWeight>0.1</LuminosityWeight>
+  <UniversalityWeight>0.1</UniversalityWeight>
+</architecture>
+```
+
+The grammar section of `MentalModel.xml` also defines the ternary LIFT
+rule for transitive verbs:
+
+```xml
+<C>lift(C, C)</C>      <!-- intransitive -->
+<C>lift(C, C, C)</C>   <!-- transitive SVO -->
+```
+
+See [Grammar.md](./Grammar.md) §Lift and [Ethics.md](./Ethics.md)
+§Universality for the architectural details.
+
 ## OpenClaw Plugin Config
 
 When using WikiOracle as an OpenClaw provider, the TypeScript extension

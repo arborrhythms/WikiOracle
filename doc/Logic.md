@@ -223,6 +223,47 @@ The formal results above establish three things:
 
 This is a genuine structural enrichment of Strong Kleene logic.
 
+## Luminosity
+
+Luminosity measures the coherence of a truth set as a single scalar:
+
+```
+luminosity = ||relu(min(truths))||
+```
+
+The element-wise min across all stored truth activations computes the
+**conjunction** — the point where all truths agree. `relu` removes
+negative dimensions (darkness from conflicting truths), and the L2 norm
+gives the brightness.
+
+- **High luminosity**: truths are coherent and mutually reinforcing.
+- **Low luminosity**: truths are sparse, contradictory, or incoherent.
+
+Luminosity serves two roles in the model:
+
+1. **Top-down bias**: concept input is scaled by luminosity during each
+   conceptual iteration: `concept_input * (1 + truthBiasScale * luminosity)`.
+   A coherent truth set amplifies concept formation; an incoherent one
+   leaves it unchanged.
+
+2. **Loss modification**: low luminosity increases training loss,
+   penalizing irrational propositions. See [Ethics.md](./Ethics.md)
+   §Universality for the full formula.
+
+### Supporting measures
+
+- **Consistency**: detects anti-parallel stored truth vectors
+  (cosine similarity < -threshold). Returns 1.0 for a consistent set,
+  0.0 for maximally contradictory.
+
+- **Derive**: pairwise mereological inference via the Grammar's `part()`
+  rule. When the parthood score between two truths exceeds a threshold,
+  a new implied truth is recorded with attenuated DoT. This extends
+  the truth set beyond explicitly stored claims.
+
+See also [`Socrates.pdf`](./Socrates.pdf) for Venn diagrams as a model
+of luminosity.
+
 ## See also
 
 * [BuddhistParallels](./BuddhistParallels.md) — pramana theory, tetralemma, and the Buddhist motivation for non-affirming negation.

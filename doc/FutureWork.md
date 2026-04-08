@@ -31,9 +31,16 @@
 ## Mereological Operations on Conceptual Space
 * Make improvements to NanoChat that allow it to compute truth within the geometric/conceptual space of the network, giving meaning to logical operations within that space (so use mereological operations to implement the ternary logic that is currently operating over the trust entries of the HME architecture in the current design). This means replacing AND with union, OR with intersection, IMPLICATION with parthood. See [Socrates.pdf](Socrates.pdf) for a quick sketch of deriving mereological (Venn-diagram-like) logic from entailment.
 * The architecture of WikiOracle is designed as a conceptual space, in the sense of Gardenfors. Conceptual spaces are similarity spaces, where similar concepts occupy regions of space close to one another. As spaces also of truth, they are amenable to logical calculation. This is similar to existing LLM architecture: Embedding spaces encode meaningful vectors in the same way, and separating hypersurfaces (the neurons of the network) categorize that space in numerous ways, allowing calculation on that space. Summing over multiplicative connections provides the basic Boolean architectural primitives {or, and} in a continuous and learnable way, which allows logical computation on that space. However, it allows such voluminous computation that the syntax and semantics are dense compared to the English language. The trust computed by the contextual structure provided here is explicit, subject to interpretation, and much higher level. The values of certainty propagate, giving not only a next-token prediction but a measure of confidence in the computed answer.
-* See [`Socrates.pdf`](./Socrates.pdf): Venn diagram as a model of luminousity. 
+* See [`Socrates.pdf`](./Socrates.pdf): Venn diagram as a model of luminosity. 
 * Use parser.py to alter the NanoChat input format as in [Grammar.md](doc/Grammar.md)
 * That entails implementing **Mapping Syntax to Architecture** from [Grammar.md](doc/Grammar.md) in Nanochat
+* **Partially implemented:** Luminosity (`||relu(min(truths))||`) and implication derivation via `part()` are now in `TruthLayer`. Ternary `lift(C, C, C)` implements transitive verb application with object-restricted symbol intersection. See [Logic.md](doc/Logic.md) §Luminosity, [Grammar.md](doc/Grammar.md) §Lift.
+
+## Egocentrism Detection
+* Use the universality mechanism to detect self-serving reasoning. If universality is consistently negative for actions that benefit the agent, the model may be exhibiting egocentrism. This builds on the Golden Rule infrastructure (see [Ethics.md](doc/Ethics.md) §Universality) but requires tracking universality scores per-agent over time.
+
+## Truth Set Orthogonalization
+* Use luminosity to orthogonalize the truth set, removing redundant or near-duplicate entries and resolving contradictions. The consistency measure (`TruthLayer.consistency()`) detects anti-parallel vectors; a future step would automatically prune or merge conflicting truths based on their DoT magnitudes.
 
 ## Shamatha Speech Project
 Mindfulness entails that negative entities do not manifest at the sentential level. They are clauses at best.

@@ -72,7 +72,7 @@ DATA_SHARDS_FULL ?= 370
 # --- Remote configuration (override via env or make VAR=value) ----------------
 
 REMOTE_PROVIDER    ?= lambda          # lambda (default) or ec2
-TRAIN_TARGET         ?=
+TRAIN_TARGET       ?=
 
 # Lambda Labs configuration
 LAMBDA_INSTANCE_TYPE ?= gpu_1x_h100_sxm5   # ~$4.29/hr
@@ -98,22 +98,22 @@ ALERT_EMAIL ?=
 WIKIORACLE_APP ?= bin/wikioracle.py
 
 # --- Local/Remote switching ---------------------------------------------------
-HOST      ?= local
-NANO_PORT ?= 8000
-NANO_HOST ?= 127.0.0.1
-NANO_SOURCE ?= sft
-NANO_MODEL_TAG ?= d26
-NANO_STEP ?=
-NANO_DTYPE ?= float32
-NANO_DEVICE_TYPE ?= cpu
+HOST              ?= local
+NANO_PORT         ?= 8000
+NANO_HOST         ?= 127.0.0.1
+NANO_SOURCE       ?= sft
+NANO_MODEL_TAG    ?= d26
+NANO_STEP         ?=
+NANO_DTYPE        ?= float32
+NANO_DEVICE_TYPE  ?= cpu
 NANO_READY_TIMEOUT ?= 45
-NANO_PID  := .nano.pid
-WO_PID    := .wo.pid
-NANO_LOG  ?= output/nanochat.log
-WO_LOG    ?= output/wikioracle.log
-WO_BIND_HOST ?= 127.0.0.1
-WO_PORT ?= 8888
-WO_READY_TIMEOUT ?= 45
+NANO_PID          := .nano.pid
+WO_PID            := .wo.pid
+NANO_LOG          ?= output/nanochat.log
+WO_LOG            ?= output/wikioracle.log
+WO_BIND_HOST      ?= 127.0.0.1
+WO_PORT           ?= 8888
+WO_READY_TIMEOUT  ?= 45
 
 DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
                --wo-host=$(WO_HOST) --wo-dest=$(WO_DEST)

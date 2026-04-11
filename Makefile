@@ -71,14 +71,22 @@ DATA_SHARDS_FULL ?= 370
 
 # --- Remote configuration (override via env or make VAR=value) ----------------
 
-# Remote EC2 configuration
+REMOTE_PROVIDER    ?= lambda          # lambda (default) or ec2
+TRAIN_TARGET         ?=
+
+# Lambda Labs configuration
+LAMBDA_INSTANCE_TYPE ?= gpu_1x_h100_sxm5   # ~$4.29/hr
+LAMBDA_REGION        ?=                      # auto-select from available
+LAMBDA_KEY_FILE      ?= ~/bin/lambda.pem
+LAMBDA_API_KEY       ?= secret_lambda_dffa9f4d9f744221a25804854bdbf108.PSVLGPiqGgjT31W3XjSHNdNPgqLvDYNw
+
+# EC2 configuration (fallback: REMOTE_PROVIDER=ec2)
 EC2_INSTANCE_TYPE ?= p5.4xlarge     # 1× H100-80GB ~$6.88/hr (alt: p4d.24xlarge 8× A100 ~$32.77/hr)
 EC2_REGION        ?= us-west-2
 EC2_KEY_NAME      ?= nanochat-key
 EC2_KEY_FILE      ?= ~/.ssh/$(EC2_KEY_NAME).pem
 EC2_DISK_SIZE     ?= 200
 EC2_USER          ?= ubuntu
-EC2_TARGET        ?=
 
 # WikiOracle (Lightsail) deployment configuration
 WO_KEY_FILE       ?= ./wikiOracle.pem
@@ -144,15 +152,15 @@ PDF_CHAPTERS := README.md \
   doc/Freedom.md \
   doc/Voting.md \
   doc/Logic.md \
-  doc/Grammar.md \
   doc/Training.md \
   doc/Implementation.md \
   doc/Config.md \
   doc/State.md \
   doc/UserInterface.md \
   doc/FutureWork.md \
-  doc/BuddhistParallels.md \
-  doc/ProposedLicense.md
+  doc/ProposedLicense.md \
+  basicmodel/doc/Grammar.md \
+  basicmodel/doc/BuddhistParallels.md
 
 
 # --- Help ---------------------------------------------------------------------
@@ -177,9 +185,9 @@ help:
 	@echo "  make nano_train         Full NanoChat pipeline: data + tok + pretrain + finetune"
 	@echo "  make train_pretrain     Pretrain NanoChat base model (ARCH=cpu|gpu)"
 	@echo "  make train_finetune     NanoChat supervised fine-tuning (ARCH=cpu|gpu)"
-	@echo "  make train_remote       Launch EC2, copy repo, start training"
-	@echo "  make train_deploy       Launch EC2, train, deploy to WikiOracle"
-	@echo "  make train_retrieve     Pull artifacts, terminate EC2 instance"
+	@echo "  make train_remote       Launch remote GPU (Lambda/EC2), start training"
+	@echo "  make train_deploy       Launch remote, train, deploy to WikiOracle"
+	@echo "  make train_retrieve     Pull artifacts, terminate instance"
 	@echo "  make train_ssh/status/logs"
 	@echo ""
 	@echo "Test / Evaluation (test_*):"
@@ -242,26 +250,34 @@ else
 	$(MAKE) all ARCH=cpu CPU_ITERS=10
 endif
 
-# --- Training on EC2 (train_remote/retrieve/ssh/status/logs/deploy) ----------
+# --- Remote training (train_remote/retrieve/ssh/status/logs/deploy) ----------
 
-REMOTE_ARGS := --region=$(EC2_REGION) --key-name=$(EC2_KEY_NAME) \
-               --key-file=$(EC2_KEY_FILE) --user=$(EC2_USER)
+ifeq ($(REMOTE_PROVIDER),ec2)
+  REMOTE_ARGS := --provider=ec2 --region=$(EC2_REGION) --key-name=$(EC2_KEY_NAME) \
+                 --key-file=$(EC2_KEY_FILE) --user=$(EC2_USER)
+  LAUNCH_ARGS := --instance-type=$(EC2_INSTANCE_TYPE) --disk-size=$(EC2_DISK_SIZE)
+else
+  REMOTE_ARGS := --provider=lambda \
+                 $(if $(LAMBDA_REGION),--region=$(LAMBDA_REGION)) \
+                 --key-file=$(LAMBDA_KEY_FILE) --user=ubuntu
+  LAUNCH_ARGS := --instance-type=$(LAMBDA_INSTANCE_TYPE)
+endif
 
 train_remote:
+ifeq ($(REMOTE_PROVIDER),ec2)
 ifndef ALERT_EMAIL
-	$(error ALERT_EMAIL is required — e.g. make train_remote ALERT_EMAIL=you@example.com)
+	$(error ALERT_EMAIL is required for EC2 — e.g. make train_remote ALERT_EMAIL=you@example.com)
 endif
-ifndef EC2_TARGET
-	$(error EC2_TARGET is required — e.g. make train_remote EC2_TARGET=all)
 endif
-	python3 bin/remote.py $(REMOTE_ARGS) launch \
-		--instance-type=$(EC2_INSTANCE_TYPE) \
-		--disk-size=$(EC2_DISK_SIZE) \
+ifndef TRAIN_TARGET
+	$(error TRAIN_TARGET is required — e.g. make train_remote TRAIN_TARGET=all)
+endif
+	python3 bin/remote.py $(REMOTE_ARGS) launch $(LAUNCH_ARGS) \
 		--nproc=$(NPROC) \
 		--wandb-run=$(WANDB_RUN) \
 		--data-shards=$(DATA_SHARDS_FULL) \
-		--target="$(EC2_TARGET)" \
-		--alert-email=$(ALERT_EMAIL)
+		--target="$(TRAIN_TARGET)" \
+		$(if $(ALERT_EMAIL),--alert-email=$(ALERT_EMAIL))
 
 train_retrieve:
 	python3 bin/remote.py $(REMOTE_ARGS) retrieve
@@ -276,20 +292,20 @@ train_status:
 	python3 bin/remote.py $(REMOTE_ARGS) status
 
 train_deploy:
+ifeq ($(REMOTE_PROVIDER),ec2)
 ifndef ALERT_EMAIL
-	$(error ALERT_EMAIL is required — e.g. make train_deploy ALERT_EMAIL=you@example.com)
+	$(error ALERT_EMAIL is required for EC2 — e.g. make train_deploy ALERT_EMAIL=you@example.com)
 endif
-ifndef EC2_TARGET
-	$(error EC2_TARGET is required — e.g. make train_deploy EC2_TARGET=all)
 endif
-	python3 bin/remote.py $(REMOTE_ARGS) launch \
-		--instance-type=$(EC2_INSTANCE_TYPE) \
-		--disk-size=$(EC2_DISK_SIZE) \
+ifndef TRAIN_TARGET
+	$(error TRAIN_TARGET is required — e.g. make train_deploy TRAIN_TARGET=all)
+endif
+	python3 bin/remote.py $(REMOTE_ARGS) launch $(LAUNCH_ARGS) \
 		--nproc=$(NPROC) \
 		--wandb-run=$(WANDB_RUN) \
 		--data-shards=$(DATA_SHARDS_FULL) \
-		--target="$(EC2_TARGET)" \
-		--alert-email=$(ALERT_EMAIL) \
+		--target="$(TRAIN_TARGET)" \
+		$(if $(ALERT_EMAIL),--alert-email=$(ALERT_EMAIL)) \
 		--deploy $(DEPLOY_ARGS)
 
 # Local development

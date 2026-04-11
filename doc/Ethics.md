@@ -134,21 +134,36 @@ universality = luminosity(truths + SVO + OVS) - luminosity(truths)
 - **Negative**: the action diminishes illumination (unkind).
   The loss is increased, penalizing the proposition.
 
-The loss modification formula:
+The loss modification formula (multiplicative):
 
 ```
 totalLoss = totalLoss * (1 + LuminosityWeight * (1 - luminosity)
                            + UniversalityWeight * (1 - universality))
 ```
 
-This makes unkind propositions harder to learn — not by filtering
-output, but by making them structurally costly during training.
-Moral axioms (e.g. "causing harm leads to suffering") enter as
-regular TruthSet entries; no special API is needed.
+In addition, an **additive** TruthLoss penalty directly penalizes
+propositions that contradict stored truths. It measures the union norm
+reduction when a proposition is folded into the TruthSet via
+`Basis.disjunction()` — contradicting dimensions cancel, reducing the
+norm, which produces a positive penalty. Agreeing or unknown
+propositions pass through with no penalty. DoT weighting is implicit:
+stored truth vectors carry DoT in their magnitude.
 
-See [Config.md](./Config.md) for the `LuminosityWeight` and
-`UniversalityWeight` parameters. See [Grammar.md](./Grammar.md) for the
-ternary LIFT rule that identifies subject, verb, and object.
+```
+totalLoss = totalLoss + TruthLoss * falsity_penalty
+```
+
+Together, these make unkind and false propositions harder to learn —
+not by filtering output, but by making them structurally costly during
+training. Moral axioms (e.g. "causing harm leads to suffering") enter
+as regular TruthSet entries; no special API is needed.
+
+See [Config.md](./Config.md) for the `LuminosityWeight`,
+`UniversalityWeight`, and `TruthLoss` parameters.
+See [Grammar.md](../basicmodel/doc/Grammar.md) for the ternary LIFT rule
+that identifies subject, verb, and object. See
+[Reasoning](../basicmodel/doc/reasoning.md) §TruthLoss for the full
+specification.
 
 ## Truth improves ethics
 

@@ -66,16 +66,15 @@ python bin/wikioracle.py
 
 ## Documentation
 
-The full design and governance documentation lives in `./doc`:
+Server and client documentation lives in `./doc`:
 
 | File | Topic |
 |---|---|
-| [BuddhistParallels.md](doc/BuddhistParallels.md) | Buddhist epistemology parallels, pramana theory, and WikiOracle truth objects |
 | [Config.md](doc/Config.md) | Configuration format, settings reference, and environment variables |
 | [Constitution.md](doc/Constitution.md) | Non-negotiable invariants for WikiOracle truth and governance |
 | [Ethics.md](doc/Ethics.md) | Ethical AI through truth architecture, entanglement policy, and truth development |
 | [Freedom.md](doc/Freedom.md) | Freedom, entanglement policy, and worldline-capture constraints |
-| [FutureWork.md](doc/FutureWork.md) | Roadmap and future directions |
+| [FutureWork.md](doc/FutureWork.md) | Server roadmap and future directions |
 | [Voting.md](doc/Voting.md) | Hierarchical Mixture of Experts architecture and voting model |
 | [Implementation.md](doc/Implementation.md) | Implementation notes |
 | [Installation.md](doc/Installation.md) | Build, deploy, and runtime instructions |
@@ -89,6 +88,23 @@ The full design and governance documentation lives in `./doc`:
 | [UserInterface.md](doc/UserInterface.md) | Canonical client UI strings and labels |
 | [WikiOracle.md](doc/WikiOracle.md) | WikiOracle design overview |
 | [WikiOracle.pdf](doc/WikiOracle.pdf) | PDF version of the WikiOracle overview |
+
+BasicModel AI documentation lives in `./basicmodel/doc`:
+
+| File | Topic |
+|---|---|
+| [Architecture.md](basicmodel/doc/Architecture.md) | Six-space bidirectional pipeline, invertible layers, LDU |
+| [BasicModel.md](basicmodel/doc/BasicModel.md) | Four-space cognitive model theory, symmetric perception |
+| [BuddhistParallels.md](basicmodel/doc/BuddhistParallels.md) | Buddhist epistemology parallels, pramana theory, tetralemma |
+| [Ergodic.md](basicmodel/doc/Ergodic.md) | Ergodic exploration, gradient energy sensor, simulated annealing |
+| [Grammar.md](basicmodel/doc/Grammar.md) | Formal grammar mapped to neural architecture spaces |
+| [Language.md](basicmodel/doc/Language.md) | SyntacticLayer, CNF grammar rules, method implementations |
+| [Logic.md](basicmodel/doc/Logic.md) | Subsymbolic/symbolic operators, truth fields, luminosity |
+| [MachineMinds.md](basicmodel/doc/MachineMinds.md) | Weight ergodicity, network invertibility, output certainty |
+| [Params.md](basicmodel/doc/Params.md) | XML configuration schema for all model hyperparameters |
+| [reasoning.md](basicmodel/doc/reasoning.md) | Reasoning methods, TruthLoss, partitioned symbolic space |
+| [Spaces.md](basicmodel/doc/Spaces.md) | InputSpace through OutputSpace specifications |
+| [Training.md](basicmodel/doc/Training.md) | Two-phase training: embedding pretraining + network training |
 
 ## Research Materials
 

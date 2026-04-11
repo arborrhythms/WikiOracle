@@ -61,22 +61,22 @@ Distrust between communities is not a defect. It creates epistemic distance, pre
 
 ## Empathy as Shared Constraint
 
-Plural truth alone is not sufficient. Empathy ineeds to be architectural. It means enforcing how disagreement is handled:
+Plural truth alone is not sufficient. Empathy needs to be architectural. It means enforcing how disagreement is handled:
 
 * When Truth conflicts, meaning that the same Truth is held to be both True and False, each truth should be contextualized in its own reference frame.
-* Feelings cannot conflict, becuase they are authoritative from different points of view.  
+* Feelings cannot conflict, because they are authoritative from different points of view.  
 
-As a first take at encoding emapthy, a Golden Rule is encoded in by allowing the choice of symmetric truths.  
+As a first take at encoding empathy, a Golden Rule is encoded by allowing the choice of symmetric truths.  
 An unempathetic body of truth can be prevented by refusing selfish truths (truth must be universally true).
 
 ## Relation to the Wikipedia Model
 
 Wikipedia provides an important precedent:
 
-* Open participation (achieved thorugh low barrier to entry or free use without advertising).  
+* Open participation (achieved through low barrier to entry or free use without advertising).  
 * Transparent citation (achieved through a corpus of truth within which you can decide what you trust and distrust). 
-* Community moderation (achieved by reaching agreement within a single reference frame or creating seperate reference frames).  
-* Distributed subject-matter authority (achived by creating seperate reference frames or trusted authorities)
+* Community moderation (achieved by reaching agreement within a single reference frame or creating separate reference frames).  
+* Distributed subject-matter authority (achieved by creating separate reference frames or trusted authorities)
 
 WikiOracle extends the strengths of Wikipedia while going further:
 
@@ -106,8 +106,8 @@ WikiOracle attempts to achieve a distributed truth, and shares much of the desig
 
 * **Anti-Monetization Bias** — As a nonprofit project it should operate without advertising-driven content incentives.
 
-* **Self-Correcting Dynamics** — Errors and vandalism can be rapidly identified and corrected, whihc causes their sources to be distrusted. This requires that all data for training the weights remains visible for later error correction and modification.
+* **Self-Correcting Dynamics** — Errors and vandalism can be rapidly identified and corrected, which causes their sources to be distrusted. This requires that all data for training the weights remains visible for later error correction and modification.
 
-* **Cultural Legitimacy** — WikiOracle is intended to function as a widely accepted public reference layer and shared knowledge commons which prevents surveiallance and advertizing.
+* **Cultural Legitimacy** — WikiOracle is intended to function as a widely accepted public reference layer and shared knowledge commons which prevents surveillance and advertising.
 
 * **Open Knowledge Model** — It demonstrates that large-scale, decentralized, norm-governed collaboration can produce a coherent and durable knowledge commons.

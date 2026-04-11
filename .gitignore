@@ -4,6 +4,7 @@
 *~
 .venv/
 .ec2/
+.remote/
 .claude/
 .vscode/
 output/

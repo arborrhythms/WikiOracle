@@ -52,7 +52,7 @@ WikiOracle's truth layer is composed of explicit, user-visible primitives stored
 5. **Authorities**: pointers to external knowledge bases (remote `state.xml` files, ORCIDs, or DIDs): we trust what they trust, to some degree.
 6. **Providers**: external AIs used as tools ("other minds") whose outputs become evidence, not unquestionable authority.
 
-All truth computations must remain legible as operations over these primitives. If the system "knows" something, it should be possible to point to what it is grounded in; otherwise it is merely intuition. See [Truth.md](Truth)
+All truth computations must remain legible as operations over these primitives. If the system "knows" something, it should be possible to point to what it is grounded in; otherwise it is merely intuition. See [Truth.md](./Truth.md)
 
 ## Plurality, Dispute, and Minority Preservation
 
@@ -65,7 +65,7 @@ All truth computations must remain legible as operations over these primitives. 
 
 WikiOracle may use proprietary or open models as providers, but:
 
-1. **No provider is privledged** Data is revokable and belongs to the client.
+1. **No provider is privileged** Data is revocable and belongs to the client.
 2. **Providers are evidence generators** Provider outputs should be treated as non-authoritative contributions with a trust value like any other entry.
 3. **Replaceability is required** The system must remain operable if any single provider becomes unavailable, hostile, or compromised.
 
@@ -82,9 +82,9 @@ Authority entries exist to enable decentralized truth (a network of trust) witho
 ## Local-First Data and Auditability
 
 1. **Client-owned Particular State** The default posture is local-first: user conversation state and news lives on the user's machine and are portable.
-2. **Server-ovener Universal State** A shared hosted service accumulate only anonymized knowledge in a TruthSet which serves as a trusted source of facts.
+2. **Server-owned Universal State** A shared hosted service accumulates only anonymized knowledge in a TruthSet which serves as a trusted source of facts.
 
-See [DataPrivacy.md](DataPrivacy)
+See [PrivacyAndSecurity.md](./PrivacyAndSecurity.md)
 
 ## Safety as Freedom, Empathy, and Truth
 
@@ -92,7 +92,7 @@ WikiOracle's truthfulness effort must not trade away human welfare or agency:
 
 1. **Freedom:** increase distributed agency, not centralized leverage. AI must not be used to transgress the freedom of others. Data sovereignty and freedom to use the platform are non-negotiable.
 2. **Empathy:** represent the concerns of all creatures, not just the operator. Preserve dignity, minimize harm, and make uncertainty explicit. De-emphasize egocentric optimization that externalizes costs.
-3. **Truth:** keep truth auditable and non-proprietary; do not convert epistemic advantage into coercive control. The truth is not a commodity: data formats, tests, and willingly shared truth must be open and reproducible. Make identification and surveillannce impossible. 
+3. **Truth:** keep truth auditable and non-proprietary; do not convert epistemic advantage into coercive control. The truth is not a commodity: data formats, tests, and willingly shared truth must be open and reproducible. Make identification and surveillance impossible. 
 
 
-See [Freedom.md](Freedom), [Empathy.md](Empathy), and [Truth.md](Truth).
+See [Freedom.md](./Freedom.md), [Ethics.md](./Ethics.md), and [Truth.md](./Truth.md).

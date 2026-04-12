@@ -154,6 +154,7 @@ preferences (layout, theme, confirm actions) are also saved in state.
 | Max truth entries        | `setTruthMaxEntries`   | number        | `config.server.training.truth_max_entries`  | `1000`                                  | Maximum entries in the server TruthSet before trimming.           |
 | Store particular facts   | `setStoreParticulars`  | checkbox      | `config.server.truthset.store_concrete`     | `false`                                 | Store spatiotemporally-bound facts in the server TruthSet.        |
 | Allow URL fetching       | `setUrlFetch`          | checkbox      | `config.server.evaluation.url_fetch`        | `false`                                 | Allow the assistant to fetch URL content.                         |
+| Thought-free mode        | `setThoughtFree`       | checkbox      | `config.server.evaluation.thought_free`     | `false`                                 | Enable shamatha speech: restricts grammar to S→C only, prepends 10-rule non-discursive constraint to LLM providers. |
 | Confirm deletes / merges | `setConfirm`           | checkbox      | `state.ui.confirm_actions`                  | `false`                                 | Require confirmation before destructive operations.               |
 
 ### Settings Persistence

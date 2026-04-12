@@ -18,6 +18,15 @@
 ## Europe
 * Prepare for #AI4Good
 
+================================== Deferred ==================================
+
+## Reversing Verb Operation (rev- prefix)
+* When grammatically coding a sentence, allow a "rev-" prefix on a VP to do the inverse VP: lift_inverse() followed by lift() to reconstruct.
+* Surface grammar: add `VP -> REV VP` and `REV -> "rev"` to grammar.cfg
+* Parser: add handler in parse.py VP block to emit `<rev-lift>` XML tag
+* LiftingLayer: add `lift_inverse()` to Model.py — since forward_reflexive computes C' = (I + VP_eff) @ C, inverse is C = (I + VP_eff)^{-1} @ C' via torch.linalg.solve
+* Engine: handle `<rev-lift>` tag in ConceptualSpace forward pass
+
 ================================== ? ==================================
 
 ## OAuth

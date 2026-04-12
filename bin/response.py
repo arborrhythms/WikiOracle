@@ -533,6 +533,38 @@ def build_query(
     else:
         bundle.system = XHTML_INSTRUCTION
 
+    # Shamatha speech: prepend thoughtfree constraints for LLM providers
+    if query_config.get("thought_free", False):
+        bundle.system = (
+            'You must produce "thoughtfree" output. Constraints:\n'
+            "1. One-pointed sentences only.\n"
+            "  Each sentence expresses a single unfolding phenomenon.\n"
+            "  No observer may be present.\n"
+            '2. Use of "is".\n'
+            '  Only predicative "is" is allowed.\n'
+            "  No definitions, no identity statements, no epistemic framing.\n"
+            "3. No epistemic verbs.\n"
+            "  Forbidden: see, know, believe, appear, seem, recognize, observe, analyze, understand.\n"
+            "4. No passive epistemic constructions.\n"
+            "  Do not imply an observer through passive voice.\n"
+            "5. Contiguous experiential field.\n"
+            "  All content must refer to a single, unified sensory or phenomenological field.\n"
+            "  No abstractions, systems, or theories.\n"
+            "6. No comparisons or hypotheticals.\n"
+            "  No conditionals, contrasts, or branching structures.\n"
+            "7. No explanation or purpose.\n"
+            "  Do not explain, justify, or assign causes.\n"
+            "8. Impermanence is implicit.\n"
+            "  Do not state impermanence or nonduality directly.\n"
+            "9. Short sentences.\n"
+            "  Each sentence must be \u2264 10 words.\n"
+            "  Prefer present tense.\n"
+            "10. Stability over information.\n"
+            "  If a response cannot be given without violating constraints, return fewer sentences.\n\n"
+            "Output must be minimal, direct, and non-discursive.\n\n"
+            + bundle.system
+        )
+
     # 2) Truth table → sources  (the HME pipeline)
     #
     #    st = static_truth(state.truth)     — facts & references
@@ -1026,7 +1058,8 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
 
 def _call_basicmodel(cfg: Config, messages: List[Dict], temperature: float,
                      max_tokens: int = 128, timeout: int = 120,
-                     truth_entries: Optional[List[Dict]] = None) -> str:
+                     truth_entries: Optional[List[Dict]] = None,
+                     thought_free: bool = False) -> str:
     """Call BasicModel /chat/completions endpoint.
 
     Args:
@@ -1039,6 +1072,8 @@ def _call_basicmodel(cfg: Config, messages: List[Dict], temperature: float,
     payload = {"messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     if truth_entries:
         payload["truth"] = truth_entries
+    if thought_free:
+        payload["thought_free"] = True
     provider_timeout = max(PROVIDERS.get("WikiOracle", {}).get("basicmodel_timeout") or timeout, 15)
     try:
         resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
@@ -1295,7 +1330,8 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
                     client_model: str = "",
                     messages: List[Dict] | None = None,
                     chat_settings: Dict | None = None,
-                    truth_entries: Optional[List[Dict]] = None) -> str:
+                    truth_entries: Optional[List[Dict]] = None,
+                    thought_free: bool = False) -> str:
     """Call a provider using a ProviderBundle (preferred) or legacy messages."""
     import config as config_mod
 
@@ -1322,7 +1358,8 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
             return _call_basicmodel(cfg, local_msgs, temperature,
                                     max_tokens=int(cs.get("max_tokens", 128)),
                                     timeout=int(cs.get("timeout", 120)),
-                                    truth_entries=truth_entries)
+                                    truth_entries=truth_entries,
+                                    thought_free=thought_free)
         else:
             if DEBUG_MODE:
                 print(f"[DEBUG] → _call_nanochat (127.0.0.1)")
@@ -1867,9 +1904,11 @@ def process_chat(
             trust = entry.get("trust")
             if text and trust is not None:
                 bm_truth.append({"content": text, "trust": trust})
+    thought_free = query_config.get("thought_free", False)
     response_text = _call_provider(cfg, bundle, temperature, provider, client_api_key, client_model,
                                     chat_settings=query_config.get("evaluation"),
-                                    truth_entries=bm_truth or None)
+                                    truth_entries=bm_truth or None,
+                                    thought_free=thought_free)
     if config_mod.DEBUG_MODE:
         print(f"[DEBUG] ← Response ({len(response_text)} chars): {response_text[:120]}...")
     llm_provider_name = provider

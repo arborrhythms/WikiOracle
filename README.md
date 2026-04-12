@@ -98,11 +98,11 @@ BasicModel AI documentation lives in `./basicmodel/doc`:
 | [BuddhistParallels.md](basicmodel/doc/BuddhistParallels.md) | Buddhist epistemology parallels, pramana theory, tetralemma |
 | [Ergodic.md](basicmodel/doc/Ergodic.md) | Ergodic exploration, gradient energy sensor, simulated annealing |
 | [Grammar.md](basicmodel/doc/Grammar.md) | Formal grammar mapped to neural architecture spaces |
-| [Language.md](basicmodel/doc/Language.md) | SyntacticLayer, CNF grammar rules, method implementations |
+| [Language.md](basicmodel/doc/Language.md) | SyntacticLayer, CNF grammar rules, method implementations, thought-free mode |
 | [Logic.md](basicmodel/doc/Logic.md) | Subsymbolic/symbolic operators, truth fields, luminosity |
 | [MachineMinds.md](basicmodel/doc/MachineMinds.md) | Weight ergodicity, network invertibility, output certainty |
 | [Params.md](basicmodel/doc/Params.md) | XML configuration schema for all model hyperparameters |
-| [reasoning.md](basicmodel/doc/reasoning.md) | Reasoning methods, TruthLoss, partitioned symbolic space |
+| [Reasoning.md](basicmodel/doc/Reasoning.md) | Reasoning methods, TruthLoss, partitioned symbolic space, contemplative awareness |
 | [Spaces.md](basicmodel/doc/Spaces.md) | InputSpace through OutputSpace specifications |
 | [Training.md](basicmodel/doc/Training.md) | Two-phase training: embedding pretraining + network training |
 

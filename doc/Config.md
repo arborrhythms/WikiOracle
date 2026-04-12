@@ -72,6 +72,7 @@ Defaults for LLM inference. These were formerly in the top-level `chat` section.
 | `max_tokens`  | positive int    | `128`   | Maximum tokens requested from the provider for a single response.                              |
 | `timeout`     | positive int    | `120`   | Request timeout in seconds for provider evaluation.                                            |
 | `url_fetch`   | boolean         | `false` | Allow the assistant to fetch and incorporate content from URLs referenced in the conversation. |
+| `thought_free` | boolean        | `false` | Enable thought-free (shamatha speech) mode. Restricts BasicModel grammar to the S→C transition only and prepends a 10-rule constraint prompt to LLM providers. See [UserInterface.md](./UserInterface.md) §Settings Controls. |
 
 ```xml
 <evaluation>

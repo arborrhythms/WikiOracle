@@ -1063,6 +1063,7 @@ async function sendMessage() {
         username: state.client_name || "User",
         evaluation: config.server.evaluation || {},
         truthset: config.server.truthset || {},
+        thought_free: !!(config.server.evaluation || {}).thought_free,
       },
     };
     // Include pruned state (ancestor path only) + runtime_config

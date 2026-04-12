@@ -531,6 +531,7 @@ function openSettings() {
   document.getElementById("setTruthMaxEntries").value = (config.server.training || {}).truth_max_entries ?? 1000;
   document.getElementById("setStoreParticulars").checked = !!ts.store_concrete;
   document.getElementById("setUrlFetch").checked = !!eval_.url_fetch;
+  document.getElementById("setThoughtFree").checked = !!eval_.thought_free;
   document.getElementById("setConfirm").checked = !!(state.ui.confirm_actions);
 
   document.getElementById("settingsOverlay").classList.add("active");
@@ -555,6 +556,7 @@ async function saveSettings() {
   config.server.evaluation.max_tokens = parseInt(document.getElementById("setMaxTokens").value, 10);
   config.server.evaluation.timeout = parseInt(document.getElementById("setTimeout").value, 10);
   config.server.evaluation.url_fetch = document.getElementById("setUrlFetch").checked;
+  config.server.evaluation.thought_free = document.getElementById("setThoughtFree").checked;
 
   // Provider trust (store per-provider)
   if (!config.server.providers) config.server.providers = {};

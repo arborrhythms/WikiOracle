@@ -75,6 +75,23 @@ In stateless mode, the server has no disk — the client sends and receives the 
 * `branch_from` — create a new child conversation under the specified parent, seed it with the user message + LLM response
 * Neither — create a new root-level conversation
 
+## Thought-Free Mode
+
+When `thought_free` is set in the query config, the chat pipeline applies two
+constraints:
+
+1. **LLM providers:** `build_query()` prepends a 10-rule constraint prompt to
+   `bundle.system` that enforces one-pointed, non-discursive output (no
+   epistemic verbs, no observer, no comparisons, sentences ≤ 10 words).
+
+2. **BasicModel provider:** `_call_basicmodel()` sends `"thought_free": true`
+   in the JSON payload.  `serve.py` sets `TheGrammar.thought_free = True`
+   before inference (restricting S-tier to the S→C transition only) and resets
+   it in a `finally` block.
+
+The flag flows: `wikioracle.js` query config → `POST /chat` → `process_chat()`
+→ `_call_provider()` → `build_query()` / `_call_basicmodel()`.
+
 ## Reducing Inferential Truth to Facts and Feelings
 
 The chat pipeline always sends the final query to the provider selected in the

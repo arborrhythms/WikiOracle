@@ -17,3 +17,4 @@ __pycache__/
 /conversations/*.jsonl
 /bin/__pycache__/
 *.pid
+.tunnel.log

@@ -258,14 +258,6 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         raise StateValidationError(f"Unsupported schema URL: {schema}")
     state["schema"] = str(schema) if isinstance(schema, str) and schema else SCHEMA_URL
 
-    # Backward compat: old "time" / "date" fields map to time_creation
-    if "time_creation" not in state:
-        old_time = state.get("time") or state.get("date")
-        if old_time:
-            state["time_creation"] = _coerce_timestamp(old_time)
-    state.pop("time", None)
-    state.pop("date", None)
-
     tc = state.get("time_creation")
     if strict and tc and not _is_iso8601_utc(tc):
         raise StateValidationError("State.time_creation must be ISO8601 UTC")
@@ -321,24 +313,9 @@ def ensure_minimal_state(raw: Any, *, strict: bool = False) -> dict:
         for k, v in _default_ui.items():
             state["ui"].setdefault(k, v)
 
-    # Client identity — flat client_name/client_id in state.
-    # Backward compat: old nested user block → flat fields.
-    if "user_guid" in state:
-        state.setdefault("client_id", state["user_guid"])
-    state.pop("user_guid", None)
-
-    user = state.pop("user", None)
-    if isinstance(user, dict):
-        state.setdefault("client_name", user.get("name", "User"))
-        state.setdefault("client_id", user.get("user_id", ""))
-
-    # Remove legacy context/output (now in config.providers)
-    state.pop("context", None)
-    state.pop("output", None)
-
-    # Clean up legacy fields
-    state.pop("messages", None)
-    state.pop("active_path", None)
+    # Client identity
+    state.setdefault("client_name", "User")
+    state.setdefault("client_id", "")
 
     return state
 
@@ -689,6 +666,16 @@ def _conv_to_xml(conv: dict, parent_el: ET.Element, _seen_ids: set | None = None
         if msg.get("selected") is True and is_first:
             msg_el.set("selected", "true")
         _set_xhtml_content(msg_el, "content", msg.get("content", ""))
+        for att in msg.get("attachments") or []:
+            att_el = ET.SubElement(msg_el, "attachment")
+            if att.get("name"):
+                att_el.set("name", att["name"])
+            if att.get("type"):
+                att_el.set("type", att["type"])
+            if att.get("url"):
+                att_el.set("url", att["url"])
+            if att.get("data"):
+                att_el.text = att["data"]
 
     children = conv.get("children", [])
     for child_conv in children:
@@ -729,6 +716,21 @@ def _conv_from_xml(conv_el: ET.Element) -> dict:
             }
             if _coerce_selected_flag(msg_el.get("selected", False)):
                 msg["selected"] = True
+            attachments = []
+            for att_el in msg_el.findall("attachment"):
+                att = {}
+                if att_el.get("name"):
+                    att["name"] = att_el.get("name")
+                if att_el.get("type"):
+                    att["type"] = att_el.get("type")
+                if att_el.get("url"):
+                    att["url"] = att_el.get("url")
+                if att_el.text and att_el.text.strip():
+                    att["data"] = att_el.text.strip()
+                if att:
+                    attachments.append(att)
+            if attachments:
+                msg["attachments"] = attachments
             conv["messages"].append(msg)
         elif child.tag == "conversation":
             conv["children"].append(_conv_from_xml(child))
@@ -746,8 +748,8 @@ def state_to_xml(state: dict) -> str:
     state = ensure_minimal_state(state, strict=False)
     root = ET.Element("state")
 
-    # -- Client --
-    client_el = ET.SubElement(root, "client")
+    # -- Header --
+    client_el = ET.SubElement(root, "header")
 
     ver_el = ET.SubElement(client_el, "version")
     ver_el.text = str(state.get("version", STATE_VERSION))
@@ -823,10 +825,8 @@ def xml_to_state(text: str) -> dict:
     if root.tag != "state":
         return state
 
-    # -- Client (backward compat: also accept <header>) --
-    client_el = root.find("client")
-    if client_el is None:
-        client_el = root.find("header")  # backward compat
+    # -- Header --
+    client_el = root.find("header")
     if client_el is not None:
         ver_el = client_el.find("version")
         if ver_el is not None and ver_el.text:
@@ -840,12 +840,6 @@ def xml_to_state(text: str) -> dict:
         tc_el = client_el.find("time_creation")
         if tc_el is not None and tc_el.text:
             state["time_creation"] = tc_el.text
-        else:
-            # Backward compat: old <time> element
-            old_t = client_el.find("time")
-            if old_t is not None and old_t.text:
-                state["time_creation"] = old_t.text
-                state["time_lastModified"] = old_t.text
         tm_el = client_el.find("time_lastModified")
         if tm_el is not None and tm_el.text:
             state["time_lastModified"] = tm_el.text
@@ -855,26 +849,12 @@ def xml_to_state(text: str) -> dict:
         sel_el = client_el.find("selected_conversation")
         if sel_el is not None and sel_el.text:
             state["selected_conversation"] = sel_el.text
-        # Flat client identity fields
         cn_el = client_el.find("client_name")
         if cn_el is not None and cn_el.text:
             state["client_name"] = cn_el.text
         ci_el = client_el.find("client_id")
         if ci_el is not None and ci_el.text:
             state["client_id"] = ci_el.text
-        # Backward compat: nested <user> block → flat client fields
-        user_el = client_el.find("user")
-        if user_el is not None:
-            name_el = user_el.find("name")
-            if name_el is not None and name_el.text and "client_name" not in state:
-                state["client_name"] = name_el.text
-            uid_el = user_el.find("user_id")
-            if uid_el is not None and uid_el.text and "client_id" not in state:
-                state["client_id"] = uid_el.text
-        # Backward compat: <user_guid> → client_id
-        ug_el = client_el.find("user_guid")
-        if ug_el is not None and ug_el.text and "client_id" not in state:
-            state["client_id"] = ug_el.text
         # UI preferences
         ui_el = client_el.find("ui")
         if ui_el is not None:

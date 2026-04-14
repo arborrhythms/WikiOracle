@@ -25,8 +25,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 import requests
 
 from config import (
-    Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, _load_config, _PROVIDER_MODELS,
-    DEFAULT_TRUTH_CONTEXT, DEFAULT_CONVERSATION_CONTEXT, DEFAULT_OUTPUT,
+    Config, DEBUG_MODE, PROVIDERS, STATELESS_MODE, TheConfig, _load_config, _PROVIDER_MODELS,
 )
 from graph import apply_selection_flags
 from sensation import preprocess_training_example
@@ -403,9 +402,11 @@ def evaluate_providers(
 
         # Resolve context from section-level defaults (config.providers)
         if wants_conversation:
-            ctx = conversation_context or DEFAULT_CONVERSATION_CONTEXT
+            ctx = conversation_context or TheConfig.get(
+                "server.providers.conversation_context", "")
         else:
-            ctx = truth_context or DEFAULT_TRUTH_CONTEXT
+            ctx = truth_context or TheConfig.get(
+                "server.providers.truth_context", "")
 
         # Per-provider truth: authority_url provides private facts
         prov_truth = resolve_provider_truth(pconfig, entry)
@@ -673,9 +674,9 @@ def build_query(
     bundle.query = user_message or "(continue)"
 
     # 6) Structured output instructions (from config.providers.output)
-    # Fall back to DEFAULT_OUTPUT so the main provider always knows to produce
-    # structured <conversation>/<fact>/<feeling> output.
-    bundle.output = query_config.get("output", "") or DEFAULT_OUTPUT
+    # Fall back to the canonical server output template defined in config.xml.
+    bundle.output = query_config.get("output", "") or TheConfig.get(
+        "server.providers.output", "")
 
     return bundle
 
@@ -1023,8 +1024,12 @@ def _call_nanochat(cfg: Config, messages: List[Dict], temperature: float,
             print(f"  [{i}] {m['role']}: {m['content'][:200]}{'...' if len(m['content']) > 200 else ''}")
     payload = {"messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     provider_timeout = max(PROVIDERS.get("WikiOracle", {}).get("timeout") or timeout, 15)
+    # Separate connect vs read timeout for streaming.  Connect should fail
+    # fast (10 s) but the read timeout must tolerate slow first-token
+    # latency — CPU inference after swap-in can take minutes.
+    stream_read_timeout = max(provider_timeout, 600)
     resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"},
-                         timeout=provider_timeout, stream=True)
+                         timeout=(10, stream_read_timeout), stream=True)
     if resp.status_code >= 400:
         return f"[Error from upstream: HTTP {resp.status_code}] {resp.text[:500]}"
 
@@ -1320,7 +1325,11 @@ def _call_gemini(bundle: ProviderBundle | None, temperature: float,
                 f'<fact trust="{trust}">{html_mod.escape(t)}: {html_mod.escape(u)}</fact>'
                 for t, u in citations
             )
-            result = f"<conversation>{result}</conversation>\n{citation_facts}"
+            # Avoid double-wrapping if Gemini already returned <conversation>
+            if "<conversation" in result:
+                result = f"{result}\n{citation_facts}"
+            else:
+                result = f"<conversation>{result}</conversation>\n{citation_facts}"
 
     return result
 
@@ -1366,32 +1375,16 @@ def _call_provider(cfg: Config, bundle: ProviderBundle | None, temperature: floa
             return _call_nanochat(cfg, local_msgs, temperature,
                                   max_tokens=int(cs.get("max_tokens", 128)),
                                   timeout=int(cs.get("timeout", 120)))
-    # Build effective config: merge client + server keys
+    # Build effective config.  Key precedence is uniform across modes:
+    # the server-side key (PROVIDERS, sourced from <client><providers> in
+    # config.xml) is used unless the request carries a client-side key.
     effective_cfg = dict(pcfg)
     if client_model:
         effective_cfg["model"] = client_model
-    # Key precedence:
-    #   Stateless mode: client key → server key (client owns state)
-    #   Server mode:    server key → hot-reload → client key (server owns state)
-    if config_mod.STATELESS_MODE:
-        if client_api_key:
-            effective_cfg["api_key"] = client_api_key
-        # Fall through to server key if client didn't provide one
-    else:
-        if not effective_cfg.get("api_key") and client_api_key:
-            effective_cfg["api_key"] = client_api_key
+    if client_api_key:
+        effective_cfg["api_key"] = client_api_key
     if not effective_cfg.get("api_key"):
-        if not config_mod.STATELESS_MODE:
-            # Hot-reload config.xml in case keys were added after server start
-            fresh = _load_config()
-            fresh_key = (fresh.get("providers", {}).get(provider) or {}).get("api_key", "")
-            if fresh_key:
-                effective_cfg["api_key"] = fresh_key
-                # Update cached PROVIDERS so subsequent calls don't need to reload
-                if provider in PROVIDERS:
-                    PROVIDERS[provider]["api_key"] = fresh_key
-        if not effective_cfg.get("api_key"):
-            return f"[No API key for {provider}. Add it to config.xml.]"
+        return f"[No API key for {provider}. Add it to config.xml.]"
     if prov_type == "openai":
         if DEBUG_MODE:
             print(f"[DEBUG] → _call_openai ({effective_cfg.get('url', '?')}, model={effective_cfg.get('model')})")
@@ -1779,13 +1772,17 @@ def process_chat(
 
     server_eval = runtime_cfg.get("server", {}).get("evaluation", {})
     server_ts = runtime_cfg.get("server", {}).get("truthset", {})
+    client_provs = (runtime_cfg.get("client") or {}).get("providers") or {}
     provider = (
-        (query_config.get("provider") or runtime_cfg.get("providers", {}).get("default"))
+        (query_config.get("provider") or client_provs.get("default_provider", ""))
         .strip()
     )
-    client_model = (query_config.get("model") or "").strip()
+    client_model = (
+        query_config.get("model") or client_provs.get("default_model", "")
+    ).strip()
     print(f"[WikiOracle] Chat request: provider='{provider}' (from client config), "
-          f"truth_weight={query_config.get('truthset', {}).get('truth_weight', '?')}")
+          f"truth_weight={query_config.get('truthset', {}).get('truth_weight', '?')}, "
+          f"thought_free={query_config.get('thought_free', False)}", flush=True)
 
     temperature = max(0.0, min(2.0, float(
         query_config.get("temp", server_eval.get("temperature", 0.7))
@@ -1798,7 +1795,8 @@ def process_chat(
     # Evaluation settings: url_fetch, max_tokens, timeout
     if "evaluation" not in query_config or not isinstance(query_config.get("evaluation"), dict):
         query_config["evaluation"] = {}
-    query_config["evaluation"].setdefault("url_fetch", server_eval.get("url_fetch", False))
+    query_config["evaluation"].setdefault("url_fetch",
+        query_config.get("url_fetch", server_eval.get("url_fetch", False)))
     query_config["evaluation"].setdefault("max_tokens", server_eval.get("max_tokens", 128))
     query_config["evaluation"].setdefault("timeout", server_eval.get("timeout", 120))
     # Training settings: truth_max_entries
@@ -1837,11 +1835,12 @@ def process_chat(
     conversation_sources: list = []
     truth_contributions: list = []
 
-    providers_cfg = runtime_cfg.get("providers", {})
+    providers_cfg = (runtime_cfg.get("server") or {}).get("providers", {})
     context_text = strip_xhtml(providers_cfg.get("context", ""))
     print(f"[WikiOracle] Chat: provider='{provider}', model='{client_model or PROVIDERS.get(provider, {}).get('model', '?')}', "
           f"context={'yes' if context_text else 'none'} ({len(context_text)} chars), "
-          f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}")
+          f"api_key={'local' if provider == 'wikioracle' else 'server' if PROVIDERS.get(provider, {}).get('api_key') else 'MISSING'}",
+          flush=True)
     truth_count = len(state.get("truth") or [])
     truth_weight_flag = query_config.get("truthset", {}).get("truth_weight", "MISSING")
 
@@ -1850,11 +1849,13 @@ def process_chat(
     query_config.setdefault("context", providers_cfg.get("context", ""))
     query_config.setdefault("output", providers_cfg.get("output", ""))
 
-    client_api_key = ""
-    if config_mod.STATELESS_MODE:
-        rc_providers = runtime_cfg.get("providers", {})
-        rc_pcfg = rc_providers.get(provider, {})
-        client_api_key = rc_pcfg.get("api_key", "")
+    # Per-request client API key — present in any mode (stateful or
+    # stateless).  When set, it overrides the server's PROVIDERS entry
+    # for this single call, per the canonical key precedence rule.
+    rc_client = runtime_cfg.get("client") or {}
+    rc_client_provs = rc_client.get("providers") or {}
+    rc_pcfg = rc_client_provs.get(provider) or {}
+    client_api_key = rc_pcfg.get("api_key", "")
 
     # ── Step 1: truth provider fan-out ──
     if dyn_providers:
@@ -1884,7 +1885,7 @@ def process_chat(
                          conversation_id=context_conv_id,
                          provider_sources=all_provider_sources or None)
     print(f"[WikiOracle] RAG: truth_weight={truth_weight_flag}, truth_entries={truth_count}, "
-          f"bundle.sources={len(bundle.sources)}")
+          f"bundle.sources={len(bundle.sources)}", flush=True)
     if config_mod.DEBUG_MODE:
         print(f"[DEBUG] ProviderBundle: system={len(bundle.system)} chars, "
               f"history={len(bundle.history)} msgs, "
@@ -1931,13 +1932,6 @@ def process_chat(
     # Use <conversation> text for display if the main provider produced structured
     # output; otherwise fall back to the full response text.
     display_text = main_conv_text if main_conv_text else response_text
-
-    # Output safety filtering on the display text (all providers)
-    if detect_identifiability(display_text):
-        display_text = "[Response filtered: identifiable content]"
-    asym_reason = detect_asymmetric_claim(display_text)
-    if asym_reason:
-        display_text = "[Response filtered: asymmetric claim]"
 
     user_content = ensure_xhtml(user_msg) if user_msg else ""
     assistant_content = ensure_xhtml(display_text)
@@ -2180,10 +2174,11 @@ def process_chat(
                 "store_concrete", ts_cfg.get("store_concrete", False))
             if not _store_part:
                 client_truth = filter_knowledge_only(client_truth)
-            client_truth = [
-                e for e in client_truth
-                if not detect_identifiability(e.get("content", ""))
-            ]
+            for e in client_truth:
+                if detect_identifiability(e.get("content", "")):
+                    print(f"[WikiOracle] Warning: truth entry contains identifiable content: "
+                          f"{e.get('content', '')[:80]!r}")
+
             # Symmetry check (doc/Ethics.md §5-8)
             if ts_cfg.get("truth_symmetry", True):
                 surviving = []

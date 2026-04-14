@@ -36,9 +36,10 @@ function _deepestSelectedNode(root) {
   return best || root;
 }
 
-function conversationsToHierarchy(conversations, selectedId) {
+function conversationsToHierarchy(conversations, selectedId, multiSelectedSet) {
   var seen = {};                 // id → mapped node
   _diamondLinks = [];
+  var _ms = multiSelectedSet || new Set();
 
   function mapConv(conv, parentId) {
     if (seen[conv.id]) {
@@ -62,6 +63,7 @@ function conversationsToHierarchy(conversations, selectedId) {
       questionCount: qCount,
       messages: msgs,
       selected: conv.selected === true || conv.id === selectedId,
+      multiSelected: _ms.has(conv.id),
       children: childNodes.length > 0 ? childNodes : undefined,
     };
     seen[conv.id] = node;
@@ -278,6 +280,7 @@ function renderTree(hierarchyData, callbacks) {
     const el = d3.select(this);
     const isRoot = d.data.id === "root";
     const isSel = d.data.selected;
+    const isMulti = d.data.multiSelected;
 
     if (isRoot) {
       el.append("circle")
@@ -332,14 +335,14 @@ function renderTree(hierarchyData, callbacks) {
         .attr("x", -pillW / 2).attr("y", -pillH / 2)
         .attr("width", pillW).attr("height", pillH)
         .attr("rx", pillH / 2)
-        .attr("fill", bg)
-        .attr("stroke", border)
-        .attr("stroke-width", 1);
+        .attr("fill", isMulti ? accentLight : bg)
+        .attr("stroke", isMulti ? accent : border)
+        .attr("stroke-width", isMulti ? 2 : 1);
       el.append("text")
         .attr("text-anchor", "middle")
         .attr("dy", "0.35em")
         .attr("font-size", "9px")
-        .attr("fill", fgMuted)
+        .attr("fill", isMulti ? fg : fgMuted)
         .attr("pointer-events", "none")
         .text(short);
     }
@@ -368,7 +371,14 @@ function renderTree(hierarchyData, callbacks) {
       return;
     }
 
+    // Shift-click → toggle multi-selection
+    if (event.shiftKey && d.data.id !== "root") {
+      if (callbacks.onToggleMultiSelect) callbacks.onToggleMultiSelect(d.data.id);
+      return;
+    }
+
     // Navigate (root → null, else → node id)
+    if (callbacks.onClearMultiSelect) callbacks.onClearMultiSelect();
     if (callbacks.onNavigate) callbacks.onNavigate(d.data.id === "root" ? null : d.data.id);
   });
 
@@ -594,10 +604,11 @@ function _showContextMenu(event, nodeData, callbacks, container) {
     menu.appendChild(pasteItem);
   }
 
-  // Delete
+  // Delete (shows count when multi-selected)
+  var multiCount = callbacks.multiSelectCount ? callbacks.multiSelectCount() : 0;
   var deleteItem = document.createElement("div");
   deleteItem.className = "ctx-item ctx-danger";
-  deleteItem.textContent = "Delete";
+  deleteItem.textContent = multiCount > 1 ? "Delete " + multiCount + " selected" : "Delete";
   deleteItem.addEventListener("click", function(e) {
     e.stopPropagation(); _hideContextMenu();
     if (callbacks.onDelete) callbacks.onDelete(nodeData.id);

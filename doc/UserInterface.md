@@ -144,15 +144,10 @@ preferences (layout, theme, confirm actions) are also saved in state.
 | Username                 | `setUsername`          | text          | `state.client_name`                         | `"User"`                                | Display name shown in chat messages.                              |
 | Provider                 | `setProvider`          | select        | `config.providers.default`                  | `"wikioracle"`                          | Active LLM provider.                                              |
 | Model                    | `setModel`             | select        | `state.ui.model`                            | provider metadata model or empty        | Explicit model override sent in `POST /chat` as `config.model`.   |
-| Provider trust           | `setProviderTrust`     | range (0–1)   | runtime `config.server.providers.<selected>.trust` | `1.0` for `wikioracle`, `0.6` otherwise | Per-provider trust weight used by the UI/runtime config bundle.   |
+| Provider trust           | `setProviderTrust`     | range (0–1)   | `config.server.providers.<selected>.trust`  | `1.0` for `wikioracle`, `0.6` otherwise | Per-provider trust weight; updates when the provider dropdown changes. |
 | Layout                   | `setLayout`            | select        | `state.ui.layout`                           | saved value; legacy fallback `flat`     | Panel layout mode. The current selector exposes `horizontal` and `vertical`. |
 | Theme                    | `setTheme`             | select        | `state.ui.theme`                            | `"system"`                              | Colour theme (`system`, `light`, `dark`).                         |
 | Temperature              | `setTemp`              | range (0–2)   | `config.server.evaluation.temperature`      | `0.7`                                   | Sampling temperature for the LLM.                                 |
-| Max tokens               | `setMaxTokens`         | range         | `config.server.evaluation.max_tokens`       | `128`                                   | Maximum tokens in the LLM response.                               |
-| Timeout                  | `setTimeout`           | range         | `config.server.evaluation.timeout`          | `120`                                   | Request timeout in seconds.                                       |
-| Truth weight             | `setTruthWeight`       | range (0–1)   | `config.server.truthset.truth_weight`       | `0.7`                                   | How much DoT gates the learning rate. See below.                  |
-| Max truth entries        | `setTruthMaxEntries`   | number        | `config.server.training.truth_max_entries`  | `1000`                                  | Maximum entries in the server TruthSet before trimming.           |
-| Store particular facts   | `setStoreParticulars`  | checkbox      | `config.server.truthset.store_concrete`     | `false`                                 | Store spatiotemporally-bound facts in the server TruthSet.        |
 | Allow URL fetching       | `setUrlFetch`          | checkbox      | `config.server.evaluation.url_fetch`        | `false`                                 | Allow the assistant to fetch URL content.                         |
 | Thought-free mode        | `setThoughtFree`       | checkbox      | `config.server.evaluation.thought_free`     | `false`                                 | Enable shamatha speech: restricts grammar to S→C only, prepends 10-rule non-discursive constraint to LLM providers. |
 | Confirm deletes / merges | `setConfirm`           | checkbox      | `state.ui.confirm_actions`                  | `false`                                 | Require confirmation before destructive operations.               |
@@ -250,10 +245,6 @@ strings hard-coded in `client/util.js` match the tables below.
 | `reference` | `Reference: citation with external link`      |
 | `authority` | `Authority: pointer to remote TruthSet`       |
 | `provider`  | `Provider: external LLM endpoint`             |
-| `not`       | `NOT: negation of a truth entry`              |
-| `non`       | `NON: non-affirming weakening toward zero`    |
-| `or`        | `OR: true when any child is true (max)`       |
-| `and`       | `AND: true when all children are true (min)`  |
 
 ### Descriptions
 
@@ -274,14 +265,14 @@ strings hard-coded in `client/util.js` match the tables below.
 | Key         | Template                                                                                             |
 | ----------- | ---------------------------------------------------------------------------------------------------- |
 | `feeling`   | `<feeling>Subjective statement here.</feeling>`                                                      |
-| `fact`      | `<fact DoT="0.0">Assertion text here.</fact>`                                                        |
-| `reference` | `<reference DoT="0.0"><a href="https://example.com">Link text</a></reference>`                       |
+| `fact`      | `<fact trust="0.0">Assertion text here.</fact>`                                                      |
+| `reference` | `<reference trust="0.0"><a href="https://example.com">Link text</a></reference>`                     |
 | `and`       | `<logic><and><ref id=""/><ref id=""/></and></logic>`                                                 |
 | `or`        | `<logic><or><ref id=""/><ref id=""/></or></logic>`                                                   |
 | `not`       | `<logic><not><ref id=""/></not></logic>`                                                             |
 | `non`       | `<logic><non><ref id=""/></non></logic>`                                                             |
-| `provider`  | `<provider DoT="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>` |
-| `authority` | `<authority DoT="0.0"><url>https://example.com/kb.xml</url></authority>`                             |
+| `provider`  | `<provider trust="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>` |
+| `authority` | `<authority trust="0.0"><url>https://example.com/state.zip</url><key>password</key></authority>` |
 
 ### Empty state
 

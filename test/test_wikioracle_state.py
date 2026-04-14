@@ -119,17 +119,6 @@ class TestEnsureMinimalState(unittest.TestCase):
         ]), strict=True)
         self.assertEqual(state["truth"][0]["trust"], 1.0)
 
-    def test_removes_legacy_fields(self):
-        state = ensure_minimal_state({
-            "version": 2, "schema": SCHEMA_URL, "time": "2026-02-23T00:00:00Z",
-            "conversations": [],
-            "messages": [{"id": "m_1"}],  # legacy
-            "active_path": ["m_1"],  # legacy
-            "truth": [],
-        }, strict=False)
-        self.assertNotIn("messages", state)
-        self.assertNotIn("active_path", state)
-
     def test_strict_rejects_non_path_conversation_selection(self):
         root = _make_conv("c_root", "root", [_make_msg("m_1", "user", "Alec", "<p>Q</p>")], children=[
             _make_conv("c_a", "A", [_make_msg("m_2", "assistant", "Bot", "<p>A</p>")]),
@@ -643,20 +632,6 @@ class TestSelectedConversationRoundtrip(unittest.TestCase):
         self.assertEqual(restored["selected_conversation"], "c_1")
         self.assertEqual(restored["selected_message"], "m_2")
         self.assertTrue(restored["conversations"][0]["messages"][1].get("selected"))
-
-
-class TestOutputField(unittest.TestCase):
-    """Test that output is no longer in state (moved to config.providers)."""
-
-    def test_output_removed_from_state(self):
-        """Output is removed from state by ensure_minimal_state."""
-        state = ensure_minimal_state({"output": "Custom format."})
-        self.assertNotIn("output", state)
-
-    def test_output_absent_in_empty_state(self):
-        """Missing output stays absent (no longer defaulted in state)."""
-        state = ensure_minimal_state({})
-        self.assertNotIn("output", state)
 
 
 class TestTitleField(unittest.TestCase):

@@ -13,3 +13,6 @@ torchvision
 fastapi>=0.117.1
 uvicorn>=0.36.0
 pytest
+pyzipper
+dropbox>=12.0
+qrcode[pil]>=7.0

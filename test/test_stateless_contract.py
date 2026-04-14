@@ -47,7 +47,11 @@ def _make_state(**overrides):
 
 
 def _make_runtime_config(**overrides):
-    """Create a runtime_config dict (parsed config)."""
+    """Create a runtime_config dict in the canonical {server, client} shape.
+
+    Callers may override either section; legacy ``providers={...}`` overrides
+    are mapped onto ``client.providers`` so older tests still work.
+    """
     base = {
         "server": {
             "evaluation": {
@@ -60,8 +64,18 @@ def _make_runtime_config(**overrides):
                 "truth_weight": 0.7,
             },
         },
-        "providers": {"default": "WikiOracle"},
+        "client": {
+            "providers": {"default_provider": "WikiOracle"},
+        },
     }
+    legacy_provs = overrides.pop("providers", None)
+    if legacy_provs is not None:
+        cli_provs = base["client"]["providers"]
+        if "default" in legacy_provs:
+            cli_provs["default_provider"] = legacy_provs["default"]
+        for k, v in legacy_provs.items():
+            if k != "default":
+                cli_provs[k] = v
     base.update(overrides)
     return base
 
@@ -282,21 +296,26 @@ class TestBootstrapEndpoint(StatelessContractBase):
         self.assertIn("name", provs["WikiOracle"])
 
     def test_bootstrap_config_has_expected_keys(self):
-        """Config in bootstrap response has expected nested keys."""
+        """Config in bootstrap response has the canonical {server, client} shape."""
         resp = self.client.get("/bootstrap")
         data = resp.get_json()
         c = data["config"]
-        # Top-level sections: server + providers only
+        # Canonical top-level: only `server` and `client`
         self.assertNotIn("user", c)
-        self.assertNotIn("ui", c)       # UI now lives in state
-        self.assertNotIn("chat", c)     # split into server.evaluation + server.truthset
+        self.assertNotIn("chat", c)         # split into server.evaluation + server.truthset
+        self.assertNotIn("providers", c)    # now under server.providers and client.providers
+        self.assertNotIn("storage", c)      # now under client.storage
+        self.assertNotIn("ui", c)           # now under client.ui
         self.assertIn("server", c)
-        self.assertIn("providers", c)
-        # Nested sub-keys
-        self.assertIn("default", c["providers"])
+        self.assertIn("client", c)
+        # Server section
         self.assertIn("stateless", c["server"])
         self.assertIn("url_prefix", c["server"])
         self.assertIn("server_id", c["server"])
+        self.assertIn("providers", c["server"])
+        # Client section
+        self.assertIn("providers", c["client"])
+        self.assertIn("default_provider", c["client"]["providers"])
 
 
 class TestConfigDrivenRuntimeBehavior(StatelessContractBase):
@@ -496,11 +515,11 @@ class TestStatelessExistingEndpoints(StatelessContractBase):
         resp = self.client.post("/merge", json={"state": _make_state()})
         self.assertEqual(resp.status_code, 403)
 
-    def test_config_post_returns_403(self):
+    def test_config_post_with_empty_config_returns_403(self):
         resp = self.client.post("/config", json={"config": {}})
         self.assertEqual(resp.status_code, 403)
 
-    def test_config_post_returns_403(self):
+    def test_config_post_with_provider_returns_403(self):
         resp = self.client.post("/config", json={"provider": "WikiOracle"})
         self.assertEqual(resp.status_code, 403)
 

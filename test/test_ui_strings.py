@@ -188,11 +188,20 @@ class TestUIStringsConsistency(unittest.TestCase):
         )
 
     def test_all_nine_truth_types_present(self):
-        """All 9 truth types appear in all three tables."""
-        for heading in ("Dropdown labels", "Descriptions", "Templates"):
+        """All 9 truth types appear in Descriptions and Templates;
+        Dropdown labels only lists user-addable types (no logic operators)."""
+        _DROPDOWN_TYPES = frozenset({
+            "feeling", "fact", "reference", "provider", "authority",
+        })
+        expected = {
+            "Dropdown labels": _DROPDOWN_TYPES,
+            "Descriptions": _TRUTH_TYPES,
+            "Templates": _TRUTH_TYPES,
+        }
+        for heading, expect in expected.items():
             md_keys = set(_parse_md_table(self.md_text, heading).keys())
             self.assertEqual(
-                md_keys, _TRUTH_TYPES,
+                md_keys, expect,
                 f"MD table '{heading}' missing/extra keys",
             )
 

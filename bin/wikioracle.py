@@ -44,7 +44,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from flask import Flask, request as flask_request, jsonify, send_from_directory
+from flask import Flask, request as flask_request, jsonify, redirect, send_from_directory, session
 
 # Ensure bin/ is on the path so sibling modules are importable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -56,12 +56,13 @@ from config import (
     TheConfig,
     _PROJECT_ROOT,
     _build_providers,
+    _client_safe_config,
     _find_xml,
-    _normalize_config,
     _env_bool,
     _ensure_self_signed_cert,
     _load_config,
     _load_config_xml,
+    _load_config_xml_string,
     config_to_xml,
     load_config,
     parse_args,
@@ -88,16 +89,63 @@ from response import (
     run_cli_merge,
 )
 from security import RateLimiter, guard_input
+from zip_crypto import build_encrypted_zip, read_encrypted_zip
+import dropbox_storage
+
+
+# ---------------------------------------------------------------------------
+# QR code generation for authority sharing
+# ---------------------------------------------------------------------------
+def _generate_authority_qr(dropbox_url: str, password: str) -> tuple:
+    """Generate a QR code encoding the full authority XML block.
+
+    The QR contains the text that can be pasted directly into the
+    <authority> truth field of a WikiOracle client.
+
+    Returns (base64_png, authority_xml).
+    """
+    import base64
+    import io
+    from xml.sax.saxutils import escape
+
+    import qrcode
+
+    dl_url = dropbox_url.replace("dl=0", "dl=1")
+    authority_xml = f'<authority trust="0.0"><url>{escape(dl_url)}</url><key>{escape(password)}</key></authority>'
+
+    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M,
+                        box_size=6, border=2)
+    qr.add_data(authority_xml)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return b64, authority_xml
 
 
 # ---------------------------------------------------------------------------
 # Flask app factory
 # ---------------------------------------------------------------------------
-def create_app(cfg: Config, url_prefix: str = "") -> Flask:
+def create_app(cfg: Config, url_prefix: str = "", use_ssl: bool = True) -> Flask:
     """Create and configure the WikiOracle Flask application instance."""
     log = logging.getLogger("wikioracle")
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = cfg.max_state_bytes
+
+    # Session (for Dropbox OAuth tokens — never stores the WikiOracle password)
+    if cfg.session_secret:
+        app.secret_key = cfg.session_secret
+    else:
+        # Derive a stable secret from the state file path so sessions survive
+        # restarts without requiring explicit WIKIORACLE_SESSION_SECRET config.
+        import hashlib
+        _seed = str(cfg.state_file or cfg.data_dir or "wikioracle")
+        app.secret_key = hashlib.sha256(f"wikioracle-session:{_seed}".encode()).hexdigest()
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SECURE"] = use_ssl
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
     # Rate limiting (disabled when env var is 0)
     _chat_rpm = int(os.getenv("WIKIORACLE_RATE_LIMIT_CHAT", "30"))
@@ -129,17 +177,17 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
         if _config_xml_path is not None:
             _disk_cfg = _load_config_xml(_config_xml_path)
             if not _disk_cfg.get("server", {}).get("server_id"):
-                normalized = _normalize_config(TheConfig.data)
-                new_sid = normalized.get("server", {}).get("server_id")
-                if new_sid:
-                    _disk_cfg.setdefault("server", {})["server_id"] = new_sid
-                    try:
-                        _config_xml_path.write_text(
-                            config_to_xml(_disk_cfg), encoding="utf-8",
-                        )
-                        log.info("Persisted auto-generated server_id to config.xml")
-                    except OSError as exc:
-                        log.warning("Could not persist server_id: %s", exc)
+                import uuid as _uuid_local
+                new_sid = str(_uuid_local.uuid4())
+                _disk_cfg.setdefault("server", {})["server_id"] = new_sid
+                TheConfig.set("server.server_id", new_sid)
+                try:
+                    _config_xml_path.write_text(
+                        config_to_xml(_disk_cfg), encoding="utf-8",
+                    )
+                    log.info("Persisted auto-generated server_id to config.xml")
+                except OSError as exc:
+                    log.warning("Could not persist server_id: %s", exc)
 
     # Security headers (CORS + CSP)
     @app.after_request
@@ -169,7 +217,8 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
     def auth_check():
         """Enforce bearer-token auth (if configured) and CSRF header on POSTs."""
         # Bearer-token auth — skip for OPTIONS, /health, and static UI serving
-        _PUBLIC_ENDPOINTS = {"health", "ui_index", "static_files", "nanochat_status", "basicmodel_status"}
+        _PUBLIC_ENDPOINTS = {"health", "ui_index", "static_files", "nanochat_status", "basicmodel_status",
+                              "dropbox_auth_start", "dropbox_auth_callback", "dropbox_auth_status"}
         if cfg.api_token and flask_request.method != "OPTIONS":
             if flask_request.endpoint not in _PUBLIC_ENDPOINTS:
                 auth = flask_request.headers.get("Authorization", "")
@@ -252,12 +301,12 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             seed_state = ensure_minimal_state({}, strict=False)
         result["state"] = seed_state
 
-        # Normalized config (with defaults + runtime server fields)
+        # Client-safe view of the canonical config (no in-code defaults).
         fresh = _load_config()
         if fresh:
             TheConfig.replace(fresh)
             _inject_server_runtime()
-        result["config"] = _normalize_config(TheConfig.data)
+        result["config"] = _client_safe_config(TheConfig.data)
 
         return jsonify(result)
 
@@ -509,7 +558,7 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
 
     @app.route(url_prefix + "/config", methods=["GET", "POST"])
     def config_endpoint():
-        """GET: normalized config.  POST: accept full config dict; write config.xml."""
+        """GET: client-safe config.  POST: replace ``client`` section; write config.xml."""
         # Re-read config to pick up hot-reloads
         fresh = _load_config()
         if fresh:
@@ -517,43 +566,264 @@ def create_app(cfg: Config, url_prefix: str = "") -> Flask:
             _inject_server_runtime()
 
         if flask_request.method == "GET":
-            return jsonify({"config": _normalize_config(TheConfig.data)})
-        else:
-            if config_mod.STATELESS_MODE:
-                return jsonify({"ok": False, "error": "Server is in stateless mode — writes disabled"}), 403
+            return jsonify({"config": _client_safe_config(TheConfig.data)})
 
-            body = flask_request.get_json(force=True, silent=True) or {}
+        # In stateless mode the server's TheConfig is shared across all
+        # clients — a single client must not mutate it.  Per-request
+        # overrides go through the chat body's `runtime_config` instead.
+        if config_mod.STATELESS_MODE:
+            return jsonify({"ok": False, "error": "stateless_no_config_writes"}), 403
 
-            try:
+        body = flask_request.get_json(force=True, silent=True) or {}
+        if "config" not in body or not isinstance(body["config"], dict):
+            return jsonify({"ok": False, "error": "missing config dict"}), 400
+
+        try:
+            incoming = body["config"]
+            new_client = incoming.get("client")
+            if not isinstance(new_client, dict):
+                return jsonify({"ok": False, "error": "missing client section"}), 400
+
+            # Replace the entire client section wholesale.  The server
+            # section is authoritative on disk and ignored from the client.
+            TheConfig.set("client", copy.deepcopy(new_client))
+            PROVIDERS.clear()
+            PROVIDERS.update(_build_providers())
+
+            # Stateful servers persist; stateless servers keep changes in memory.
+            if not config_mod.STATELESS_MODE:
                 cfg_xml = _find_xml(_PROJECT_ROOT, "config.xml") or _PROJECT_ROOT / "config.xml"
+                cfg_xml.write_text(config_to_xml(TheConfig.data), encoding="utf-8")
 
-                # Client sends { config: {...} } — the full config dict
-                if "config" not in body or not isinstance(body["config"], dict):
-                    return jsonify({"ok": False, "error": "missing config dict"}), 400
+            return jsonify({"ok": True, "config": _client_safe_config(TheConfig.data)})
+        except Exception as exc:
+            log.exception("POST /config failed")
+            return jsonify({"ok": False, "error": "Configuration update failed"}), 400
 
-                data = body["config"]
-                # Strip runtime-only field (server.providers) — not user config.
-                if isinstance(data.get("server"), dict):
-                    data["server"].pop("providers", None)
-                # Preserve the on-disk allowed_urls — clients must not
-                # override this server-level security setting.
-                disk_allowed = TheConfig.get("server.allowed_urls", None)
-                if isinstance(data.get("server"), dict):
-                    data["server"].pop("allowed_urls", None)
-                if disk_allowed is not None:
-                    data.setdefault("server", {})["allowed_urls"] = disk_allowed
+    # ------------------------------------------------------------------
+    # Dropbox OAuth2 routes
+    # ------------------------------------------------------------------
+    def _dbx_app_creds():
+        """Return (app_key, app_secret) from config.xml <server><dropbox>."""
+        dbx = TheConfig.get("server.dropbox", None)
+        if not isinstance(dbx, dict):
+            return None, None
+        return dbx.get("app_key", ""), dbx.get("app_secret", "")
 
-                cfg_xml.write_text(config_to_xml(data), encoding="utf-8")
+    @app.route(url_prefix + "/auth/dropbox/start", methods=["GET"])
+    def dropbox_auth_start():
+        """Redirect browser to Dropbox OAuth2 authorization page."""
+        import dropbox as _dbx
+        app_key, app_secret = _dbx_app_creds()
+        if not app_key:
+            return jsonify({"ok": False, "error": "Dropbox app_key not configured"}), 500
+        redirect_uri = flask_request.url_root.rstrip("/") + url_prefix + "/auth/dropbox/callback"
+        flow = _dbx.DropboxOAuth2Flow(
+            consumer_key=app_key,
+            consumer_secret=app_secret,
+            redirect_uri=redirect_uri,
+            session=dict(session),  # copy for CSRF token storage
+            csrf_token_session_key="dbx_csrf",
+            token_access_type="offline",
+        )
+        auth_url = flow.start()
+        # Store CSRF token in real session
+        session["dbx_csrf"] = flow.session.get("dbx_csrf", "")
+        return redirect(auth_url)
 
-                TheConfig.replace(_load_config())
-                _inject_server_runtime()
-                PROVIDERS.clear()
-                PROVIDERS.update(_build_providers())
-                normalized = _normalize_config(TheConfig.data)
-                return jsonify({"ok": True, "config": normalized})
-            except Exception as exc:
-                log.exception("POST /config failed")
-                return jsonify({"ok": False, "error": "Configuration update failed"}), 400
+    @app.route(url_prefix + "/auth/dropbox/callback", methods=["GET"])
+    def dropbox_auth_callback():
+        """Complete Dropbox OAuth2 and store tokens in session."""
+        import dropbox as _dbx
+        app_key, app_secret = _dbx_app_creds()
+        redirect_uri = flask_request.url_root.rstrip("/") + url_prefix + "/auth/dropbox/callback"
+        flow = _dbx.DropboxOAuth2Flow(
+            consumer_key=app_key,
+            consumer_secret=app_secret,
+            redirect_uri=redirect_uri,
+            session={"dbx_csrf": session.get("dbx_csrf", "")},
+            csrf_token_session_key="dbx_csrf",
+            token_access_type="offline",
+        )
+        try:
+            result = flow.finish(flask_request.args)
+        except Exception as exc:
+            log.exception("Dropbox OAuth callback failed")
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        session["dbx_access_token"] = result.access_token
+        session["dbx_refresh_token"] = result.refresh_token or ""
+        session.pop("dbx_csrf", None)
+        return redirect(url_prefix + "/")
+
+    @app.route(url_prefix + "/auth/dropbox/status", methods=["GET"])
+    def dropbox_auth_status():
+        """Return whether Dropbox is configured and whether a session is active."""
+        app_key, _ = _dbx_app_creds()
+        return jsonify({
+            "configured": bool(app_key),
+            "connected": bool(session.get("dbx_access_token")),
+        })
+
+    @app.route(url_prefix + "/auth/dropbox/logout", methods=["POST"])
+    def dropbox_auth_logout():
+        """Clear Dropbox tokens from session."""
+        session.pop("dbx_access_token", None)
+        session.pop("dbx_refresh_token", None)
+        return jsonify({"ok": True})
+
+    # ------------------------------------------------------------------
+    # Storage routes (Dropbox-backed encrypted ZIP)
+    # ------------------------------------------------------------------
+    def _dbx_session_creds():
+        """Return (access_token, refresh_token, app_key, app_secret) or None."""
+        at = session.get("dbx_access_token")
+        if not at:
+            return None
+        rt = session.get("dbx_refresh_token", "")
+        app_key, app_secret = _dbx_app_creds()
+        return at, rt, app_key, app_secret
+
+    @app.route(url_prefix + "/storage/status", methods=["GET"])
+    def storage_status():
+        """Check whether any encrypted files exist in Dropbox."""
+        creds = _dbx_session_creds()
+        if not creds:
+            return jsonify({"has_files": False})
+        at, rt, ak, aps = creds
+        try:
+            # Check for any *_config.zip or *_state.zip (or legacy config.zip)
+            has = (dropbox_storage.file_exists(at, rt, ak, aps, "/User_config.zip")
+                   or dropbox_storage.file_exists(at, rt, ak, aps, "/config.zip"))
+            return jsonify({"has_files": has})
+        except Exception as exc:
+            log.warning("storage/status: %s", exc)
+            return jsonify({"has_files": False})
+
+    @app.route(url_prefix + "/storage/save", methods=["POST"])
+    def storage_save():
+        """Encrypt and upload state/config ZIPs to Dropbox."""
+        from state import state_to_xml
+        creds = _dbx_session_creds()
+        if not creds:
+            return jsonify({"ok": False, "error": "not_connected"}), 401
+        at, rt, ak, aps = creds
+
+        body = flask_request.get_json(force=True, silent=True) or {}
+        password = body.get("password", "")
+        which = body.get("which", "both")
+        name = body.get("name", "User")
+        if not password:
+            return jsonify({"ok": False, "error": "missing_password"}), 400
+        # Sanitize name: alphanumeric + underscore only
+        import re as _re
+        name = _re.sub(r"[^A-Za-z0-9_]", "", name) or "User"
+
+        state_path = f"/{name}_state.zip"
+        config_path = f"/{name}_config.zip"
+
+        try:
+            if which in ("state", "both"):
+                state_data = _load_state(cfg)
+                state_xml = state_to_xml(state_data).encode("utf-8")
+                state_zip = build_encrypted_zip("state.xml", state_xml, password)
+                dropbox_storage.upload_file(at, rt, ak, aps, state_path, state_zip)
+
+            if which in ("config", "both"):
+                # In stateless mode the server's TheConfig never sees client
+                # selections, so the client must supply its in-memory config
+                # in the request body. Use it when present; fall back to
+                # TheConfig.data otherwise.
+                cfg_to_save = TheConfig.data
+                client_cfg = body.get("config")
+                if isinstance(client_cfg, dict):
+                    merged = copy.deepcopy(TheConfig.data)
+                    if isinstance(client_cfg.get("client"), dict):
+                        merged["client"] = copy.deepcopy(client_cfg["client"])
+                    cfg_to_save = merged
+                config_xml = config_to_xml(cfg_to_save).encode("utf-8")
+                config_zip = build_encrypted_zip("config.xml", config_xml, password)
+                dropbox_storage.upload_file(at, rt, ak, aps, config_path, config_zip)
+
+            result = {"ok": True}
+            # Generate authority-sharing QR only for state saves (not config)
+            if which == "state":
+                try:
+                    shared_url = dropbox_storage.create_shared_link(
+                        at, rt, ak, aps, state_path)
+                    qr_png, authority_xml = _generate_authority_qr(shared_url, password)
+                    result["qr_png"] = qr_png
+                    result["authority_uri"] = authority_xml
+                except Exception:
+                    log.debug("Could not generate authority QR", exc_info=True)
+
+            return jsonify(result)
+        except Exception as exc:
+            log.exception("POST /storage/save failed")
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.route(url_prefix + "/storage/load", methods=["POST"])
+    def storage_load():
+        """Download and decrypt state/config ZIPs from Dropbox."""
+        from state import xml_to_state
+        creds = _dbx_session_creds()
+        if not creds:
+            return jsonify({"ok": False, "error": "not_connected"}), 401
+        at, rt, ak, aps = creds
+
+        body = flask_request.get_json(force=True, silent=True) or {}
+        password = body.get("password", "")
+        which = body.get("which", "both")
+        name = body.get("name", "User")
+        if not password:
+            return jsonify({"ok": False, "error": "missing_password"}), 400
+        import re as _re
+        name = _re.sub(r"[^A-Za-z0-9_]", "", name) or "User"
+
+        state_path = f"/{name}_state.zip"
+        config_path = f"/{name}_config.zip"
+
+        result: Dict[str, Any] = {"ok": True}
+        try:
+            if which in ("state", "both"):
+                if not dropbox_storage.file_exists(at, rt, ak, aps, state_path):
+                    if which == "state":
+                        return jsonify({"ok": False, "error": "not_found"}), 404
+                else:
+                    state_zip = dropbox_storage.download_file(at, rt, ak, aps, state_path)
+                    state_xml_bytes = read_encrypted_zip(state_zip, "state.xml", password)
+                    state_data = xml_to_state(state_xml_bytes.decode("utf-8"))
+                    if not config_mod.STATELESS_MODE:
+                        _save_state(cfg, state_data)
+                    result["state"] = state_data
+
+            if which in ("config", "both"):
+                if not dropbox_storage.file_exists(at, rt, ak, aps, config_path):
+                    if which == "config":
+                        return jsonify({"ok": False, "error": "not_found"}), 404
+                else:
+                    config_zip = dropbox_storage.download_file(at, rt, ak, aps, config_path)
+                    config_xml_bytes = read_encrypted_zip(config_zip, "config.xml", password)
+                    config_data = _load_config_xml_string(config_xml_bytes.decode("utf-8"))
+                    result["config"] = _client_safe_config(config_data)
+
+            return jsonify(result)
+        except RuntimeError:
+            return jsonify({"ok": False, "error": "bad_password"}), 403
+        except Exception as exc:
+            log.exception("POST /storage/load failed")
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.route(url_prefix + "/authority/conversations", methods=["POST"])
+    def authority_conversations():
+        """Fetch and return conversations from an authority URL."""
+        from truth import fetch_authority_conversations
+        body = flask_request.get_json(force=True, silent=True) or {}
+        url = body.get("url", "")
+        if not url:
+            return jsonify({"ok": False, "error": "missing_url"}), 400
+        decrypt_key = body.get("key") or None
+        convs = fetch_authority_conversations(url, decrypt_key=decrypt_key)
+        return jsonify({"ok": True, "conversations": convs})
 
     # Static file serving — all UI assets live in client/ subdirectory
     ui_dir = _PROJECT_ROOT / "client"
@@ -656,6 +926,9 @@ def main() -> int:
         print(f"  Online trn : \033[32mON\033[0m (device={ot_device})")
     else:
         print(f"  Online trn : \033[31moff\033[0m")
+    _dbx_key = TheConfig.get("server.dropbox.app_key", "")
+    print(f"  Dropbox    : {'configured' if _dbx_key else 'not configured'}")
+    print(f"  Storage    : Dropbox" if _dbx_key else f"  Storage    : local")
     print(f"  Debug      : {'ON' if config_mod.DEBUG_MODE else 'off'}")
     print(f"  UI         : {scheme}://{cfg.bind_host}:{cfg.bind_port}{url_prefix}/")
     if cfg.bind_host == "0.0.0.0":
@@ -675,7 +948,7 @@ def main() -> int:
         ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_ctx.load_cert_chain(str(cfg.ssl_cert), str(cfg.ssl_key))
 
-    app = create_app(cfg, url_prefix=url_prefix)
+    app = create_app(cfg, url_prefix=url_prefix, use_ssl=use_ssl)
     app.run(host=cfg.bind_host, port=cfg.bind_port, debug=False, ssl_context=ssl_ctx)
     return 0
 

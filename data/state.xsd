@@ -37,7 +37,7 @@
   <xs:element name="state">
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="client" type="ClientType"/>
+        <xs:element name="header" type="HeaderType"/>
         <xs:element ref="conversation" minOccurs="0" maxOccurs="unbounded"/>
         <xs:element name="truth" type="TruthSetType" minOccurs="0"/>
       </xs:sequence>
@@ -45,14 +45,14 @@
   </xs:element>
 
   <!-- ======================================================================
-       Client
+       Header
        ====================================================================== -->
 
-  <xs:complexType name="ClientType">
+  <xs:complexType name="HeaderType">
     <xs:annotation>
       <xs:documentation>
-        Client identity and preferences. The client is the authority for
-        all data in this block — the server never owns it.
+        State header: identity, versioning, and timestamps. The client is
+        the authority for all data in this block — the server never owns it.
       </xs:documentation>
     </xs:annotation>
     <xs:all>
@@ -71,105 +71,6 @@
           <xs:documentation>
             Persistent client identifier. Auto-generated from the client
             name when absent.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="ui" type="StateUIType" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Client-side UI preferences. These are owned by the client and
-            persisted in the state file, not the server config.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-    </xs:all>
-  </xs:complexType>
-
-  <!-- ── State UI ──────────────────────────────────────────────────────── -->
-
-  <xs:complexType name="StateUIType">
-    <xs:annotation>
-      <xs:documentation>
-        User interface preferences including layout mode, colour theme,
-        model selection, divider position, swipe navigation toggles,
-        and action confirmation prompts.
-      </xs:documentation>
-    </xs:annotation>
-    <xs:all>
-      <xs:element name="layout" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Layout mode for the chat interface.
-            - horizontal: side-by-side tree and chat panels
-            - vertical:   stacked tree and chat panels
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:string">
-            <xs:enumeration value="horizontal"/>
-            <xs:enumeration value="vertical"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="theme" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Colour theme for the UI.
-            - system: follow the operating system preference
-            - light:  light background theme
-            - dark:   dark background theme
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:string">
-            <xs:enumeration value="system"/>
-            <xs:enumeration value="light"/>
-            <xs:enumeration value="dark"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="model" type="xs:string" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Currently selected model identifier for the active provider.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="divider_pos" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Conversation-tree / chat panel divider position expressed as
-            a percentage (0-100). A value of 0 collapses the tree panel.
-          </xs:documentation>
-        </xs:annotation>
-        <xs:simpleType>
-          <xs:restriction base="xs:integer">
-            <xs:minInclusive value="0"/>
-            <xs:maxInclusive value="100"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:element>
-      <xs:element name="swipe_nav_horizontal" type="xs:boolean" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Enable horizontal swipe gestures (left/right) to navigate
-            between sibling conversation branches.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="swipe_nav_vertical" type="xs:boolean" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Enable vertical swipe gestures (up/down) to navigate between
-            sibling conversation branches.
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
-      <xs:element name="confirm_actions" type="xs:boolean" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            When true, the UI prompts the user for confirmation before
-            destructive operations such as deletes and merges.
           </xs:documentation>
         </xs:annotation>
       </xs:element>
@@ -200,6 +101,7 @@
   <xs:complexType name="MessageType">
     <xs:sequence>
       <xs:element name="content" type="XHTMLContentType"/>
+      <xs:element name="attachment" type="AttachmentType" minOccurs="0" maxOccurs="unbounded"/>
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required"/>
     <xs:attribute name="role" use="required">
@@ -214,6 +116,23 @@
     <xs:attribute name="username" type="xs:string" use="required"/>
     <xs:attribute name="time" type="xs:string" use="required"/>
     <xs:attribute name="selected" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="AttachmentType">
+    <xs:annotation>
+      <xs:documentation>
+        File attachment on a message.  URL attachments use the url
+        attribute; inline data (e.g. base64 images) is stored as text
+        content of the element.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="name" type="xs:string" use="optional"/>
+        <xs:attribute name="type" type="xs:string" use="optional"/>
+        <xs:attribute name="url" type="xs:string" use="optional"/>
+      </xs:extension>
+    </xs:simpleContent>
   </xs:complexType>
 
   <!-- ======================================================================

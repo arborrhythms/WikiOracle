@@ -121,6 +121,50 @@ def _escape_plain_text(text: str) -> str:
     return f"<p>{html.escape(text)}</p>"
 
 
+# HTML void elements that need self-closing for XHTML validity.
+_VOID_ELEMENTS = frozenset([
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+])
+
+# Named HTML entities that aren't valid in XML (XML only has &amp; &lt; &gt; &quot; &apos;).
+_HTML_ENTITIES = {
+    "&nbsp;": "\u00a0", "&ndash;": "\u2013", "&mdash;": "\u2014",
+    "&lsquo;": "\u2018", "&rsquo;": "\u2019", "&ldquo;": "\u201c",
+    "&rdquo;": "\u201d", "&bull;": "\u2022", "&hellip;": "\u2026",
+    "&copy;": "\u00a9", "&reg;": "\u00ae", "&trade;": "\u2122",
+    "&times;": "\u00d7", "&divide;": "\u00f7", "&deg;": "\u00b0",
+    "&micro;": "\u00b5", "&para;": "\u00b6", "&sect;": "\u00a7",
+    "&euro;": "\u20ac", "&pound;": "\u00a3", "&yen;": "\u00a5",
+    "&cent;": "\u00a2",
+}
+
+
+def _repair_html_to_xhtml(fragment: str) -> str:
+    """Best-effort repair of HTML fragment into well-formed XHTML.
+
+    Fixes common HTML-isms that break strict XML parsing:
+    - Self-close void elements (<br> → <br/>)
+    - Replace named HTML entities with Unicode characters
+    - Strip stray & that aren't part of entities
+    """
+    repaired = fragment
+    # Replace named HTML entities with Unicode equivalents
+    for entity, char in _HTML_ENTITIES.items():
+        repaired = repaired.replace(entity, char)
+    # Self-close void elements: <br> → <br />, <hr class="x"> → <hr class="x" />
+    _void_pat = "|".join(_VOID_ELEMENTS)
+    repaired = re.sub(
+        rf"<({_void_pat})(\s[^>]*?)?\s*/?>",
+        lambda m: f"<{m.group(1)}{m.group(2) or ''} />",
+        repaired,
+        flags=re.IGNORECASE,
+    )
+    # Fix bare & (not part of &amp; &lt; &gt; &quot; &apos; &#...;)
+    repaired = re.sub(r"&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)", "&amp;", repaired)
+    return repaired
+
+
 def _canonicalize_xml_fragment(fragment: str) -> str:
     """Parse an XHTML fragment and return C14N-canonicalized inner content.
 
@@ -142,8 +186,8 @@ def _is_plain_text(fragment: str) -> bool:
 def ensure_xhtml(fragment: Any) -> str:
     """Normalize user content into safe, minimal XHTML fragments.
 
-    Pipeline: sanitize_unicode → parse as XML → canonicalize, or escape as
-    plain text.  Plain text (no markup) is wrapped in ``<p>`` with escaping.
+    Pipeline: sanitize_unicode → parse as XML → canonicalize, or repair
+    HTML → canonicalize, or escape as plain text.
     """
     if not isinstance(fragment, str) or not fragment.strip():
         return "<div/>"
@@ -153,7 +197,12 @@ def ensure_xhtml(fragment: Any) -> str:
             return _escape_plain_text(cleaned)
         return _canonicalize_xml_fragment(cleaned) or "<div/>"
     except ET.ParseError:
-        return _escape_plain_text(cleaned)
+        # HTML repair: fix void elements, entities, bare ampersands
+        try:
+            repaired = _repair_html_to_xhtml(cleaned)
+            return _canonicalize_xml_fragment(repaired) or _escape_plain_text(cleaned)
+        except ET.ParseError:
+            return _escape_plain_text(cleaned)
 
 
 def strip_xhtml(content: str) -> str:
@@ -1041,8 +1090,11 @@ def parse_authority_block(content: str) -> dict | None:
     except (ValueError, TypeError):
         refresh = 3600
 
+    key = _val("key") or None
+
     return {
         "url": url,
+        "key": key,
         "refresh": refresh,
     }
 
@@ -1086,10 +1138,18 @@ def resolve_authority_entries(
     import time as _time
 
     results = []
+    seen_urls: set[str] = set()
     for entry, auth_config in authority_entries:
         url = auth_config.get("url", "")
         if not url:
             continue
+
+        # Guard against self-reference and cyclic duplicate URLs
+        norm_url = url.rstrip("/")
+        if norm_url in seen_urls:
+            log.debug("Skipping duplicate authority URL: %s", url)
+            continue
+        seen_urls.add(norm_url)
 
         authority_trust = entry.get("trust", 0.0)
         authority_id = entry.get("id", "unknown")
@@ -1105,6 +1165,7 @@ def resolve_authority_entries(
             raw_entries = _fetch_authority(
                 url, timeout_s=timeout_s,
                 allowed_data_dir=allowed_data_dir,
+                decrypt_key=auth_config.get("key"),
             )
             _AUTHORITY_CACHE[url] = (now, raw_entries)
             if len(_AUTHORITY_CACHE) > _AUTHORITY_CACHE_MAX:
@@ -1141,89 +1202,123 @@ def resolve_authority_entries(
     return results
 
 
-def _fetch_authority(
+def _fetch_authority_raw(
     url: str,
     timeout_s: int = 30,
     allowed_data_dir: str | None = None,
-) -> list:
-    """Fetch and parse authority data (XML or JSONL) from a URL or file:// path.
+    decrypt_key: str | None = None,
+) -> str | None:
+    """Fetch raw text content from an authority URL.
 
-    Auto-detects format: XML state files (``<?xml`` / ``<state`` /
-    ``<truth>``) are parsed via ``xml_to_state``; everything else is
-    treated as line-delimited JSON (type="truth"/"trust" records).
-
-    Returns a list of truth entry dicts.
-    On any error, logs a warning and returns [].
+    Handles file://, https://, URL whitelisting, and ZIP decryption.
+    Returns the decoded text, or None on any error.
     """
-    import json as _json
-
-    entries = []
     try:
         if url.startswith("file://"):
-            # file:// URLs are only allowed when whitelisted in allowed_urls.
             try:
                 from config import is_url_allowed
                 if not is_url_allowed(url):
                     print(f"[WikiOracle] file:// authority URL not whitelisted: {url}")
-                    return []
+                    return None
             except ImportError:
                 print(f"[WikiOracle] file:// authority URLs are blocked (no config): {url}")
-                return []
+                return None
             import os as _os
             rel_path = url[len("file://"):]
-            # Resolve relative to allowed_data_dir if provided, else cwd.
             base = allowed_data_dir or _os.getcwd()
             abs_path = _os.path.realpath(_os.path.join(base, rel_path))
             if not _os.path.isfile(abs_path):
                 print(f"[WikiOracle] file:// path not found: {abs_path}")
-                return []
+                return None
             with open(abs_path, "r", encoding="utf-8") as fh:
-                raw = fh.read(_AUTHORITY_MAX_RESPONSE_BYTES)
+                return fh.read(_AUTHORITY_MAX_RESPONSE_BYTES)
         elif url.startswith("https://"):
-            # Validate URL against the configured whitelist
             try:
                 from config import is_url_allowed
                 if not is_url_allowed(url):
                     print(f"[WikiOracle] Authority URL not in allowed_urls whitelist: {url}")
-                    return []
+                    return None
             except ImportError:
-                pass  # standalone usage without config module
+                pass
 
             import urllib.request
             req = urllib.request.Request(url, headers={"User-Agent": "WikiOracle/1.0"})
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                raw = resp.read(_AUTHORITY_MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
+                raw_bytes = resp.read(_AUTHORITY_MAX_RESPONSE_BYTES)
+
+            from urllib.parse import urlparse as _urlparse
+            if decrypt_key and _urlparse(url).path.rstrip("/").endswith(".zip"):
+                from zip_crypto import read_encrypted_zip
+                return read_encrypted_zip(raw_bytes, "state.xml", decrypt_key).decode("utf-8")
+            else:
+                return raw_bytes.decode("utf-8", errors="replace")
         else:
             print(f"[WikiOracle] Authority URL scheme not allowed: {url}")
-            return []
-
-        # Auto-detect format: XML state file vs JSONL
-        stripped = raw.lstrip()
-        if stripped.startswith("<?xml") or stripped.startswith("<state") or stripped.startswith("<truth"):
-            from state import xml_to_state
-            try:
-                parsed = xml_to_state(raw)
-                entries = parsed.get("truth", [])
-            except Exception as xml_exc:
-                print(f"[WikiOracle] Authority XML parse failed for {url}: {xml_exc}")
-                return []
-        else:
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = _json.loads(line)
-                except _json.JSONDecodeError:
-                    continue
-                if isinstance(rec, dict) and rec.get("type") in ("truth", "trust"):
-                    entries.append(rec)
-
+            return None
     except Exception as exc:
         print(f"[WikiOracle] Authority fetch failed for {url}: {exc}")
+        return None
+
+
+def _fetch_authority(
+    url: str,
+    timeout_s: int = 30,
+    allowed_data_dir: str | None = None,
+    decrypt_key: str | None = None,
+) -> list:
+    """Fetch and parse authority truth entries from a URL or file:// path.
+
+    Auto-detects format: XML state files are parsed via ``xml_to_state``;
+    everything else is treated as line-delimited JSON.
+    Returns a list of truth entry dicts.
+    """
+    import json as _json
+
+    raw = _fetch_authority_raw(url, timeout_s, allowed_data_dir, decrypt_key)
+    if raw is None:
         return []
 
+    stripped = raw.lstrip()
+    if stripped.startswith("<?xml") or stripped.startswith("<state") or stripped.startswith("<truth"):
+        from state import xml_to_state
+        try:
+            parsed = xml_to_state(raw)
+            return parsed.get("truth", [])
+        except Exception as xml_exc:
+            print(f"[WikiOracle] Authority XML parse failed for {url}: {xml_exc}")
+            return []
+
+    entries = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = _json.loads(line)
+        except _json.JSONDecodeError:
+            continue
+        if isinstance(rec, dict) and rec.get("type") in ("truth", "trust"):
+            entries.append(rec)
     return entries
+
+
+def fetch_authority_conversations(
+    url: str,
+    timeout_s: int = 30,
+    decrypt_key: str | None = None,
+) -> list:
+    """Fetch and return conversations from an authority state URL."""
+    raw = _fetch_authority_raw(url, timeout_s, decrypt_key=decrypt_key)
+    if raw is None:
+        return []
+    stripped = raw.lstrip()
+    if stripped.startswith("<?xml") or stripped.startswith("<state") or stripped.startswith("<truth"):
+        from state import xml_to_state
+        try:
+            return xml_to_state(raw).get("conversations", [])
+        except Exception:
+            return []
+    return []
 
 
 # ---------------------------------------------------------------------------

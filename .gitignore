@@ -16,7 +16,4 @@ __pycache__/
 /conversations/*.json
 /conversations/*.jsonl
 /bin/__pycache__/
-.nano.pid
-.gitignore
-.wo.pid
-WikiOracle.code-workspace
+*.pid

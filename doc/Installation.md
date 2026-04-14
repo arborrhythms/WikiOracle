@@ -7,7 +7,7 @@
 
 * Python 3 and `make`.
 * `uv` for NanoChat environment setup (`make install` will bootstrap it if missing).
-* AWS CLI configured for EC2 launch workflows (`make train_remote` and related targets).
+* AWS CLI configured for build-host launch workflows (`make train HOST=build` and related targets).
 * SSH keys:
   * EC2 training key (`~/.ssh/nanochat-key.pem`, auto-created by remote tooling as needed).
   * Lightsail key (`./wikiOracle.pem` by default, configurable via `WO_KEY_FILE`).
@@ -58,8 +58,10 @@ These are the primary entry points. For a local WikiOracle + NanoChat stack, use
 | `make install`         | Create `.venv` (shim + NanoChat), install all deps             |
 | `make build`           | Alias for `make train` (currently the BasicModel pipeline)     |
 | `make nano_train`      | Full NanoChat training pipeline                                |
+| `make sync HOST=local` | Sync app to ArborMini                                          |
 | `make sync HOST=remote`| Sync app + checkpoints to/from production server               |
-| `make run`             | Start WikiOracle Flask shim locally (foreground)               |
+| `make sync HOST=build` | Deploy active remote training artifacts to WikiOracle          |
+| `make run HOST=local`  | Start WikiOracle Flask shim locally (foreground)               |
 | `make up HOST=remote`  | Restart both services on production                            |
 | `make down HOST=remote`| Stop both services                                             |
 | `make all`             | Full pipeline: install + train + eval + report                 |
@@ -68,46 +70,50 @@ These are the primary entry points. For a local WikiOracle + NanoChat stack, use
 
 | Target                | Purpose                                               |
 | --------------------- | ----------------------------------------------------- |
-| `make train`          | BasicModel training pipeline                          |
+| `make train HOST=local` | BasicModel training pipeline                        |
+| `make train HOST=build` | Launch remote GPU instance, copy repo, start training |
 | `make nano_train`     | Full NanoChat pipeline: data + tokenizer + SFT model  |
 | `make train_pretrain` | Pretrain base model (`ARCH=cpu\|gpu`)                 |
 | `make train_finetune` | Supervised fine-tuning (`ARCH=cpu\|gpu`)              |
-| `make train_remote`   | Launch EC2 GPU instance, copy repo, start training    |
-| `make train_deploy`   | Launch EC2, train, then deploy to WikiOracle          |
-| `make train_retrieve` | Pull artifacts from EC2, terminate instance           |
-| `make train_ssh`      | SSH into running EC2 training instance                |
-| `make train_status`   | Check EC2 instance state                              |
-| `make train_logs`     | Tail training log on EC2                              |
+| `make train_deploy HOST=build`   | Launch remote instance, train, then deploy to WikiOracle |
+| `make train_retrieve HOST=build` | Pull artifacts from build instance, terminate it         |
+| `make train_ssh HOST=build`      | SSH into running build instance                           |
+| `make train_status HOST=build`   | Check build instance state                                |
+| `make train_logs HOST=build`     | Tail training log on build instance                       |
 
 ### Test / Evaluation (`test_*`)
 
 | Target           | Purpose                          |
 | ---------------- | -------------------------------- |
-| `make test_unit` | Run unit tests                   |
-| `make test_eval` | Evaluate model (`ARCH=cpu\|gpu`) |
+| `make test HOST=local`      | Run WikiOracle tests only                  |
+| `make test_all HOST=local`  | Run WikiOracle + subsystem `test_all` targets |
+| `make test_unit HOST=local` | Run unit tests                             |
+| `make test_basicmodel HOST=local` | Run BasicModel tests                 |
+| `make test_eval HOST=local` | Evaluate model (`ARCH=cpu\|gpu`)           |
 
 ### Run / Inference (`run_*`)
 
 | Target            | Purpose                                  |
 | ----------------- | ---------------------------------------- |
-| `make run`        | Start WikiOracle local shim (foreground) |
-| `make run_debug`  | Start WikiOracle local shim (debug mode) |
-| `make run_init`   | Remove state files for a fresh start     |
-| `make run_cli`    | Chat with NanoChat directly (CLI)        |
-| `make run_web`    | Run the NanoChat web extension           |
+| `make run HOST=local`       | Start WikiOracle local shim (foreground) |
+| `make run_debug HOST=local` | Start WikiOracle local shim (debug mode) |
+| `make run_init HOST=local`  | Remove state files for a fresh start     |
+| `make run_cli HOST=local`   | Chat with NanoChat directly (CLI)        |
+| `make run_web HOST=local`   | Run the NanoChat web extension           |
 
 ### Sync (`sync_*`)
 
 | Target                       | Purpose                                          |
 | ---------------------------- | ------------------------------------------------ |
+| `make sync HOST=local`       | Sync app to ArborMini                            |
 | `make sync HOST=remote`      | Sync app + checkpoints to/from production server |
-| `make sync_remote`           | Sync from running EC2 to WikiOracle              |
+| `make sync HOST=build`       | Deploy active remote training artifacts to WikiOracle |
 | `make sync_checkpoint_pull`  | Pull fine-tuning weights from production         |
 | `make sync_checkpoint_push`  | Push fine-tuning weights to production            |
 
 ### Service control (`nano_*`, `wo_*`, `basicmodel_*`)
 
-NanoChat and WikiOracle support local (PID file + background process) and remote (`systemctl`) operation, controlled by `HOST=local|remote`. BasicModel is registered but does not yet have an inference server.
+NanoChat and WikiOracle support local (PID file + background process) and remote (`systemctl`) operation, controlled by `HOST=local|remote`. The `sync` target additionally accepts `HOST=build` to deploy artifacts from the active remote training instance. Training uses `HOST=local|build`, while run/test targets are local-only and reject non-local hosts. BasicModel is registered but does not yet have an inference server.
 
 | Target                                           | Purpose                          |
 | ------------------------------------------------ | -------------------------------- |
@@ -192,7 +198,7 @@ For a short CLI smoke test against the local stack:
 If you only want the WikiOracle shim in the foreground, use:
 
 ```bash
-make run
+make run HOST=local
 ```
 
 Or manually:

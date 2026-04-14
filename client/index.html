@@ -10,8 +10,7 @@
 
 <!-- Header -->
 <div class="header">
-  <button class="header-btn" id="btnNew" title="Clear all local data and start fresh">New</button>
-  <button class="header-btn" id="btnImport" title="Open an llm_*.xml state file">Open</button>
+  <button class="header-btn" id="btnImport" title="Open a state file or start fresh">Open</button>
   <button class="header-btn" id="btnRead" title="Open conversations in a readable view">Read</button>
   <button class="header-btn" id="btnExport" title="Save session as llm_*.xml">Save</button>
   <button class="header-btn" id="btnSearch" title="Search conversations">Search</button>
@@ -64,33 +63,6 @@
       <span class="range-val" id="setTempVal">0.7</span>
     </div>
 
-    <label for="setMaxTokens">Max tokens</label>
-    <div class="settings-row">
-      <input type="range" id="setMaxTokens" min="32" max="512" step="32" value="128">
-      <span class="range-val" id="setMaxTokensVal">128</span>
-    </div>
-
-    <label for="setTimeout">Timeout (seconds)</label>
-    <div class="settings-row">
-      <input type="range" id="setTimeout" min="15" max="300" step="15" value="120">
-      <span class="range-val" id="setTimeoutVal">120</span>
-    </div>
-
-    <label for="setTruthWeight">Truth weight</label>
-    <div class="settings-row">
-      <input type="range" id="setTruthWeight" min="0" max="1" step="0.05" value="0.7">
-      <span class="range-val" id="setTruthWeightVal">0.7</span>
-    </div>
-
-    <label for="setTruthMaxEntries">Max truth entries</label>
-    <div class="settings-row">
-      <input type="number" id="setTruthMaxEntries" min="100" max="10000" step="100" value="1000">
-    </div>
-
-    <label class="settings-check">
-      <input type="checkbox" id="setStoreParticulars"> Store particular facts
-    </label>
-
     <label class="settings-check">
       <input type="checkbox" id="setUrlFetch"> Allow URL fetching
     </label>
@@ -104,7 +76,8 @@
     </label>
 
     <div class="settings-sep">
-      <button class="btn btn-full" id="btnEditConfig">Edit config.xml</button>
+      <button class="btn btn-full" id="btnDropboxConnect">Cloud Storage: Not configured</button>
+      <button class="btn btn-full" id="btnDropboxDisconnect" style="display:none">Cloud Storage: Disconnect</button>
     </div>
 
     <div class="settings-actions">
@@ -132,11 +105,14 @@
 
 <!-- Input -->
 <div class="input-bar">
+  <div id="attachmentChips" class="attachment-chips" style="display:none"></div>
   <div class="input-wrapper">
+    <button class="attach-btn" id="btnAttach" title="Attach file or URL">+</button>
     <textarea id="msgInput" rows="1" placeholder="Message WikiOracle..." autofocus></textarea>
     <button class="send-btn" id="btnSend">Send</button>
   </div>
 </div>
+<input type="file" id="fileAttach" class="hidden">
 
 <!-- Hidden file input for import -->
 <input type="file" id="fileImport" accept=".xml,.json" class="hidden">
@@ -149,6 +125,7 @@
 <script src="graph.js?v=1"></script>
 <script src="query.js?v=1"></script>
 <script src="tree.js?v=17"></script>
-<script src="wikioracle.js?v=33"></script>
+<script src="storage.js?v=5"></script>
+<script src="wikioracle.js?v=34"></script>
 </body>
 </html>

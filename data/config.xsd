@@ -6,10 +6,9 @@
     <xs:documentation>
       WikiOracle Config — XML configuration schema.
       Defines the structure for WikiOracle XML configuration files.
-      The config is server-owned and contains provider definitions,
-      server runtime parameters (evaluation, training, TruthSet policy),
-      and shared provider context. User identity and UI preferences
-      are stored in the state file, not here.
+      The config contains server runtime parameters (evaluation,
+      training, TruthSet policy), client-side UI and storage settings,
+      and LLM provider definitions with shared context.
     </xs:documentation>
   </xs:annotation>
 
@@ -28,7 +27,7 @@
     <xs:complexType>
       <xs:all>
         <xs:element name="server"    type="ServerType"/>
-        <xs:element name="providers" type="ProvidersType"/>
+        <xs:element name="client"    type="ClientConfigType" minOccurs="0"/>
       </xs:all>
     </xs:complexType>
   </xs:element>
@@ -108,6 +107,22 @@
             URL prefixes permitted for authority lookups and dynamic
             provider fetches. Only https:// URLs matching one of these
             prefixes are allowed; file:// URLs are always blocked.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="dropbox" type="DropboxType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Dropbox OAuth2 app credentials for encrypted cloud storage.
+            Never sent to the client.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="providers" type="ProvidersType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            LLM provider definitions (type, model, URL, etc.).
+            API keys are stored separately under client/api_keys.
           </xs:documentation>
         </xs:annotation>
       </xs:element>
@@ -218,6 +233,14 @@
           <xs:documentation>
             Allow the assistant to fetch and incorporate content from
             URLs referenced in the conversation.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="thought_free" type="xs:boolean" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            When true, suppress chain-of-thought / thinking tokens in
+            LLM responses (where supported by the provider).
           </xs:documentation>
         </xs:annotation>
       </xs:element>
@@ -398,28 +421,182 @@
     </xs:sequence>
   </xs:complexType>
 
+  <!-- ── Dropbox ────────────────────────────────────────────────────────── -->
+
+  <xs:complexType name="DropboxType">
+    <xs:annotation>
+      <xs:documentation>
+        Dropbox OAuth2 app credentials. These are server-only secrets
+        and are stripped by _normalize_config before sending to clients.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="app_key" type="xs:string" use="required"/>
+    <xs:attribute name="app_secret" type="xs:string" use="required"/>
+  </xs:complexType>
+
   <!-- ======================================================================
-       Section 2 — Providers
+       Section 2 — Client
+       ====================================================================== -->
+
+  <xs:complexType name="ClientConfigType">
+    <xs:annotation>
+      <xs:documentation>
+        Client-side settings sent to the browser. Contains UI preferences
+        and storage configuration. Never includes server secrets.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:all>
+      <xs:element name="ui" type="UIType" minOccurs="0"/>
+      <xs:element name="storage" type="StorageType" minOccurs="0"/>
+      <xs:element name="temperature" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Sampling temperature for LLM responses (0.0–2.0).
+            Overrides server.evaluation.temperature when present.
+          </xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:decimal">
+            <xs:minInclusive value="0.0"/>
+            <xs:maxInclusive value="2.0"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="url_fetch" type="xs:boolean" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Allow the assistant to fetch and incorporate content from
+            URLs referenced in the conversation.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="thought_free" type="xs:boolean" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            When true, suppress chain-of-thought / thinking tokens in
+            LLM responses (where supported by the provider).
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="providers" type="ClientProvidersType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Client-owned provider settings: default provider selection and
+            API keys. Keys override server-provided defaults. Provider
+            definitions (type, model, URL) are in server/providers.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:all>
+  </xs:complexType>
+
+  <xs:complexType name="ClientProvidersType">
+    <xs:annotation>
+      <xs:documentation>
+        Client provider settings: default provider/model selection and
+        provider entries carrying API keys (name + api_key only).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="default_provider" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Provider selected on application startup (must match a
+            provider name under server/providers).
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="default_model" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>
+            Model identifier selected on startup for the default
+            provider (e.g. "gemini-2.5-flash"). When omitted, the
+            server provider's built-in default model is used.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="provider" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:all>
+            <xs:element name="name" type="xs:string"/>
+            <xs:element name="api_key" type="xs:string"/>
+          </xs:all>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- ── UI ────────────────────────────────────────────────────────────── -->
+
+  <xs:complexType name="UIType">
+    <xs:annotation>
+      <xs:documentation>
+        User interface preferences: layout mode, colour theme,
+        divider position, swipe navigation, and confirmation.
+        Model selection lives under client/providers/default_model.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:all>
+      <xs:element name="layout" minOccurs="0">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="horizontal"/>
+            <xs:enumeration value="vertical"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="theme" minOccurs="0">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="system"/>
+            <xs:enumeration value="light"/>
+            <xs:enumeration value="dark"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="divider_pos" minOccurs="0">
+        <xs:simpleType>
+          <xs:restriction base="xs:integer">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="swipe_nav_horizontal" type="xs:boolean" minOccurs="0"/>
+      <xs:element name="swipe_nav_vertical" type="xs:boolean" minOccurs="0"/>
+      <xs:element name="confirm_actions" type="xs:boolean" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- ── Storage ───────────────────────────────────────────────────────── -->
+
+  <xs:complexType name="StorageType">
+    <xs:annotation>
+      <xs:documentation>
+        Cloud storage settings.  When Dropbox is connected, config.zip
+        and state.zip are stored as encrypted archives in the App Folder.
+        state_key holds the password for state.zip so the client can
+        auto-load state after decrypting config.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="state_key" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <!-- ======================================================================
+       Section 3 — Providers
        ====================================================================== -->
 
   <xs:complexType name="ProvidersType">
     <xs:annotation>
       <xs:documentation>
         Container for LLM provider definitions and shared context.
-        Section-level elements (default, context, output, truth_context,
-        conversation_context) apply to all providers. Individual provider
-        elements carry per-provider configuration.
+        Section-level elements (context, output, truth_context,
+        conversation_context) apply to all providers. Individual
+        provider elements carry per-provider configuration.
+        Default provider/model selection lives under client/providers.
       </xs:documentation>
     </xs:annotation>
     <xs:sequence>
-      <xs:element name="default" type="xs:string" minOccurs="0">
-        <xs:annotation>
-          <xs:documentation>
-            Provider key selected by default on application startup
-            (must match a provider name attribute).
-          </xs:documentation>
-        </xs:annotation>
-      </xs:element>
       <xs:element name="context" type="XHTMLContentType" minOccurs="0">
         <xs:annotation>
           <xs:documentation>
@@ -471,15 +648,23 @@
       </xs:documentation>
     </xs:annotation>
     <xs:all>
-      <xs:element name="display_name" type="xs:string">
+      <xs:element name="name" type="xs:string">
         <xs:annotation>
           <xs:documentation>
-            Human-readable display name shown in the chat UI to tag
-            assistant messages (e.g. "chatGPT", "claude", "gemini").
+            Provider lookup key and display name shown in the chat UI
+            (e.g. "WikiOracle", "OpenAI", "Anthropic", "Gemini", "Grok").
           </xs:documentation>
         </xs:annotation>
       </xs:element>
-      <xs:element name="username" type="xs:string">
+      <xs:element name="type" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>
+            Provider type identifier for API dispatch
+            (e.g. "wikioracle", "openai", "anthropic", "gemini", "grok", "openrouter").
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="username" type="xs:string" minOccurs="0">
         <xs:annotation>
           <xs:documentation>
             API login email address associated with this provider account.
@@ -493,16 +678,18 @@
           </xs:documentation>
         </xs:annotation>
       </xs:element>
-      <xs:element name="api_key" type="xs:string">
+      <xs:element name="api_key" type="xs:string" minOccurs="0">
         <xs:annotation>
           <xs:documentation>
             API key for authentication. Can also be supplied via the
             corresponding environment variable (e.g. OPENAI_API_KEY,
             ANTHROPIC_API_KEY, GEMINI_API_KEY, XAI_API_KEY).
+            Optional in server provider definitions; client API keys
+            are stored under client/providers.
           </xs:documentation>
         </xs:annotation>
       </xs:element>
-      <xs:element name="default_model" type="xs:string">
+      <xs:element name="model" type="xs:string">
         <xs:annotation>
           <xs:documentation>
             Default model identifier to use for requests when no model
@@ -529,14 +716,6 @@
         </xs:annotation>
       </xs:element>
     </xs:all>
-    <xs:attribute name="name" type="xs:string" use="required">
-      <xs:annotation>
-        <xs:documentation>
-          Provider lookup key used internally to identify this provider
-          (e.g. "wikioracle", "openai", "anthropic", "gemini", "grok").
-        </xs:documentation>
-      </xs:annotation>
-    </xs:attribute>
   </xs:complexType>
 
   <!-- ======================================================================

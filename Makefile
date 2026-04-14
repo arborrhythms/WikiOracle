@@ -3,15 +3,15 @@
 # Top-level workflow:
 #   make install          — create .venv (shim + NanoChat), install all deps
 #   make build            — train model (alias for 'make train')
-#   make sync HOST=remote — sync app + checkpoints to/from production server
-#   make run              — start WikiOracle Flask shim locally
+#   make sync HOST=local|remote|build — sync app to ArborMini, production, or active build host
+#   make run HOST=local   — start WikiOracle Flask shim locally
 #
 # Contributors: install → build → run gets you a working local instance.
 # Maintainers:  sync and up/down manage the production Lightsail server.
 #
 # Key variables:
 #   ARCH=cpu|gpu   — target architecture (default: cpu)
-#   HOST=local|remote — target host for sync/up/down/nano_*/wo_* (default: local)
+#   HOST=local|remote|build — host mode (sync: local|remote|build; services: local|remote; train: local|build)
 
 SHELL := /bin/bash
 
@@ -109,6 +109,7 @@ NANO_DEVICE_TYPE  ?= cpu
 NANO_READY_TIMEOUT ?= 45
 NANO_PID          := .nano.pid
 WO_PID            := .wo.pid
+TUNNEL_PID        := .tunnel.pid
 NANO_LOG          ?= output/nanochat.log
 WO_LOG            ?= output/wikioracle.log
 WO_BIND_HOST      ?= 127.0.0.1
@@ -126,11 +127,12 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         install build sync run \
         build_venv build_setup \
         build_data build_tokenizer build_preprocess build_sft \
-        train_pretrain train_finetune train nano_train \
+        train_pretrain train_finetune train train_local train_build nano_train \
         train_remote train_retrieve train_ssh train_status train_logs train_deploy \
         test test_all test_eval test_unit test_basicmodel basic_test_all \
         run_init run_server run_debug run_cli run_web parse \
-        sync_local sync_remote sync_checkpoint_pull sync_checkpoint_push \
+        sync_local sync_build sync_remote sync_checkpoint_pull sync_checkpoint_push \
+        tunnel_start tunnel_stop tunnel_status \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
         basic_data basic_smallTrain basic_train basic_remoteTrain basic_test basic_run basic_build \
@@ -138,7 +140,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         openclaw_setup openclaw_run openclaw_test \
         doc_report doc_pdf clean clean_all \
         remote remote_retrieve remote_ssh remote_status remote_logs \
-        remote_deploy remote_deploy_launch \
+        remote_deploy_launch guard_service_host \
         checkpoint_pull checkpoint_push
 
 # Ordered list of doc chapters for PDF generation
@@ -157,7 +159,6 @@ PDF_CHAPTERS := README.md \
   doc/Config.md \
   doc/State.md \
   doc/UserInterface.md \
-  doc/FutureWork.md \
   doc/ProposedLicense.md \
   basicmodel/doc/Grammar.md \
   basicmodel/doc/BuddhistParallels.md
@@ -174,38 +175,44 @@ help:
 	@echo "Top-level targets:"
 	@echo "  make install            Create .venv and install all dependencies (ARCH=cpu|gpu)"
 	@echo "  make build              Train model (alias for 'make train', ARCH=cpu|gpu)"
-	@echo "  make sync HOST=remote   Sync app + checkpoints to/from server"
-	@echo "  make run                Start WikiOracle local shim (foreground)"
+	@echo "  make sync HOST=local    Sync app to ArborMini"
+	@echo "  make sync HOST=remote   Sync app + checkpoints to/from production"
+	@echo "  make sync HOST=build    Deploy active remote training artifacts to WikiOracle"
+	@echo "  make run HOST=local     Start WikiOracle local shim (foreground)"
+	@echo "  make up HOST=local      NanoChat locally, tunnel to remote WikiOracle"
 	@echo "  make up HOST=remote     Restart both services on production"
+	@echo "  make down HOST=local    Stop local NanoChat + tunnel"
 	@echo "  make down HOST=remote   Stop both services"
 	@echo "  make all                Full pipeline: install + train + eval + report"
 	@echo ""
 	@echo "Training (train_*):"
-	@echo "  make train              Train BasicModel (embeddings + model)"
+	@echo "  make train HOST=local   Train BasicModel (embeddings + model)"
+	@echo "  make train HOST=build   Launch remote GPU (Lambda/EC2), start training"
 	@echo "  make nano_train         Full NanoChat pipeline: data + tok + pretrain + finetune"
 	@echo "  make train_pretrain     Pretrain NanoChat base model (ARCH=cpu|gpu)"
 	@echo "  make train_finetune     NanoChat supervised fine-tuning (ARCH=cpu|gpu)"
-	@echo "  make train_remote       Launch remote GPU (Lambda/EC2), start training"
-	@echo "  make train_deploy       Launch remote, train, deploy to WikiOracle"
-	@echo "  make train_retrieve     Pull artifacts, terminate instance"
-	@echo "  make train_ssh/status/logs"
+	@echo "  make train_deploy HOST=build   Launch remote, train, deploy to WikiOracle"
+	@echo "  make train_retrieve HOST=build Pull artifacts, terminate build instance"
+	@echo "  make train_ssh/status/logs HOST=build"
 	@echo ""
 	@echo "Test / Evaluation (test_*):"
-	@echo "  make test               Run WikiOracle tests only"
-	@echo "  make test_all           Run WikiOracle + subsystem test_all targets"
-	@echo "  make test_unit          Run WikiOracle unit tests"
-	@echo "  make test_basicmodel    Run BasicModel tests"
-	@echo "  make test_eval          Evaluate model (ARCH=cpu|gpu)"
+	@echo "  make test HOST=local         Run WikiOracle tests only"
+	@echo "  make test_all HOST=local     Run WikiOracle + subsystem test_all targets"
+	@echo "  make test_unit HOST=local    Run WikiOracle unit tests"
+	@echo "  make test_basicmodel HOST=local Run BasicModel tests"
+	@echo "  make test_eval HOST=local    Evaluate model (ARCH=cpu|gpu)"
 	@echo ""
 	@echo "Run / Inference (run_*):"
-	@echo "  make run_debug          Start WikiOracle local shim (debug mode)"
-	@echo "  make run_init           Remove state files for a fresh start"
-	@echo "  make run_cli            Chat with the model (CLI)"
-	@echo "  make run_web            Chat with the model (Web UI + /train)"
+	@echo "  make run HOST=local         Start WikiOracle local shim (foreground)"
+	@echo "  make run_debug HOST=local   Start WikiOracle local shim (debug mode)"
+	@echo "  make run_init HOST=local    Remove state files for a fresh start"
+	@echo "  make run_cli HOST=local     Chat with the model (CLI)"
+	@echo "  make run_web HOST=local     Chat with the model (Web UI + /train)"
 	@echo ""
 	@echo "Sync (sync_*):"
-	@echo "  make sync HOST=remote            Sync app + checkpoints to/from server"
-	@echo "  make sync_remote                 Sync from running EC2 to WikiOracle"
+	@echo "  make sync HOST=local             Sync app to ArborMini"
+	@echo "  make sync HOST=remote            Sync app + checkpoints to/from production"
+	@echo "  make sync HOST=build             Deploy active remote training artifacts to WikiOracle"
 	@echo "  make sync_checkpoint_pull/push   Backup/restore fine-tuning weights"
 	@echo ""
 	@echo "BasicModel (basic_*):"
@@ -229,7 +236,7 @@ help:
 	@echo ""
 	@echo "Key variables:"
 	@echo "  ARCH=cpu|gpu            Target architecture (default: cpu)"
-	@echo "  HOST=local|remote       Target host for up/down/nano_*/wo_* (default: local)"
+	@echo "  HOST=local|remote|build Host mode; sync uses local|remote|build, train uses local|build, run/test use local, services use local|remote (default: local)"
 	@echo "  NANO_PORT=8000          NanoChat server port (local mode)"
 	@echo "  NPROC=8                 GPUs per node for torchrun"
 
@@ -237,11 +244,54 @@ help:
 
 all: install train test_eval doc_report
 
-up: nano_restart wo_restart basic_restart
+update:
+	$(MAKE) sync HOST=remote
+	$(MAKE) sync down up HOST=local
 
-down: nano_stop wo_stop basic_stop
+up:
+ifeq ($(HOST),local)
+	$(MAKE) nano_restart
+	$(MAKE) basic_restart
+	$(MAKE) tunnel_start
+	$(MAKE) wo_restart HOST=remote
+else
+	$(MAKE) nano_restart wo_restart basic_restart
+endif
+
+down:
+ifeq ($(HOST),local)
+	$(MAKE) tunnel_stop
+	$(MAKE) nano_stop
+	$(MAKE) basic_stop
+else
+	$(MAKE) nano_stop wo_stop basic_stop
+endif
 
 deploy: up
+
+guard_service_host:
+	@if [ "$(HOST)" = "local" ] || [ "$(HOST)" = "remote" ]; then \
+		:; \
+	else \
+		echo "Invalid HOST '$(HOST)'; use HOST=local or HOST=remote" >&2; \
+		exit 2; \
+	fi
+
+guard_local_host:
+	@if [ "$(HOST)" = "local" ]; then \
+		:; \
+	else \
+		echo "Invalid HOST '$(HOST)'; use HOST=local" >&2; \
+		exit 2; \
+	fi
+
+guard_train_build_host:
+	@if [ "$(HOST)" = "build" ]; then \
+		:; \
+	else \
+		echo "Invalid HOST '$(HOST)'; use HOST=build" >&2; \
+		exit 2; \
+	fi
 
 some:
 ifeq ($(ARCH),gpu)
@@ -250,7 +300,7 @@ else
 	$(MAKE) all ARCH=cpu CPU_ITERS=10
 endif
 
-# --- Remote training (train_remote/retrieve/ssh/status/logs/deploy) ----------
+# --- Build-host training (HOST=build; train_retrieve/ssh/status/logs/deploy) -
 
 ifeq ($(REMOTE_PROVIDER),ec2)
   REMOTE_ARGS := --provider=ec2 --region=$(EC2_REGION) --key-name=$(EC2_KEY_NAME) \
@@ -263,50 +313,53 @@ else
   LAUNCH_ARGS := --instance-type=$(LAMBDA_INSTANCE_TYPE)
 endif
 
-train_remote:
+train_build: guard_train_build_host
 ifeq ($(REMOTE_PROVIDER),ec2)
 ifndef ALERT_EMAIL
-	$(error ALERT_EMAIL is required for EC2 — e.g. make train_remote ALERT_EMAIL=you@example.com)
+	$(error ALERT_EMAIL is required for EC2 — e.g. make train HOST=build ALERT_EMAIL=you@example.com)
 endif
 endif
 ifndef TRAIN_TARGET
-	$(error TRAIN_TARGET is required — e.g. make train_remote TRAIN_TARGET=all)
+	$(error TRAIN_TARGET is required — e.g. make train HOST=build TRAIN_TARGET=all)
 endif
-	python3 bin/remote.py $(REMOTE_ARGS) launch $(LAUNCH_ARGS) \
-		--nproc=$(NPROC) \
-		--wandb-run=$(WANDB_RUN) \
-		--data-shards=$(DATA_SHARDS_FULL) \
-		--target="$(TRAIN_TARGET)" \
-		$(if $(ALERT_EMAIL),--alert-email=$(ALERT_EMAIL))
+		python3 bin/remote.py $(REMOTE_ARGS) launch $(LAUNCH_ARGS) \
+			--nproc=$(NPROC) \
+			--wandb-run=$(WANDB_RUN) \
+			--data-shards=$(DATA_SHARDS_FULL) \
+			--target="$(TRAIN_TARGET)" \
+			$(if $(ALERT_EMAIL),--alert-email=$(ALERT_EMAIL))
 
-train_retrieve:
-	python3 bin/remote.py $(REMOTE_ARGS) retrieve
+train_retrieve: guard_train_build_host
+		python3 bin/remote.py $(REMOTE_ARGS) retrieve
 
-train_ssh:
-	python3 bin/remote.py $(REMOTE_ARGS) ssh
+train_ssh: guard_train_build_host
+		python3 bin/remote.py $(REMOTE_ARGS) ssh
 
-train_logs:
-	python3 bin/remote.py $(REMOTE_ARGS) logs
+train_logs: guard_train_build_host
+		python3 bin/remote.py $(REMOTE_ARGS) logs
 
-train_status:
-	python3 bin/remote.py $(REMOTE_ARGS) status
+train_status: guard_train_build_host
+		python3 bin/remote.py $(REMOTE_ARGS) status
 
-train_deploy:
+train_deploy: guard_train_build_host
 ifeq ($(REMOTE_PROVIDER),ec2)
 ifndef ALERT_EMAIL
-	$(error ALERT_EMAIL is required for EC2 — e.g. make train_deploy ALERT_EMAIL=you@example.com)
+	$(error ALERT_EMAIL is required for EC2 — e.g. make train_deploy HOST=build ALERT_EMAIL=you@example.com)
 endif
 endif
 ifndef TRAIN_TARGET
-	$(error TRAIN_TARGET is required — e.g. make train_deploy TRAIN_TARGET=all)
+	$(error TRAIN_TARGET is required — e.g. make train_deploy HOST=build TRAIN_TARGET=all)
 endif
-	python3 bin/remote.py $(REMOTE_ARGS) launch $(LAUNCH_ARGS) \
-		--nproc=$(NPROC) \
-		--wandb-run=$(WANDB_RUN) \
-		--data-shards=$(DATA_SHARDS_FULL) \
-		--target="$(TRAIN_TARGET)" \
-		$(if $(ALERT_EMAIL),--alert-email=$(ALERT_EMAIL)) \
-		--deploy $(DEPLOY_ARGS)
+		python3 bin/remote.py $(REMOTE_ARGS) launch $(LAUNCH_ARGS) \
+			--nproc=$(NPROC) \
+			--wandb-run=$(WANDB_RUN) \
+			--data-shards=$(DATA_SHARDS_FULL) \
+			--target="$(TRAIN_TARGET)" \
+			$(if $(ALERT_EMAIL),--alert-email=$(ALERT_EMAIL)) \
+			--deploy $(DEPLOY_ARGS)
+
+# Legacy alias for the old target name.
+train_remote: train_build
 
 # Local development
 LOCAL_KEY_FILE       ?= ~/.ssh/id_ed25519_arbormini
@@ -318,25 +371,29 @@ LOCAL_SYNC_OPTS      ?= -av --progress \
 		--exclude .git/ \
 		--exclude output/ \
 		--exclude /config.xml \
-		--exclude state.xml \
+		--exclude /state.xml \
 		--exclude '*.pem' \
+		--exclude '*.pid' \
 		--exclude __pycache__/ \
 		--exclude .DS_Store \
 
 sync_local:
+	@echo "=== Syncing app → $(LOCAL_HOST):$(LOCAL_DEST) ==="
 	rsync $(LOCAL_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
 
-sync_remote:
+sync_build:
 	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
 
+# Legacy alias: deploy from active remote training instance to WikiOracle.
+sync_remote: sync_build
+
 # Legacy aliases for remote_* targets
-remote: train_remote
+remote: train_build
 remote_retrieve: train_retrieve
 remote_ssh: train_ssh
 remote_logs: train_logs
 remote_status: train_status
 remote_deploy_launch: train_deploy
-remote_deploy: sync_remote
 
 # --- NanoChat Server (HOST=local|remote) --------------------------------------
 # When HOST=local  → background process with PID file (localhost:NANO_PORT)
@@ -348,8 +405,8 @@ WO_RSYNC := rsync -avz -e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10"
 
 sync:
 ifeq ($(HOST),local)
-	@echo "Sync is a remote-only operation. Use: make sync HOST=remote"
-else
+	@$(MAKE) sync_local
+else ifeq ($(HOST),remote)
 	@echo "=== Syncing app → $(WO_HOST):$(WO_DEST) ==="
 	$(WO_RSYNC) --delete \
 		--exclude .venv \
@@ -376,10 +433,21 @@ else
 		sudo cp $(WO_DEST)/data/basicmodel.service /etc/systemd/system/ && \
 		sudo systemctl daemon-reload"
 	@echo "Sync complete. Run 'make up HOST=remote' to restart services."
+else ifeq ($(HOST),build)
+	@$(MAKE) sync_build
+else
+	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=remote, or HOST=build)
 endif
 
 nano_deploy: sync
 wo_deploy: sync
+
+SERVICE_HOST_TARGETS := \
+	nano_start nano_stop nano_restart nano_status nano_logs \
+	wo_start wo_stop wo_restart wo_status wo_logs \
+	basic_start basic_stop basic_restart basic_status basic_logs
+
+$(SERVICE_HOST_TARGETS): guard_service_host
 
 nano_start:
 ifeq ($(HOST),local)
@@ -465,6 +533,54 @@ ifeq ($(HOST),local)
 else
 	$(WO_SSH) "sudo journalctl -u nanochat -f --no-pager"
 endif
+
+# --- SSH Tunnel (HOST=local → remote) -----------------------------------------
+# Reverse-forwards local NanoChat to the remote WikiOracle host so the shim
+# at 127.0.0.1:8000 on the remote reaches the local Mac Mini.
+
+tunnel_start:
+	@# Kill any existing local tunnel process
+	@if [ -f $(TUNNEL_PID) ]; then \
+		kill $$(cat $(TUNNEL_PID)) 2>/dev/null; \
+		rm -f $(TUNNEL_PID); \
+	fi
+	@# Stop remote services and kill anything holding ports 8000/8001
+	-$(WO_SSH) "sudo systemctl stop nanochat 2>/dev/null; \
+		sudo systemctl stop basicmodel 2>/dev/null; \
+		sudo fuser -k 8000/tcp 2>/dev/null; \
+		sudo fuser -k 8001/tcp 2>/dev/null; \
+		sleep 1; true"
+	@nohup ssh -v -i $(WO_KEY_FILE) -o ConnectTimeout=10 \
+		-o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+		-o ExitOnForwardFailure=yes \
+		-N -R 8000:localhost:$(NANO_PORT) \
+		   -R 8001:localhost:$(BASIC_PORT) \
+		$(WO_USER)@$(WO_HOST) > .tunnel.log 2>&1 & \
+	echo $$! > $(TUNNEL_PID); \
+	sleep 3; \
+	if kill -0 $$(cat $(TUNNEL_PID)) 2>/dev/null; then \
+		echo "SSH tunnel started (PID $$(cat $(TUNNEL_PID)), :$(NANO_PORT)→remote:8000, :$(BASIC_PORT)→remote:8001)"; \
+	else \
+		echo "SSH tunnel failed to start. Log:"; \
+		tail -20 .tunnel.log 2>/dev/null; \
+		rm -f $(TUNNEL_PID); \
+		exit 1; \
+	fi
+
+tunnel_stop:
+	@if [ -f $(TUNNEL_PID) ]; then \
+		kill $$(cat $(TUNNEL_PID)) 2>/dev/null && echo "SSH tunnel stopped" || echo "SSH tunnel not running"; \
+		rm -f $(TUNNEL_PID); \
+	else \
+		echo "No tunnel PID file found"; \
+	fi
+
+tunnel_status:
+	@if [ -f $(TUNNEL_PID) ] && kill -0 $$(cat $(TUNNEL_PID)) 2>/dev/null; then \
+		echo "SSH tunnel running (PID $$(cat $(TUNNEL_PID)))"; \
+	else \
+		echo "SSH tunnel not running"; \
+	fi
 
 # --- WikiOracle Server (HOST=local|remote) ------------------------------------
 # When HOST=local  → background Flask shim with PID file
@@ -649,13 +765,29 @@ endif
 
 # --- Full training pipeline ---------------------------------------------------
 
-train: basic_train
+train:
+ifeq ($(HOST),local)
+	@$(MAKE) train_local
+else ifeq ($(HOST),build)
+	@$(MAKE) train_build HOST=build
+else
+	$(error Invalid HOST '$(HOST)'; use HOST=local or HOST=build)
+endif
+
+train_local: basic_train
 	@echo "BasicModel training pipeline complete."
 
 nano_train: build_data build_tokenizer train_pretrain train_finetune
 	@echo "$(ARCH) NanoChat training pipeline complete."
 
 # --- Test / Evaluation --------------------------------------------------------
+
+LOCAL_ONLY_TARGETS := \
+	run run_init run_server run_debug run_cli run_web parse \
+	test test_all test_unit test_basicmodel test_eval \
+	basic_test basic_test_all basic_run
+
+$(LOCAL_ONLY_TARGETS): guard_local_host
 
 test_eval:
 ifeq ($(ARCH),gpu)

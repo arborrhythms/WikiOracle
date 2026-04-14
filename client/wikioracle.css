@@ -78,6 +78,11 @@ body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disa
 .header-btn { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg-muted); cursor: pointer; padding: 0.4rem 0.7rem; font-size: 0.8rem; transition: all 0.15s; }
 .header-btn:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 
+/* Header dropdown (OPEN/SAVE context menu) */
+.header-dropdown { position: absolute; top: 100%; left: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px var(--shadow-color, rgba(0,0,0,0.15)); z-index: 200; min-width: 180px; margin-top: 2px; }
+.header-dropdown-item { display: block; width: 100%; padding: 0.5rem 0.75rem; border: none; background: none; text-align: left; cursor: pointer; font-size: 0.85rem; color: var(--fg); }
+.header-dropdown-item:hover { background: var(--accent-light); color: var(--accent); }
+
 /* Loading modal — blocks interaction until state is loaded */
 .loading-overlay { position: fixed; inset: 0; z-index: 10000; background: var(--overlay-bg, rgba(0,0,0,0.5)); display: flex; align-items: center; justify-content: center; }
 .loading-box { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem; min-width: 280px; max-width: 360px; text-align: center; box-shadow: 0 8px 32px var(--shadow-color, rgba(0,0,0,0.2)); }
@@ -186,6 +191,17 @@ body { display: flex; flex-direction: column; touch-action: pan-x pan-y; /* disa
 .send-btn { padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 0.95rem; cursor: pointer; transition: opacity 0.15s; }
 .send-btn:hover { opacity: 0.85; }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.attach-btn { width: 2.2rem; height: 2.2rem; flex-shrink: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--bg); color: var(--fg); font-size: 1.2rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: border-color 0.15s; }
+.attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+.attachment-chips { max-width: 48rem; margin: 0 auto 0.3rem; display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0 1rem; }
+.attachment-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 12px; font-size: 0.78rem; background: var(--accent-light); color: var(--fg); max-width: 220px; }
+.attachment-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip button { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 0.9rem; padding: 0; line-height: 1; }
+.attachment-chip button:hover { color: var(--fg); }
+.msg-attachments { margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.msg-attachment { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.78rem; color: var(--accent); text-decoration: none; background: var(--accent-light); }
+.msg-attachment:hover { border-color: var(--accent); }
+.msg-attachment-img { max-width: 300px; max-height: 200px; border-radius: 6px; margin-top: 0.4rem; }
 
 /* Context menu (for tree nodes) */
 .tree-context-menu { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow-color); z-index: 20; min-width: 140px; padding: 4px 0; font-size: 0.82rem; }
@@ -288,6 +304,14 @@ body.layout-vertical .chat-container { flex: 1; }
 .search-result-title { font-weight: 600; font-size: 0.82rem; margin-bottom: 0.2rem; }
 .search-result-snippet { color: var(--fg-muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .search-result-snippet mark { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+
+/* ── Authority QR toast ── */
+.qr-toast { position: fixed; bottom: 1rem; right: 1rem; z-index: 150; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); padding: 0.75rem; max-width: 280px; }
+.qr-toast-close { position: absolute; top: 0.25rem; right: 0.4rem; background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--fg-muted); line-height: 1; }
+.qr-toast-compact-inner { display: flex; align-items: center; font-size: 0.85rem; }
+.qr-toast-expanded { text-align: center; }
+.qr-toast-expanded img { max-width: 200px; margin: 0.5rem auto; display: block; }
+.qr-toast-uri { width: 100%; padding: 0.3rem 0.4rem; margin: 0.5rem 0; font-family: monospace; font-size: 0.7rem; border: 1px solid var(--border); border-radius: 4px; background: var(--input-bg); color: var(--fg); }
 
 /* ── Mobile: pinch-zoomed layout ── */
 @media (pointer: coarse) {

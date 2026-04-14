@@ -1,7 +1,5 @@
 # TODO
 
-================================== April 17 ==================================
-
 ## MentalModel
 * ensure Truth
 * ShamathaSpeech mode
@@ -9,7 +7,6 @@
 ================================== April 24 ==================================
 
 ## WikiOracle
-* host WikiOracle.org on a better server
 * share address
 * share with EFF, Solid, EthAI, etc
 
@@ -28,9 +25,6 @@
 * Engine: handle `<rev-lift>` tag in ConceptualSpace forward pass
 
 ================================== ? ==================================
-
-## OAuth
-* Look into something better than storing API Keys in cleartest on the client
 
 ## Point-Free Spacetime
 * The `<place>` and `<time>` attributes of facts and feelings define a larger or smaller spatiotemporal subspace, not an infinite universal or infinitesimal particular extent.  The universal/particular distinction is a gradient of spatiotemporal extent (see doc/Entanglement.md), and every proposition occupies a subspace that is larger or smaller, never infinite or infinitesimal.

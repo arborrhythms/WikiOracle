@@ -171,10 +171,10 @@ class TestStateToXml(unittest.TestCase):
         root = ET.fromstring(xml_str.split("\n", 1)[1])
         self.assertEqual(root.tag, "state")
 
-    def test_contains_client(self):
+    def test_contains_header(self):
         state = _make_state_with_conversations()
         xml_str = state_to_xml(state)
-        self.assertIn("<client>", xml_str)
+        self.assertIn("<header>", xml_str)
         self.assertIn("<title>XML Test State</title>", xml_str)
         self.assertIn("<client_name>Alice</client_name>", xml_str)
         self.assertIn("<client_id>alice-uuid-123</client_id>", xml_str)
@@ -290,7 +290,7 @@ class TestStateToXml(unittest.TestCase):
 class TestXmlToState(unittest.TestCase):
     """Test XML to state dict deserialization."""
 
-    def test_roundtrip_preserves_client(self):
+    def test_roundtrip_preserves_header(self):
         original = _make_state_with_conversations()
         xml_str = state_to_xml(original)
         restored = xml_to_state(xml_str)
@@ -413,41 +413,6 @@ class TestXmlToState(unittest.TestCase):
     def test_empty_string_returns_empty_state(self):
         restored = xml_to_state("")
         self.assertEqual(restored["conversations"], [])
-
-    def test_backward_compat_old_time_field(self):
-        """Old <time> element maps to time_creation."""
-        xml_text = """<?xml version="1.0" encoding="UTF-8"?>
-<state>
-  <header>
-    <version>2</version>
-    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
-    <time>2026-03-05T12:00:00Z</time>
-    <title>Old Format</title>
-    <context><div /></context>
-  </header>
-</state>
-"""
-        restored = xml_to_state(xml_text)
-        self.assertEqual(restored["time_creation"], "2026-03-05T12:00:00Z")
-        self.assertEqual(restored["time_lastModified"], "2026-03-05T12:00:00Z")
-
-    def test_backward_compat_old_user_guid(self):
-        """Old <user_guid> in <header> maps to client_id via ensure_minimal_state."""
-        xml_text = """<?xml version="1.0" encoding="UTF-8"?>
-<state>
-  <header>
-    <version>2</version>
-    <schema>https://raw.githubusercontent.com/arborrhythms/WikiOracle/main/data/state.xsd</schema>
-    <time_creation>2026-03-05T12:00:00Z</time_creation>
-    <time_lastModified>2026-03-05T12:00:00Z</time_lastModified>
-    <title>Old GUID Format</title>
-  </header>
-</state>
-"""
-        restored = xml_to_state(xml_text)
-        restored = ensure_minimal_state(restored, strict=False)
-        # Old format is parsed by xml_to_state with backward compat
-        self.assertEqual(restored["title"], "Old GUID Format")
 
     def test_client_fields_roundtrip(self):
         """Flat client_name and client_id roundtrip through XML."""

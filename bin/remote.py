@@ -994,7 +994,7 @@ def cmd_retrieve(args):
             capture=True, check=False,
         )
         if "train" in screen_check:
-            print("Training is still running. Use 'make remote-logs' to monitor.")
+            print("Training is still running. Use 'make train_logs HOST=build' to monitor.")
             print("Run 'make remote-retrieve' again after training completes.")
             sys.exit(1)
         else:
@@ -1090,8 +1090,8 @@ def cmd_deploy(args):
             capture=True, check=False,
         )
         if "train" in screen_check:
-            print("Training is still running. Use 'make remote-logs' to monitor.")
-            print("Run 'make remote-deploy' again after training completes.")
+            print("Training is still running. Use 'make train_logs HOST=build' to monitor.")
+            print("Run 'make sync HOST=build' again after training completes.")
             sys.exit(1)
         else:
             print("Warning: No done.json found and no screen session running.")

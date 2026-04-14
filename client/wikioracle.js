@@ -134,6 +134,10 @@ var _treePath = [];
 // Pending branch: when set, the next send creates a child of this conversation
 let _pendingBranchParent = null;
 
+// Multi-selection sets (conversation IDs and message indices)
+var _multiSelectedConvs = new Set();
+var _multiSelectedMsgs = new Set();
+
 function _syncClientSelectionState() {
   if (!state) return [];
   if (!Array.isArray(state.conversations)) state.conversations = [];
@@ -176,7 +180,7 @@ function _syncClientSelectionState() {
 
 // ─── Confirmation helper (skips dialog when confirm_actions is off) ───
 function confirmAction(msg) {
-  if (state.ui && state.ui.confirm_actions) return confirm(msg);
+  if (config.client.ui && config.client.ui.confirm_actions) return confirm(msg);
   return true;
 }
 
@@ -270,6 +274,11 @@ function branchFromNode(convId) {
 
 function deleteConversation(convId) {
   if (!state || !state.conversations) return;
+  // If the node is part of a multi-selection, delete all selected
+  if (_multiSelectedConvs.size > 1 && _multiSelectedConvs.has(convId)) {
+    _deleteSelectedConversations();
+    return;
+  }
   const conv = findConversation(state.conversations, convId);
   if (!conv) return;
 
@@ -277,10 +286,50 @@ function deleteConversation(convId) {
   if (!confirmAction(`Delete "${conv.title}" and all its branches? (${count} message${count !== 1 ? "s" : ""})`)) return;
 
   removeFromTree(state.conversations, convId);
+  _multiSelectedConvs.delete(convId);
   state.selected_conversation = null;
   renderMessages();
   _persistState();
   setStatus(`Deleted "${conv.title}"`);
+}
+
+function _deleteSelectedConversations() {
+  if (_multiSelectedConvs.size === 0) return;
+  var ids = Array.from(_multiSelectedConvs);
+  var total = 0;
+  for (var i = 0; i < ids.length; i++) {
+    var c = findConversation(state.conversations, ids[i]);
+    if (c) total += countTreeMessages(c);
+  }
+  if (!confirmAction("Delete " + ids.length + " selected conversations? (" + total + " total messages)")) return;
+  for (var i = 0; i < ids.length; i++) {
+    removeFromTree(state.conversations, ids[i]);
+  }
+  _multiSelectedConvs.clear();
+  state.selected_conversation = null;
+  renderMessages();
+  _persistState();
+  setStatus("Deleted " + ids.length + " conversations.");
+}
+
+function _deleteSelectedMessages() {
+  if (!state || !state.selected_conversation) return;
+  if (_multiSelectedMsgs.size === 0) return;
+  var conv = findConversation(state.conversations, state.selected_conversation);
+  if (!conv || !conv.messages) return;
+  var indices = Array.from(_multiSelectedMsgs).sort(function(a, b) { return b - a; }); // descending
+  if (!confirmAction("Delete " + indices.length + " selected messages?")) return;
+  for (var i = 0; i < indices.length; i++) {
+    conv.messages.splice(indices[i], 1);
+  }
+  _multiSelectedMsgs.clear();
+  if (conv.messages.length === 0 && (!conv.children || conv.children.length === 0)) {
+    removeFromTree(state.conversations, state.selected_conversation);
+    state.selected_conversation = null;
+  }
+  renderMessages();
+  _persistState();
+  setStatus("Deleted " + indices.length + " messages.");
 }
 
 // ─── Clipboard (shared by tree and message context menus) ───
@@ -473,11 +522,16 @@ function _showMsgContextMenu(event, msgIdx, totalMsgs) {
     menu.appendChild(pasteItem);
   }
 
-  // Delete
+  // Delete (multi-aware)
   var delItem = document.createElement("div");
   delItem.className = "ctx-item ctx-danger";
-  delItem.textContent = "Delete";
-  delItem.addEventListener("click", function(e) { e.stopPropagation(); _hideMsgContextMenu(); _deleteMessage(msgIdx); });
+  if (_multiSelectedMsgs.size > 1) {
+    delItem.textContent = "Delete " + _multiSelectedMsgs.size + " selected";
+    delItem.addEventListener("click", function(e) { e.stopPropagation(); _hideMsgContextMenu(); _deleteSelectedMessages(); });
+  } else {
+    delItem.textContent = "Delete";
+    delItem.addEventListener("click", function(e) { e.stopPropagation(); _hideMsgContextMenu(); _deleteMessage(msgIdx); });
+  }
   menu.appendChild(delItem);
 
   // Separator
@@ -619,6 +673,7 @@ function _friendlyDate(iso) {
 // Auto-scrolls chat container to bottom after render.
 function renderMessages() {
   _hideAllContextMenus();
+  _multiSelectedMsgs.clear();
   const wrapper = document.getElementById("chatWrapper");
   wrapper.innerHTML = "";
 
@@ -638,7 +693,19 @@ function renderMessages() {
     onCut: _cutConversation, onCopy: _copyConversationContent, onPaste: _pasteConversation,
     hasClipboard: function() { return _clipboard && _clipboard.type === "conv"; },
     clipboardLabel: function() { return _clipboard ? _clipboard.title || "" : ""; },
-    onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations
+    onEditContext: _toggleContextEditor, onEditTruth: _openTruthEditor, onDeleteAll: _deleteAllConversations,
+    onToggleMultiSelect: function(convId) {
+      if (_multiSelectedConvs.has(convId)) {
+        _multiSelectedConvs.delete(convId);
+      } else {
+        _multiSelectedConvs.add(convId);
+      }
+      renderMessages();
+    },
+    onClearMultiSelect: function() {
+      if (_multiSelectedConvs.size > 0) { _multiSelectedConvs.clear(); }
+    },
+    multiSelectCount: function() { return _multiSelectedConvs.size; }
   };
 
   // Determine which messages to show
@@ -700,16 +767,58 @@ function renderMessages() {
     bubble.className = "msg-bubble";
     bubble.innerHTML = ensureXhtml(msg.content || "");
 
+    // Render attachments
+    if (msg.attachments && msg.attachments.length) {
+      const attDiv = document.createElement("div");
+      attDiv.className = "msg-attachments";
+      for (let ai = 0; ai < msg.attachments.length; ai++) {
+        const att = msg.attachments[ai];
+        const isImage = att.type && att.type.startsWith("image/");
+        if (isImage && att.data) {
+          const img = document.createElement("img");
+          img.className = "msg-attachment-img";
+          img.src = att.data;
+          img.alt = att.name || "image";
+          attDiv.appendChild(img);
+        } else {
+          const link = document.createElement("a");
+          link.className = "msg-attachment";
+          link.href = att.url || "#";
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = att.name || att.url || "attachment";
+          attDiv.appendChild(link);
+        }
+      }
+      bubble.appendChild(attDiv);
+    }
+
     div.appendChild(meta);
     div.appendChild(bubble);
 
-    // Click bubble to select (highlight outline, like tree-node selection)
+    // Click bubble to select; Shift+click toggles multi-select
     bubble.addEventListener("click", (e) => {
       e.stopPropagation();
       _hideAllContextMenus();
-      const prev = wrapper.querySelector(".msg-selected");
-      if (prev && prev !== bubble) prev.classList.remove("msg-selected");
-      bubble.classList.toggle("msg-selected");
+      if (e.shiftKey) {
+        bubble.classList.toggle("msg-selected");
+        if (bubble.classList.contains("msg-selected")) {
+          _multiSelectedMsgs.add(idx);
+        } else {
+          _multiSelectedMsgs.delete(idx);
+        }
+      } else {
+        // Clear all multi-selections, toggle this one
+        _multiSelectedMsgs.clear();
+        var allSel = wrapper.querySelectorAll(".msg-selected");
+        for (var si = 0; si < allSel.length; si++) {
+          if (allSel[si] !== bubble) allSel[si].classList.remove("msg-selected");
+        }
+        bubble.classList.toggle("msg-selected");
+        if (bubble.classList.contains("msg-selected")) {
+          _multiSelectedMsgs.add(idx);
+        }
+      }
     });
 
     // Context menu (right-click / long-press) for message actions
@@ -737,7 +846,7 @@ function renderMessages() {
   if (state.selected_conversation === null && !_pendingBranchParent) {
     var stats = computeTreeStats(state.conversations);
     var trustEntries = Array.isArray(state.truth) ? state.truth : [];
-    var contextText = stripTags((config.providers && config.providers.context) || "").trim();
+    var contextText = stripTags(((config.server && config.server.providers) || {}).context || "").trim();
 
     var summary = document.createElement("div");
     summary.className = "root-summary";
@@ -909,7 +1018,7 @@ function renderMessages() {
   // Render D3 tree
   try {
     if (typeof conversationsToHierarchy === "function" && typeof renderTree === "function") {
-      const treeData = conversationsToHierarchy(state.conversations, state.selected_conversation);
+      const treeData = conversationsToHierarchy(state.conversations, state.selected_conversation, _multiSelectedConvs);
       renderTree(treeData, treeCallbacks);
     }
   } catch (e) {
@@ -965,9 +1074,12 @@ function _hideProgress() {
 
 function _updatePlaceholder() {
   const input = document.getElementById("msgInput");
-  const meta = config.server.providers[config.providers.default];
-  const name = meta ? meta.name : config.providers.default;
-  const model = state.ui.model || (meta ? meta.model : "");
+  const cliProvs = (config.client && config.client.providers) || {};
+  const srvProvs = (config.server && config.server.providers) || {};
+  const providerName = cliProvs.default_provider || "";
+  const meta = srvProvs[providerName] || null;
+  const name = meta && meta.name ? meta.name : providerName;
+  var model = cliProvs.default_model || (meta && meta.model) || "";
   input.placeholder = model ? `Message ${name} (${model})...` : `Message ${name}...`;
 }
 
@@ -1007,12 +1119,21 @@ async function sendMessage() {
   // Optimistic UI: show user message immediately (skip for empty sends)
   const optimisticMsgId = generateUUID();
   const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  const userEntry = text ? {
+  // Collect pending attachments
+  const msgAttachments = (window._pendingAttachments || []).splice(0);
+  if (typeof _renderAttachmentChips === "function") {
+    // _renderAttachmentChips is local to bindEvents, trigger via DOM
+    var chipsEl = document.getElementById("attachmentChips");
+    if (chipsEl) { chipsEl.innerHTML = ""; chipsEl.style.display = "none"; }
+  }
+
+  const userEntry = (text || msgAttachments.length) ? {
     id: optimisticMsgId,
     role: "user",
     username: state.client_name || "User",
     time: now,
     content: `<p>${escapeHtml(text)}</p>`,
+    attachments: msgAttachments.length ? msgAttachments : undefined,
     _pending: true,
   } : null;
 
@@ -1052,18 +1173,28 @@ async function sendMessage() {
   renderMessages();
 
   try {
+    const _cliProvs = (config.client && config.client.providers) || {};
+    const _srvCfg = config.server || {};
+    const _provider = _cliProvs.default_provider || "";
+    const _model = _cliProvs.default_model
+                   || ((_srvCfg.providers || {})[_provider] || {}).model
+                   || "";
+    const _clientApiKey = ((_cliProvs[_provider] || {}).api_key) || "";
     const queryBundle = {
     // QueryBundle: sent to POST /chat
       message: text,
       conversation_id: conversationId || undefined,
       branch_from: branchFrom || undefined,
       config: {
-        provider: config.providers.default,
-        model: state.ui.model || (config.server.providers[config.providers.default] || {}).model || "",
+        provider: _provider,
+        model: _model,
+        api_key: _clientApiKey,
         username: state.client_name || "User",
-        evaluation: config.server.evaluation || {},
-        truthset: config.server.truthset || {},
-        thought_free: !!(config.server.evaluation || {}).thought_free,
+        temp: (config.client && config.client.temperature),
+        url_fetch: !!(config.client && config.client.url_fetch),
+        evaluation: _srvCfg.evaluation || {},
+        truthset: _srvCfg.truthset || {},
+        thought_free: !!(config.client && config.client.thought_free),
       },
     };
     // Include pruned state (ancestor path only) + runtime_config
@@ -1159,7 +1290,7 @@ async function sendMessage() {
 // ─── Bind UI events ───
 function bindEvents() {
   // New (clear all local data; server writes empty state to disk)
-  document.getElementById("btnNew").addEventListener("click", async function() {
+  async function _doNew() {
     if (!confirm("This will clear all local data (conversations, truth entries, config). This cannot be undone. Continue?")) return;
     try {
       await api("POST", "/new");
@@ -1168,21 +1299,70 @@ function bindEvents() {
     }
     _clearAllLocal();
     window.location.reload();
-  });
+  }
 
-  // Export XML
-  document.getElementById("btnExport").addEventListener("click", function() {
-    if (!state) { setStatus("No state to export"); return; }
+  // Export config.xml locally
+  function _doLocalConfigExport(datePart) {
+    if (!config) { setStatus("No config to export"); return; }
+    const fn = `config_${datePart}.xml`;
+    const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const escAttr = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n';
+    xml += '  <client>\n';
+    // UI
+    var ui = config.client.ui || {};
+    if (Object.keys(ui).length) {
+      xml += '    <ui>\n';
+      for (var k in ui) { if (ui[k] !== undefined && ui[k] !== null) xml += '      <' + esc(k) + '>' + esc(ui[k]) + '</' + esc(k) + '>\n'; }
+      xml += '    </ui>\n';
+    }
+    // Storage
+    var st = config.client.storage || {};
+    var stAttrs = '';
+    if (st.state_key) stAttrs += ' state_key="' + escAttr(st.state_key) + '"';
+    xml += '    <storage' + stAttrs + '/>\n';
+    xml += '  </client>\n';
+    // Providers
+    var provs = config.client.providers || {};
+    xml += '  <providers default="' + escAttr(provs.default || '') + '">\n';
+    for (var pKey in provs) {
+      if (pKey === "default" || pKey === "context") continue;
+      var p = provs[pKey];
+      if (!p || typeof p !== "object") continue;
+      xml += '    <provider>\n';
+      xml += '      <name>' + esc(p.name || pKey) + '</name>\n';
+      if (p.type) xml += '      <type>' + esc(p.type) + '</type>\n';
+      if (p.model) xml += '      <model>' + esc(p.model) + '</model>\n';
+      xml += '    </provider>\n';
+    }
+    xml += '  </providers>\n';
+    xml += '</config>\n';
+    const blob = new Blob([xml], { type: "application/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = fn; a.click();
+    URL.revokeObjectURL(url);
+    setStatus("Exported: " + fn);
+  }
+
+  // Export XML (with Dropbox dropdown when connected)
+  function _doLocalExport(which) {
     const now = new Date();
     const pad2 = n => String(n).padStart(2, "0");
-    const fn = `llm_${now.getFullYear()}.${pad2(now.getMonth()+1)}.${pad2(now.getDate())}.${pad2(now.getHours())}${pad2(now.getMinutes())}.xml`;
+    const datePart = `${now.getFullYear()}.${pad2(now.getMonth()+1)}.${pad2(now.getDate())}.${pad2(now.getHours())}${pad2(now.getMinutes())}`;
+
+    if (which === "config") {
+      _doLocalConfigExport(datePart);
+      return;
+    }
+    if (!state) { setStatus("No state to export"); return; }
+    const fn = `state_${datePart}.xml`;
 
     const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
     const escAttr = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<state>\n';
 
-    // Client
-    xml += '  <client>\n';
+    // Header
+    xml += '  <header>\n';
     xml += '    <version>2</version>\n';
     xml += '    <schema>' + esc(state.schema || 'https://wikioracle.org/schemas/state/v2') + '</schema>\n';
     xml += '    <time_creation>' + esc(state.time_creation || now.toISOString()) + '</time_creation>\n';
@@ -1194,18 +1374,18 @@ function bindEvents() {
       xml += '    <client_id>' + esc(state.client_id) + '</client_id>\n';
     if (state.selected_conversation)
       xml += '    <selected_conversation>' + esc(state.selected_conversation) + '</selected_conversation>\n';
-    if (state.ui) {
+    if (config.client.ui) {
       xml += '    <ui>\n';
-      if (state.ui.layout) xml += '      <layout>' + esc(state.ui.layout) + '</layout>\n';
-      if (state.ui.theme) xml += '      <theme>' + esc(state.ui.theme) + '</theme>\n';
-      if (state.ui.model) xml += '      <model>' + esc(state.ui.model) + '</model>\n';
-      if (state.ui.divider_pos !== undefined) xml += '      <divider_pos>' + esc(state.ui.divider_pos) + '</divider_pos>\n';
-      if (state.ui.swipe_nav_horizontal !== undefined) xml += '      <swipe_nav_horizontal>' + esc(state.ui.swipe_nav_horizontal) + '</swipe_nav_horizontal>\n';
-      if (state.ui.swipe_nav_vertical !== undefined) xml += '      <swipe_nav_vertical>' + esc(state.ui.swipe_nav_vertical) + '</swipe_nav_vertical>\n';
-      if (state.ui.confirm_actions !== undefined) xml += '      <confirm_actions>' + esc(state.ui.confirm_actions) + '</confirm_actions>\n';
+      if (config.client.ui.layout) xml += '      <layout>' + esc(config.client.ui.layout) + '</layout>\n';
+      if (config.client.ui.theme) xml += '      <theme>' + esc(config.client.ui.theme) + '</theme>\n';
+      if (config.client.ui.model) xml += '      <model>' + esc(config.client.ui.model) + '</model>\n';
+      if (config.client.ui.divider_pos !== undefined) xml += '      <divider_pos>' + esc(config.client.ui.divider_pos) + '</divider_pos>\n';
+      if (config.client.ui.swipe_nav_horizontal !== undefined) xml += '      <swipe_nav_horizontal>' + esc(config.client.ui.swipe_nav_horizontal) + '</swipe_nav_horizontal>\n';
+      if (config.client.ui.swipe_nav_vertical !== undefined) xml += '      <swipe_nav_vertical>' + esc(config.client.ui.swipe_nav_vertical) + '</swipe_nav_vertical>\n';
+      if (config.client.ui.confirm_actions !== undefined) xml += '      <confirm_actions>' + esc(config.client.ui.confirm_actions) + '</confirm_actions>\n';
       xml += '    </ui>\n';
     }
-    xml += '  </client>\n';
+    xml += '  </header>\n';
 
     // Conversations (nested tree — no flattening needed)
     xml += '  <conversations>\n';
@@ -1261,11 +1441,37 @@ function bindEvents() {
     a.click();
     URL.revokeObjectURL(url);
     setStatus("Exported: " + fn);
+  }
+
+  document.getElementById("btnExport").addEventListener("click", function() {
+    if (_dropboxConnected) {
+      _showHeaderDropdown(this, [
+        { label: "Save to Dropbox", action: _saveToDropbox },
+        { label: "Share to Dropbox", action: _shareStateToDropbox },
+        { label: "Save to local", action: function() { _doLocalExport("state"); } },
+      ]);
+    } else {
+      _showHeaderDropdown(this, [
+        { label: "state.xml to local", action: function() { _doLocalExport("state"); } },
+        { label: "config.xml to local", action: function() { _doLocalExport("config"); } },
+      ]);
+    }
   });
 
-  // Import
-  document.getElementById("btnImport").addEventListener("click", function() {
+  // Import (dropdown: local file, Dropbox, New)
+  function _doLocalImport() {
     document.getElementById("fileImport").click();
+  }
+
+  document.getElementById("btnImport").addEventListener("click", function() {
+    var options = [
+      { label: "Local file", action: _doLocalImport },
+    ];
+    if (_dropboxConnected) {
+      options.unshift({ label: "Dropbox", action: _initFromDropbox });
+    }
+    options.push({ label: "New", action: _doNew });
+    _showHeaderDropdown(this, options);
   });
 
   function _validateImport(st) {
@@ -1287,7 +1493,7 @@ function bindEvents() {
     for (var k = 0; k < st.truth.length; k++) {
       var t = st.truth[k];
       if (typeof t.id !== "string") throw new Error("Invalid import: truth entry missing id");
-      if (typeof t.trust !== "number" || t.trust < -1 || t.trust > 1)
+      if (t.trust !== undefined && (typeof t.trust !== "number" || t.trust < -1 || t.trust > 1))
         throw new Error("Invalid import: truth entry " + t.id + " has invalid trust value");
       if (typeof t.content !== "string") throw new Error("Invalid import: truth entry " + t.id + " missing content");
     }
@@ -1304,28 +1510,56 @@ function bindEvents() {
 
       let importState;
 
-      if (trimmed.startsWith("<?xml") || trimmed.startsWith("<state")) {
-        // Parse XML state file
+      if (trimmed.startsWith("<?xml") || trimmed.startsWith("<state") || trimmed.startsWith("<config")) {
+        // Parse XML file (state or config)
         _showProgress(40, "Parsing XML\u2026");
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, "application/xml");
         if (doc.querySelector("parsererror")) throw new Error("Invalid XML");
         const root = doc.documentElement;
-        const hdr = root.querySelector("client") || root.querySelector("header");
+
+        // ── Config file import ──
+        if (root.tagName === "config") {
+          var parsed = xmlToConfig(text);
+          if (!parsed) throw new Error("Could not parse config.xml");
+          // The server section is authoritative on disk — only the
+          // imported client section is applied to the live config.
+          if (parsed.client) config.client = parsed.client;
+          _saveLocalConfig(config);
+
+          // Write to disk in non-stateless mode
+          if (!config.server.stateless) {
+            try {
+              await api("POST", "/config", { config: config });
+            } catch (e) {
+              setStatus("Config imported locally but disk write failed: " + e.message);
+            }
+          }
+
+          _hideProgress();
+          applyLayout(config.client.ui ? config.client.ui.layout : "horizontal");
+          applyTheme(config.client.ui ? config.client.ui.theme : "system");
+          await _refreshProviderMeta();
+          _updatePlaceholder();
+          setStatus("Imported config from " + file.name);
+          e.target.value = "";
+          return;
+        }
+
+        // ── State file import ──
+        const hdr = root.querySelector("header");
         importState = {
           version: parseInt(hdr?.querySelector("version")?.textContent || "2"),
           schema: hdr?.querySelector("schema")?.textContent || "",
-          time_creation: hdr?.querySelector("time_creation")?.textContent
-              || hdr?.querySelector("time")?.textContent || "",
+          time_creation: hdr?.querySelector("time_creation")?.textContent || "",
           time_lastModified: hdr?.querySelector("time_lastModified")?.textContent
-              || hdr?.querySelector("time_creation")?.textContent
-              || hdr?.querySelector("time")?.textContent || "",
+              || hdr?.querySelector("time_creation")?.textContent || "",
           title: hdr?.querySelector("title")?.textContent || "",
           conversations: [],
           selected_conversation: hdr?.querySelector("selected_conversation")?.textContent || null,
           truth: [],
         };
-        // Client identity (flat fields, with backward compat for nested <user> and <user_guid>)
+        // Client identity
         var _clientNameEl = hdr?.querySelector("client_name");
         var _clientIdEl = hdr?.querySelector("client_id");
         if (_clientNameEl) {
@@ -1333,17 +1567,6 @@ function bindEvents() {
         }
         if (_clientIdEl) {
           importState.client_id = _clientIdEl.textContent || "";
-        }
-        // Backward compat: nested <user> block
-        if (!_clientNameEl) {
-          var _userEl = hdr?.querySelector("user");
-          if (_userEl) {
-            importState.client_name = _userEl.querySelector("name")?.textContent || "User";
-            importState.client_id = _userEl.querySelector("user_id")?.textContent || "";
-          } else if (hdr?.querySelector("user_guid")) {
-            importState.client_name = "User";
-            importState.client_id = hdr.querySelector("user_guid").textContent;
-          }
         }
         // UI block
         var _uiEl = hdr?.querySelector("ui");
@@ -1365,7 +1588,7 @@ function bindEvents() {
             children: [],
             parentId: el.getAttribute("parentId") || null,
           };
-          el.querySelectorAll(":scope > messages > message").forEach(function(mel) {
+          el.querySelectorAll(":scope > message").forEach(function(mel) {
             conv.messages.push({
               id: mel.getAttribute("id") || "",
               role: mel.getAttribute("role") || "user",
@@ -1374,33 +1597,28 @@ function bindEvents() {
               content: mel.querySelector("content")?.innerHTML || "",
             });
           });
-          const childrenEl = el.querySelector(":scope > children");
-          if (childrenEl) {
-            childrenEl.querySelectorAll(":scope > conversation").forEach(function(cel) {
-              conv.children.push(parseConv(cel));
-            });
-          }
+          el.querySelectorAll(":scope > conversation").forEach(function(cel) {
+            conv.children.push(parseConv(cel));
+          });
           return conv;
         }
-        const convsEl = root.querySelector("conversations");
-        if (convsEl) {
-          convsEl.querySelectorAll(":scope > conversation").forEach(function(cel) {
-            importState.conversations.push(parseConv(cel));
-          });
-        }
+        root.querySelectorAll(":scope > conversation").forEach(function(cel) {
+          importState.conversations.push(parseConv(cel));
+        });
 
-        // Parse truth entries
+        // Parse truth entries (typed elements per XSD)
         const truthEl = root.querySelector("truth");
         if (truthEl) {
-          truthEl.querySelectorAll(":scope > entry").forEach(function(eel) {
+          var _truthTags = ["fact", "feeling", "reference", "logic", "provider", "authority"];
+          Array.from(truthEl.children).forEach(function(eel) {
+            if (_truthTags.indexOf(eel.tagName) === -1) return;
             const entry = { id: eel.getAttribute("id") || "" };
             if (eel.getAttribute("title")) entry.title = eel.getAttribute("title");
-            if (eel.getAttribute("trust")) entry.trust = parseFloat(eel.getAttribute("trust"));
+            var dot = eel.getAttribute("DoT") || eel.getAttribute("trust");
+            if (dot) entry.trust = parseFloat(dot);
             if (eel.getAttribute("time")) entry.time = eel.getAttribute("time");
-            if (eel.getAttribute("arg1")) entry.arg1 = eel.getAttribute("arg1");
-            if (eel.getAttribute("arg2")) entry.arg2 = eel.getAttribute("arg2");
-            const cel = eel.querySelector("content");
-            entry.content = cel ? cel.innerHTML : "";
+            if (eel.getAttribute("place")) entry.place = eel.getAttribute("place");
+            entry.content = eel.innerHTML;
             importState.truth.push(entry);
           });
         }
@@ -1465,15 +1683,6 @@ function bindEvents() {
   document.getElementById("setTemp").addEventListener("input", function() {
     document.getElementById("setTempVal").textContent = this.value;
   });
-  document.getElementById("setMaxTokens").addEventListener("input", function() {
-    document.getElementById("setMaxTokensVal").textContent = this.value;
-  });
-  document.getElementById("setTimeout").addEventListener("input", function() {
-    document.getElementById("setTimeoutVal").textContent = this.value;
-  });
-  document.getElementById("setTruthWeight").addEventListener("input", function() {
-    document.getElementById("setTruthWeightVal").textContent = this.value;
-  });
   document.getElementById("setProviderTrust").addEventListener("input", function() {
     document.getElementById("setProviderTrustVal").textContent = this.value;
   });
@@ -1488,11 +1697,90 @@ function bindEvents() {
   });
   document.getElementById("btnSettingsClose").addEventListener("click", closeSettings);
 
-  // Edit config.xml button
-  document.getElementById("btnEditConfig").addEventListener("click", _openConfigEditor);
+  // Dropbox connect/disconnect buttons
+  document.getElementById("btnDropboxConnect").addEventListener("click", async function() {
+    // Re-check status in case initial check failed (e.g. cookie issue)
+    if (!_dropboxConfigured) await _checkDropboxStatus();
+    if (_dropboxConfigured) {
+      _startDropboxAuth();
+    } else {
+      showErrorDialog("Not configured", "Dropbox app credentials are not configured on the server.");
+    }
+  });
+  document.getElementById("btnDropboxDisconnect").addEventListener("click", function() {
+    _dropboxLogout();
+  });
 
   // Read button
   document.getElementById("btnRead").addEventListener("click", _openReadView);
+
+  // Attachment button
+  var _pendingAttachments = [];
+  window._pendingAttachments = _pendingAttachments;  // expose for sendMessage
+
+  function _renderAttachmentChips() {
+    var container = document.getElementById("attachmentChips");
+    container.innerHTML = "";
+    container.style.display = _pendingAttachments.length ? "" : "none";
+    for (var i = 0; i < _pendingAttachments.length; i++) {
+      var a = _pendingAttachments[i];
+      var chip = document.createElement("div");
+      chip.className = "attachment-chip";
+      var label = document.createElement("span");
+      label.textContent = a.name || a.url || "file";
+      chip.appendChild(label);
+      var rm = document.createElement("button");
+      rm.innerHTML = "&times;";
+      rm.addEventListener("click", (function(idx) {
+        return function() { _pendingAttachments.splice(idx, 1); _renderAttachmentChips(); };
+      })(i));
+      chip.appendChild(rm);
+      container.appendChild(chip);
+    }
+  }
+
+  document.getElementById("btnAttach").addEventListener("click", function() {
+    _showHeaderDropdown(this, [
+      { label: "Add URL", action: function() {
+        _promptAttachmentURL();
+      }},
+      { label: "Add File", action: function() {
+        document.getElementById("fileAttach").click();
+      }}
+    ]);
+  });
+
+  document.getElementById("fileAttach").addEventListener("change", function() {
+    var files = this.files;
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      var isImage = file.type && file.type.startsWith("image/");
+      (function(f, img) {
+        var reader = new FileReader();
+        reader.onload = function() {
+          _pendingAttachments.push({
+            name: f.name,
+            type: f.type || "application/octet-stream",
+            data: img ? reader.result : null,
+            url: img ? null : "file://" + f.name,
+          });
+          _renderAttachmentChips();
+        };
+        if (img) reader.readAsDataURL(f);
+        else { _pendingAttachments.push({ name: f.name, type: f.type || "application/octet-stream", url: "file://" + f.name }); _renderAttachmentChips(); }
+      })(file, isImage);
+    }
+    this.value = "";
+  });
+
+  async function _promptAttachmentURL() {
+    var url = await _promptPassword("Attach URL", "Enter the URL to attach to this message.");
+    if (url) {
+      var name = url.split("/").pop().split("?")[0] || url;
+      _pendingAttachments.push({ name: name, url: url, type: "text/uri-list" });
+      _renderAttachmentChips();
+    }
+  }
 
   // Textarea auto-resize + Enter to send
   const msgInput = document.getElementById("msgInput");
@@ -1569,6 +1857,21 @@ function bindEvents() {
     var tag = document.activeElement && document.activeElement.tagName;
     if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
     if (document.querySelector(".context-overlay.active")) return;
+
+    // Delete/Backspace: delete multi-selected conversations or messages
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (_multiSelectedMsgs.size > 0) {
+        e.preventDefault();
+        _deleteSelectedMessages();
+        return;
+      }
+      if (_multiSelectedConvs.size > 0) {
+        e.preventDefault();
+        _deleteSelectedConversations();
+        return;
+      }
+    }
+
     var dirMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
     var dir = dirMap[e.key];
     if (!dir) return;
@@ -1600,8 +1903,8 @@ function bindEvents() {
   }, { passive: true });
 
   // ─── Touch swipe: mobile-only tree navigation via swipe gestures ───
-  // Governed by state.ui.swipe_nav_horizontal (default true) and
-  // state.ui.swipe_nav_vertical (default false).  Vertical is off because
+  // Governed by config.client.ui.swipe_nav_horizontal (default true) and
+  // config.client.ui.swipe_nav_vertical (default false).  Vertical is off because
   // vertical scrolling is used to read content; horizontal swipes
   // navigate siblings.  Both are stored in config.xml (ui section).
   if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
@@ -1630,7 +1933,7 @@ function bindEvents() {
         var atTop = container.scrollTop <= 0;
         var atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
 
-        if (state.ui.swipe_nav_vertical) {
+        if (config.client.ui && config.client.ui.swipe_nav_vertical) {
           // Finger drags DOWN when at top → navigate to parent
           if (atTop && dy > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
             _scrollNavCooldown = now; _treeNav("up");
@@ -1641,7 +1944,7 @@ function bindEvents() {
           }
         }
 
-        if (state.ui.swipe_nav_horizontal !== false && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
+        if ((!config.client.ui || config.client.ui.swipe_nav_horizontal !== false) && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
           // Horizontal swipe: finger left = next sibling, finger right = prev
           _scrollNavCooldown = now;
           _treeNav(dx < 0 ? "right" : "left");
@@ -1685,17 +1988,27 @@ async function init() {
       config.server.url_prefix = pagePath;
     }
 
+    // Auto-load from Dropbox if session cookie is present
+    var _dbxConnected = await _checkDropboxStatus();
+    if (_dbxConnected) {
+      _hideProgress();  // dismiss "Connecting…" before any password prompt
+      var storageStatus = await _checkStorageStatus();
+      if (storageStatus.has_files) {
+        await _initFromDropbox();
+      }
+    }
+
     // Apply layout, theme, and update placeholder from config
-    applyLayout(state.ui.layout);
-    applyTheme(state.ui.theme);
+    applyLayout(config.client.ui ? config.client.ui.layout : "horizontal");
+    applyTheme(config.client.ui ? config.client.ui.theme : "system");
     _updatePlaceholder();
 
-    // Restore divider position from state (percentage 0–100).
+    // Restore divider position from config.client.ui (percentage 0–100).
     // 0 = tree fully collapsed, 100 = tree fills viewport.
-    if (state.ui.divider_pos != null) {
+    if (config.client.ui && config.client.ui.divider_pos != null) {
       const tree = document.getElementById("treeContainer");
       if (tree) {
-        var pct = Math.max(0, Math.min(100, state.ui.divider_pos));
+        var pct = Math.max(0, Math.min(100, config.client.ui.divider_pos));
         if (document.body.classList.contains("layout-vertical")) {
           tree.style.width = (pct / 100 * window.innerWidth) + "px";
         } else {
@@ -1722,42 +2035,12 @@ async function init() {
 // Stateless init: sessionStorage is authoritative.
 // If sessionStorage has data, use it directly — no server calls needed for
 // state or config.  If sessionStorage is empty, call /bootstrap once to seed.
-// One-time migration: move user identity from legacy fields to flat state fields.
 function _migrateUserToState() {
-  // Migrate nested state.user → flat client_name/client_id
-  if (state.user && typeof state.user === "object") {
-    if (state.user.name && !state.client_name) state.client_name = state.user.name;
-    if (state.user.user_id && !state.client_id) state.client_id = state.user.user_id;
-    delete state.user;
-  }
-  // Migrate state.user_guid → state.client_id
-  if (state.user_guid) {
-    if (!state.client_id) state.client_id = state.user_guid;
-    delete state.user_guid;
-  }
-  // Migrate state.time → state.time_creation
-  if (state.time && !state.time_creation) {
-    state.time_creation = state.time;
-    state.time_lastModified = state.time;
-    delete state.time;
-  }
-  // Migrate state.context/state.output → config.providers (one-time)
-  if (state.context) {
-    if (!config.providers.context) config.providers.context = state.context;
-    delete state.context;
-  }
-  if (state.output) {
-    if (!config.providers.output) config.providers.output = state.output;
-    delete state.output;
-  }
-  // Ensure state.ui exists
-  if (!state.ui) state.ui = {};
+  // UI prefs now live in config.client.ui; clear legacy state.ui
+  delete state.ui;
 }
 
 async function _initStateless() {
-  // Migrate legacy config (one-time)
-  await _migrateOldPrefs();
-
   const localConfig = _loadLocalConfig();
   const localState = _loadLocalState();
   const needsBootstrap = !localConfig || !localState;
@@ -1769,10 +2052,10 @@ async function _initStateless() {
 
       // Seed config
       if (!localConfig) {
-        config = _normalizeConfig(boot.config || {});
+        config = boot.config || { server: {}, client: {} };
         _saveLocalConfig(config);
       } else {
-        config = _normalizeConfig(localConfig);
+        config = localConfig;
       }
 
       // Seed state
@@ -1789,14 +2072,14 @@ async function _initStateless() {
       _populateProviderDropdown();
     } catch (e) {
       console.warn("[WikiOracle] bootstrap failed:", e);
-      if (localConfig) config = _normalizeConfig(localConfig);
+      if (localConfig) config = localConfig;
       state = localState || {};
       if (!Array.isArray(state.conversations)) state.conversations = [];
     }
   } else {
     // Both sessionStorage keys present — use them directly, no server calls
     console.log("[WikiOracle] stateless: using sessionStorage (no server calls)");
-    config = _normalizeConfig(localConfig);
+    config = localConfig;
     state = localState;
     if (!Array.isArray(state.conversations)) state.conversations = [];
 
@@ -1808,10 +2091,10 @@ async function _initStateless() {
 
 // Stateful init: server disk is authoritative.
 async function _initStateful() {
-  // Load config from server (with defaults, includes providers)
+  // Load config from server (canonical, no in-code defaults)
   try {
     const configData = await api("GET", "/config");
-    config = _normalizeConfig(configData.config || {});
+    config = configData.config || { server: {}, client: {} };
   } catch (e) {
     console.warn("[WikiOracle] Failed to load config:", e);
   }
@@ -1876,9 +2159,15 @@ function _fetchStateWithProgress(expectedSize) {
 // Refresh provider metadata from server.
 // Re-reads /config since provider meta is part of config.server.providers.
 async function _refreshProviderMeta() {
+  // Only update server-owned metadata (provider definitions for UI dropdowns).
+  // The client is the source of truth post-init — never overwrite client config.
   try {
     var cfgData = await api("GET", "/config");
-    config = _normalizeConfig(cfgData.config || {});
+    var serverCfg = cfgData.config || {};
+    // Update server provider definitions (type, model, url — for dropdown display)
+    if (serverCfg.server && serverCfg.server.providers) {
+      config.server.providers = serverCfg.server.providers;
+    }
     _populateProviderDropdown();
   } catch (e) {
     console.warn("[WikiOracle] Failed to refresh provider metadata:", e);
@@ -1886,13 +2175,16 @@ async function _refreshProviderMeta() {
 }
 
 // Populate the provider <select> dropdown from config.server.providers
+const _SECTION_KEYS = ["context", "output", "truth_context", "conversation_context"];
 function _populateProviderDropdown() {
   const sel = document.getElementById("setProvider");
   sel.innerHTML = "";
-  for (const [key, info] of Object.entries(config.server.providers)) {
+  for (const [key, info] of Object.entries(config.server.providers || {})) {
+    if (_SECTION_KEYS.includes(key)) continue;
+    if (!info || typeof info !== "object") continue;
     const opt = document.createElement("option");
     opt.value = key;
-    opt.textContent = info.name;
+    opt.textContent = info.name || key;
     sel.appendChild(opt);
   }
 }
@@ -1901,11 +2193,12 @@ function _populateProviderDropdown() {
 function _populateModelDropdown(providerKey) {
   const sel = document.getElementById("setModel");
   sel.innerHTML = "";
-  const meta = config.server.providers[providerKey || config.providers.default];
+  const cliProvs = (config.client && config.client.providers) || {};
+  const srvProvs = (config.server && config.server.providers) || {};
+  const meta = srvProvs[providerKey || cliProvs.default_provider];
   if (!meta) return;
   const models = meta.models || [];
   if (models.length === 0 && meta.model) {
-    // Fallback: single model from default
     const opt = document.createElement("option");
     opt.value = meta.model;
     opt.textContent = meta.model;
@@ -1978,7 +2271,7 @@ init();
     var size = isVertical() ? tree.clientWidth : tree.clientHeight;
     var viewport = isVertical() ? window.innerWidth : window.innerHeight;
     var pct = size < 4 ? 0 : Math.round(size / viewport * 1000) / 10;
-    state.ui.divider_pos = pct;
+    config.client.ui.divider_pos = pct;
     // Toggle collapsed state for border hiding
     tree.classList.toggle("tree-collapsed", pct === 0);
     _persistConfig();
@@ -2018,7 +2311,7 @@ init();
       tree.style.height = pct === 0 ? "0px" : (pct / 100 * window.innerHeight) + "px";
     }
     tree.classList.toggle("tree-collapsed", pct === 0);
-    state.ui.divider_pos = pct;
+    config.client.ui.divider_pos = pct;
     _persistConfig();
     if (typeof renderMessages === "function") renderMessages();
   });
@@ -2026,7 +2319,7 @@ init();
   // Reapply splitter percentage on window resize (e.g. maximize/restore)
   window.addEventListener("resize", function() {
     if (dragging) return; // don't fight with an active drag
-    var pct = state.ui.divider_pos;
+    var pct = config.client.ui.divider_pos;
     if (pct == null) return;
     if (isVertical()) {
       tree.style.width = pct === 0 ? "0px" : (pct / 100 * window.innerWidth) + "px";

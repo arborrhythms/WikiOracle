@@ -434,10 +434,12 @@ function _toggleContextEditor() {
     document.getElementById("ctxCancel").addEventListener("click", dlg.close);
     document.getElementById("ctxSave").addEventListener("click", function() {
       const newText = document.getElementById("contextTextarea").value.trim();
-      const currentPlain = stripTags((config.providers && config.providers.context) || "").trim();
+      const srvProvs = (config.server && config.server.providers) || {};
+      const currentPlain = stripTags(srvProvs.context || "").trim();
       if (newText !== currentPlain) {
-        if (!config.providers) config.providers = {};
-        config.providers.context = newText;
+        if (!config.server) config.server = {};
+        if (!config.server.providers) config.server.providers = {};
+        config.server.providers.context = newText;
         _saveLocalConfig(config);
         setStatus("Context saved");
       }
@@ -446,7 +448,7 @@ function _toggleContextEditor() {
   }
 
   // Populate and show
-  const rawCtx = (config.providers && config.providers.context) || "";
+  const rawCtx = ((config.server && config.server.providers) || {}).context || "";
   document.getElementById("contextTextarea").value = stripTags(rawCtx).trim();
   overlay.classList.add("active");
   document.getElementById("contextTextarea").focus();
@@ -479,16 +481,17 @@ function _toggleOutputEditor() {
     });
     document.getElementById("outSave").addEventListener("click", function() {
       const newText = document.getElementById("outputTextarea").value.trim();
-      if (!config.providers) config.providers = {};
-      config.providers.output = newText;
+      if (!config.server) config.server = {};
+      if (!config.server.providers) config.server.providers = {};
+      config.server.providers.output = newText;
       _saveLocalConfig(config);
       setStatus("Output saved");
       dlg.close();
     });
   }
 
-  // Populate from config (context/output live in config.providers)
-  const current = (config.providers && config.providers.output) || "";
+  // Populate from config (context/output live in config.server.providers)
+  const current = ((config.server && config.server.providers) || {}).output || "";
   document.getElementById("outputTextarea").value = current;
   overlay.classList.add("active");
   document.getElementById("outputTextarea").focus();
@@ -496,43 +499,41 @@ function _toggleOutputEditor() {
 
 // ─── Settings panel ───
 function openSettings() {
+  const cliProvs = (config.client && config.client.providers) || {};
+  const srvProvs = (config.server && config.server.providers) || {};
+  const provider = cliProvs.default_provider || "";
   document.getElementById("setUsername").value = state.client_name || "User";
-  document.getElementById("setProvider").value = config.providers.default || "WikiOracle";
-  _populateModelDropdown(config.providers.default);
-  var currentModel = state.ui.model || (config.server.providers[config.providers.default] || {}).model || "";
+  document.getElementById("setProvider").value = provider;
+  _populateModelDropdown(provider);
+  var currentModel = cliProvs.default_model
+                     || (srvProvs[provider] || {}).model
+                     || "";
   if (currentModel) document.getElementById("setModel").value = currentModel;
-  document.getElementById("setLayout").value = state.ui.layout || "horizontal";
-  document.getElementById("setTheme").value = state.ui.theme || "system";
+  document.getElementById("setLayout").value = (config.client.ui && config.client.ui.layout) || "horizontal";
+  document.getElementById("setTheme").value = (config.client.ui && config.client.ui.theme) || "system";
 
-  // Evaluation settings
-  const eval_ = config.server.evaluation || {};
+  // Evaluation settings (server.evaluation provides the editable defaults)
+  const eval_ = (config.server && config.server.evaluation) || {};
   const tempSlider = document.getElementById("setTemp");
-  tempSlider.value = eval_.temperature ?? 0.7;
+  tempSlider.value = (config.client && config.client.temperature != null)
+                     ? config.client.temperature
+                     : eval_.temperature;
   document.getElementById("setTempVal").textContent = tempSlider.value;
   // Provider trust
-  var provKey = document.getElementById("setProvider").value;
-  var provTrust = ((config.server.providers || {})[provKey] || {}).trust;
-  var provType = ((config.server.providers || {})[provKey] || {}).type;
-  if (provTrust == null) provTrust = (provType === "wikioracle") ? 1.0 : 0.6;
+  var provTrust = (srvProvs[provider] || {}).trust;
+  if (provTrust == null) provTrust = "";
   var trustSlider = document.getElementById("setProviderTrust");
-  trustSlider.value = provTrust;
-  document.getElementById("setProviderTrustVal").textContent = provTrust;
-  const mtSlider = document.getElementById("setMaxTokens");
-  mtSlider.value = eval_.max_tokens ?? 128;
-  document.getElementById("setMaxTokensVal").textContent = mtSlider.value;
-  const toSlider = document.getElementById("setTimeout");
-  toSlider.value = eval_.timeout ?? 120;
-  document.getElementById("setTimeoutVal").textContent = toSlider.value;
-  // TruthSet settings
-  const ts = config.server.truthset || {};
-  const twSlider = document.getElementById("setTruthWeight");
-  twSlider.value = ts.truth_weight ?? 0.7;
-  document.getElementById("setTruthWeightVal").textContent = twSlider.value;
-  document.getElementById("setTruthMaxEntries").value = (config.server.training || {}).truth_max_entries ?? 1000;
-  document.getElementById("setStoreParticulars").checked = !!ts.store_concrete;
-  document.getElementById("setUrlFetch").checked = !!eval_.url_fetch;
-  document.getElementById("setThoughtFree").checked = !!eval_.thought_free;
-  document.getElementById("setConfirm").checked = !!(state.ui.confirm_actions);
+  trustSlider.value = provTrust || 0;
+  document.getElementById("setProviderTrustVal").textContent = trustSlider.value;
+  document.getElementById("setUrlFetch").checked =
+    !!(config.client && config.client.url_fetch);
+  document.getElementById("setThoughtFree").checked =
+    !!(config.client && config.client.thought_free);
+  document.getElementById("setConfirm").checked =
+    !!(config.client.ui && config.client.ui.confirm_actions);
+
+  // Refresh Dropbox status when settings panel opens
+  if (typeof _checkDropboxStatus === "function") _checkDropboxStatus();
 
   document.getElementById("settingsOverlay").classList.add("active");
 }
@@ -541,47 +542,32 @@ function closeSettings() {
 }
 async function saveSettings() {
   const newProvider = document.getElementById("setProvider").value;
+  const newModel = document.getElementById("setModel").value || "";
 
-  config.providers.default = newProvider;
-  if (!state.ui) state.ui = {};
-  state.ui.model = document.getElementById("setModel").value || "";
+  if (!config.client) config.client = {};
+  if (!config.client.providers) config.client.providers = {};
+  config.client.providers.default_provider = newProvider;
+  config.client.providers.default_model = newModel;
+  if (!config.client.ui) config.client.ui = {};
   state.client_name = document.getElementById("setUsername").value.trim() || "User";
-  state.ui.layout = document.getElementById("setLayout").value;
-  state.ui.theme = document.getElementById("setTheme").value || "system";
-  state.ui.confirm_actions = document.getElementById("setConfirm").checked;
+  config.client.ui.layout = document.getElementById("setLayout").value;
+  config.client.ui.theme = document.getElementById("setTheme").value || "system";
+  config.client.ui.confirm_actions = document.getElementById("setConfirm").checked;
 
-  // Evaluation settings (config.server.evaluation)
-  if (!config.server.evaluation) config.server.evaluation = {};
-  config.server.evaluation.temperature = parseFloat(document.getElementById("setTemp").value);
-  config.server.evaluation.max_tokens = parseInt(document.getElementById("setMaxTokens").value, 10);
-  config.server.evaluation.timeout = parseInt(document.getElementById("setTimeout").value, 10);
-  config.server.evaluation.url_fetch = document.getElementById("setUrlFetch").checked;
-  config.server.evaluation.thought_free = document.getElementById("setThoughtFree").checked;
+  // Client-level eval prefs (mirror <client><temperature> / <url_fetch> / <thought_free>)
+  config.client.temperature = parseFloat(document.getElementById("setTemp").value);
+  config.client.url_fetch = document.getElementById("setUrlFetch").checked;
+  config.client.thought_free = document.getElementById("setThoughtFree").checked;
 
-  // Provider trust (store per-provider)
-  if (!config.server.providers) config.server.providers = {};
-  var selProv = document.getElementById("setProvider").value;
-  if (!config.server.providers[selProv]) config.server.providers[selProv] = {};
-  config.server.providers[selProv].trust = parseFloat(document.getElementById("setProviderTrust").value);
-
-  // TruthSet settings (config.server.truthset)
-  if (!config.server.truthset) config.server.truthset = {};
-  config.server.truthset.truth_weight = parseFloat(document.getElementById("setTruthWeight").value);
-  config.server.truthset.store_concrete = document.getElementById("setStoreParticulars").checked;
-
-  // Training settings (config.server.training)
-  if (!config.server.training) config.server.training = {};
-  config.server.training.truth_max_entries = parseInt(document.getElementById("setTruthMaxEntries").value, 10);
-
-  applyLayout(state.ui.layout);
-  applyTheme(state.ui.theme);
+  applyLayout(config.client.ui.layout);
+  applyTheme(config.client.ui.theme);
   _updatePlaceholder();
   closeSettings();
 
   // Persist: config (server-owned) + state (client-owned, UI prefs)
   _persistState();
+  _saveLocalConfig(config);  // always persist locally for tab-close durability
   if (config.server.stateless) {
-    _saveLocalConfig(config);
     setStatus("Settings saved (local)");
   } else {
     try {
@@ -617,9 +603,13 @@ async function _openConfigEditor() {
     overlay = dlg.overlay;
 
     document.getElementById("cfgReset").addEventListener("click", function() {
-      var factory = _normalizeConfig({});
-      if (factory.server) delete factory.server.providers;
-      document.getElementById("configEditorTextarea").value = configToXml(factory);
+      // Re-fetch the canonical config from the server so the editor
+      // shows the on-disk baseline plus any user override.
+      api("GET", "/config").then(function(resp) {
+        if (resp && resp.config) {
+          document.getElementById("configEditorTextarea").value = configToXml(resp.config);
+        }
+      }).catch(function(){});
     });
     document.getElementById("cfgCancel").addEventListener("click", dlg.close);
     document.getElementById("cfgOk").addEventListener("click", async function() {
@@ -635,18 +625,11 @@ async function _openConfigEditor() {
         return;
       }
 
-      // Normalize and adopt as config (preserve runtime fields)
-      var newConfig = _normalizeConfig(parsed);
-      newConfig.server.providers = config.server.providers;
-      newConfig.server.stateless = config.server.stateless;
-      newConfig.server.url_prefix = config.server.url_prefix;
-      if (state.ui && state.ui.model) {
-        if (!newConfig.providers) newConfig.providers = {};
-      }
-
-      config = newConfig;
+      // Adopt the parsed canonical config wholesale.  The server's
+      // POST /config will only honor the client section anyway.
+      config = parsed;
       _saveLocalConfig(config);
-      applyLayout(state.ui.layout);
+      applyLayout(config.client && config.client.ui ? config.client.ui.layout : "horizontal");
       _updatePlaceholder();
 
       // Disk write in non-stateless mode
@@ -662,7 +645,7 @@ async function _openConfigEditor() {
       }
 
       dlg.close();
-      applyTheme(state.ui.theme);
+      applyTheme(config.client.ui ? config.client.ui.theme : "system");
       await _refreshProviderMeta();
       setStatus("config.xml saved");
     });
@@ -689,8 +672,8 @@ async function _openConfigEditor() {
       return;
     }
   }
-  // Strip runtime-only field before showing in editor
-  if (parsed && parsed.server) delete parsed.server.providers;
+  // server.providers is the canonical source for provider definitions
+  // (configToXml already excludes per-provider runtime-only `name`/`models`).
   textarea.value = configToXml(parsed || {});
   textarea.focus();
 }
@@ -716,10 +699,6 @@ function _openTruthEditor() {
               <option value="reference">Reference: citation with external link</option>
               <option value="authority">Authority: pointer to remote TruthSet</option>
               <option value="provider">Provider: external LLM endpoint</option>
-              <option value="not">NOT: negation of a truth entry</option>
-              <option value="non">NON: non-affirming weakening toward zero</option>
-              <option value="or">OR: true when any child is true (max)</option>
-              <option value="and">AND: true when all children are true (min)</option>
             </select>
             <button class="btn" id="truthAdd">Add</button>
             <button class="btn" id="truthClose">Close</button>
@@ -742,14 +721,14 @@ function _openTruthEditor() {
     // ─── XHTML template for each subtype ───
     var _truthTemplates = {
       feeling: '<feeling>Subjective statement here.</feeling>',
-      fact: '<fact DoT="0.0">Assertion text here.</fact>',
-      reference: '<reference DoT="0.0"><a href="https://example.com">Link text</a></reference>',
+      fact: '<fact trust="0.0">Assertion text here.</fact>',
+      reference: '<reference trust="0.0"><a href="https://example.com">Link text</a></reference>',
       and: '<logic><and><ref id=""/><ref id=""/></and></logic>',
       or: '<logic><or><ref id=""/><ref id=""/></or></logic>',
       not: '<logic><not><ref id=""/></not></logic>',
       non: '<logic><non><ref id=""/></non></logic>',
-      provider: '<provider DoT="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>',
-      authority: '<authority DoT="0.0"><url>https://example.com/kb.xml</url></authority>'
+      provider: '<provider trust="0.0"><api_url>https://api.example.com</api_url><model>model_name</model></provider>',
+      authority: '<authority trust="0.0"><url>https://example.com/state.zip</url><key>password</key></authority>'
     };
 
     // Brief description shown above the editor for each truth type
@@ -821,6 +800,7 @@ function _openTruthEditor() {
       _persistState();
       _truthRenderList();
       _truthShowListView();
+      if (typeof renderMessages === "function") renderMessages();
     });
   }
 
@@ -904,13 +884,18 @@ function _parseAuthContent(content) {
   try {
     var parser = new DOMParser();
     var doc = parser.parseFromString("<root>" + content + "</root>", "text/xml");
-    var auth = doc.querySelector("authority");
+    var auth = doc.querySelector("authority") || doc.documentElement;
     if (!auth) return null;
+    // Read from child element first, fall back to attribute (mirrors server _val())
+    function val(tag, def) {
+      var el = auth.querySelector(tag);
+      var t = el ? (el.textContent || "").trim() : "";
+      return t || auth.getAttribute(tag) || def || "";
+    }
     return {
-      did: auth.getAttribute("did") || "",
-      orcid: auth.getAttribute("orcid") || "",
-      url: auth.getAttribute("url") || "",
-      refresh: parseInt(auth.getAttribute("refresh")) || 3600
+      url: val("url", ""),
+      key: val("key", "") || null,
+      refresh: parseInt(val("refresh", "3600")) || 3600
     };
   } catch (e) { return null; }
 }
@@ -1055,6 +1040,18 @@ function _truthRenderList() {
     const actionsTd = document.createElement("td");
     actionsTd.style.cssText = "padding:0.3rem; white-space:nowrap; text-align:right;";
 
+    // "Read" button for authority entries — fetch and display conversations
+    if (_isAuthority(entry)) {
+      const readBtn = document.createElement("button");
+      readBtn.textContent = "Read";
+      readBtn.className = "btn";
+      readBtn.style.cssText = "font-size:0.72rem; padding:0.15rem 0.5rem; margin-right:0.2rem;";
+      readBtn.addEventListener("click", (function(e) {
+        return function() { _openAuthorityReadView(e); };
+      })(entry));
+      actionsTd.appendChild(readBtn);
+    }
+
     const editBtn = document.createElement("button");
     editBtn.textContent = "Edit";
     editBtn.className = "btn";
@@ -1083,6 +1080,7 @@ function _truthRenderList() {
           state.truth.splice(idx, 1);
           _persistState();
           _truthRenderList();
+          if (typeof renderMessages === "function") renderMessages();
         }
       };
     })(i));
@@ -1237,6 +1235,56 @@ ${body}
   }
   // Revoke after a delay so the new tab has time to load
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ─── Authority Read view ───
+
+async function _openAuthorityReadView(entry) {
+  var auth = _parseAuthContent(entry.content || "");
+  if (!auth || !auth.url) {
+    showErrorDialog("No URL", "This authority entry has no URL.");
+    return;
+  }
+  try {
+    var payload = { url: auth.url };
+    if (auth.key) payload.key = auth.key;
+    var resp = await api("POST", "/authority/conversations", payload);
+    if (!resp || !resp.ok || !resp.conversations || !resp.conversations.length) {
+      showErrorDialog("No conversations", "This authority has no conversations available.");
+      return;
+    }
+    var body = _serializeConversations(resp.conversations);
+    var baseUrl = window.location.origin + (config.server.url_prefix || "");
+    var title = entry.title || "Authority";
+    var now = new Date().toLocaleString();
+    var doc = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<title>WikiOracle — ${escapeHtml(title)}</title>
+<link rel="stylesheet" href="${baseUrl}/reading.css">
+</head>
+<body>
+<article id="reading-content">
+<h1>${escapeHtml(title)}</h1>
+<div class="meta"><span class="meta-label">Authority:</span> ${escapeHtml(truncate(auth.url, 80))}<br><span class="meta-label">Date:</span> ${escapeHtml(now)}<br><span class="meta-label">Conversations:</span> ${resp.conversations.length}</div>
+<hr class="meta-rule">
+${body}
+</article>
+</body>
+</html>`;
+    var blob = new Blob([doc], { type: "text/html" });
+    var blobUrl = URL.createObjectURL(blob);
+    var win = window.open(blobUrl, "_blank");
+    if (!win) {
+      window.location.href = blobUrl;
+      return;
+    }
+    setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
+  } catch (e) {
+    showErrorDialog("Fetch failed", e.message || String(e));
+  }
 }
 
 // ─── Search ───

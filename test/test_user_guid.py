@@ -100,9 +100,3 @@ class TestUserGuidInState(unittest.TestCase):
         # client_id should not be present or should be empty
         assert not restored.get("client_id")
 
-    def test_old_user_guid_migrated_on_normalize(self):
-        """ensure_minimal_state migrates user_guid to client_id."""
-        raw = {"user_guid": "test-guid-123"}
-        state = ensure_minimal_state(raw)
-        assert state["client_id"] == "test-guid-123"
-        assert "user_guid" not in state

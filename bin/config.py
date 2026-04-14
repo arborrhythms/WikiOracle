@@ -6,16 +6,19 @@ Sections:
   - config.xml loader           (_load_config_xml, _load_config)
   - Provider registry           (_build_providers, PROVIDERS, _PROVIDER_MODELS)
   - Config schema + serializer  (CONFIG_SCHEMA, config_to_xml)
-  - Config normalization         (_normalize_config)
+  - Client-facing projection    (_client_safe_config)
   - Module-level mode flags     (DEBUG_MODE, STATELESS_MODE, URL_PREFIX)
   - CLI argument parsing        (parse_args)
 
-Configuration is read from config.xml.
+Configuration is read from config.xml. There are NO defaults in code:
+data/config.xml is the canonical baseline (shipped with the project) and
+the optional root-level config.xml is overlaid on top via deep-merge.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import os
 import subprocess
@@ -212,6 +215,7 @@ class Config:
         "https://127.0.0.1:8888", "https://localhost:8888"
     })
     api_token: str = ""  # Bearer token for endpoint auth (empty = no auth required).
+    session_secret: str = ""  # Flask session secret (auto-generated if empty).
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -288,6 +292,7 @@ def load_config() -> Config:
         merged_suffix=os.environ.get("WIKIORACLE_MERGED_SUFFIX", ".merged").strip() or ".merged",
         allowed_origins=allowed_origins,
         api_token=os.environ.get("WIKIORACLE_API_TOKEN", ""),
+        session_secret=os.environ.get("WIKIORACLE_SESSION_SECRET", ""),
     )
 
 
@@ -322,37 +327,55 @@ def _xml_coerce(text: str):
 
 
 def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
-    """Parse a config.xml file into a dict.
+    """Parse a config.xml file into the canonical config dict shape.
 
-    The XML structure uses a ``<config>`` root element with ``<server>``
-    and ``<providers>`` sections. The server section contains subsections
-    for ``<truthset>``, ``<evaluation>``, and ``<training>``. Provider
-    entries use ``<provider>`` with ``<name>``, ``<type>``, and ``<model>``
-    child elements.  Providers are keyed by ``<name>`` in the returned dict.
+    The canonical shape mirrors the XML structure exactly::
+
+        {
+          "server": {
+            "server_id": ...,
+            "stateless": ..., "url_prefix": ...,
+            "truthset":   {...},
+            "evaluation": {...},
+            "training":   {...},
+            "allowed_urls": [...],
+            "dropbox":    {...},        # only when present
+            "providers":  {             # provider *definitions* (no api_keys)
+              "context": "...", "output": "...",
+              "truth_context": "...", "conversation_context": "...",
+              "<Name>": {"type": ..., "url": ..., "model": ..., ...},
+            },
+          },
+          "client": {
+            "ui":          {...},
+            "storage":     {...},
+            "temperature": 0.7, "url_fetch": false, "thought_free": false,
+            "providers":   {            # client-owned: default + api_keys
+              "default_provider": "Gemini",
+              "default_model":    "gemini-2.5-flash",
+              "<Name>": {"api_key": "..."},
+            },
+          },
+        }
 
     Boolean text ``true``/``false`` is coerced to Python bools; numeric
     text is coerced to int/float.
     """
     tree = ET.parse(xml_path)
     root = tree.getroot()
-    data: Dict[str, Any] = {}
+    return _parse_config_root(root)
+
+
+def _parse_config_root(root: ET.Element) -> Dict[str, Any]:
+    """Parse a parsed ``<config>`` root element into the canonical shape."""
+    data: Dict[str, Any] = {"server": {}, "client": {}}
 
     def _parse_flat_children(parent_el) -> Dict[str, Any]:
-        """Parse an element's children as flat key→value pairs."""
-        result: Dict[str, Any] = {}
-        for child in parent_el:
-            result[child.tag] = _xml_coerce(_xml_text(child))
-        return result
+        return {child.tag: _xml_coerce(_xml_text(child)) for child in parent_el}
 
     def _parse_xhtml_content(el) -> str:
-        """Extract mixed content from an element as a string.
-
-        For elements that may contain XHTML markup, serialise all
-        children back to a string.  Falls back to plain text.
-        """
         if el is None:
             return ""
-        # If the element has child elements, serialise them
         children = list(el)
         if children:
             parts = [el.text or ""]
@@ -361,101 +384,177 @@ def _load_config_xml(xml_path: Path) -> Dict[str, Any]:
             return "".join(parts).strip()
         return (el.text or "").strip()
 
-    # --- server ---
-    server_el = root.find("server")
-    if server_el is not None:
-        server: Dict[str, Any] = {}
-        for child in server_el:
-            if child.tag == "truthset":
-                server["truthset"] = _parse_flat_children(child)
-            elif child.tag == "evaluation":
-                server["evaluation"] = _parse_flat_children(child)
-            elif child.tag == "training":
-                server["training"] = _parse_flat_children(child)
-            elif child.tag == "allowed_urls":
-                urls = [_xml_text(u) for u in child.findall("url") if _xml_text(u)]
-                server["allowed_urls"] = urls
-            else:
-                server[child.tag] = _xml_coerce(_xml_text(child))
-        data["server"] = server
-
-    # --- providers ---
-    providers_el = root.find("providers")
-    if providers_el is not None:
-        providers: Dict[str, Any] = {}
-        # Section-level elements
-        default_el = providers_el.find("default")
-        if default_el is not None:
-            providers["default"] = _xml_text(default_el)
-        context_el = providers_el.find("context")
-        if context_el is not None:
-            providers["context"] = _parse_xhtml_content(context_el)
-        output_el = providers_el.find("output")
-        if output_el is not None:
-            providers["output"] = _xml_text(output_el)
-        truth_context_el = providers_el.find("truth_context")
-        if truth_context_el is not None:
-            providers["truth_context"] = _parse_xhtml_content(truth_context_el)
-        conversation_context_el = providers_el.find("conversation_context")
-        if conversation_context_el is not None:
-            providers["conversation_context"] = _parse_xhtml_content(conversation_context_el)
-        # Per-provider entries — keyed by <name> child element
+    def _parse_server_providers(providers_el) -> Dict[str, Any]:
+        """Parse <server><providers>: shared sections + per-provider definitions."""
+        result: Dict[str, Any] = {}
+        for tag in ("context", "output", "truth_context", "conversation_context"):
+            el = providers_el.find(tag)
+            if el is not None:
+                if tag in ("context", "truth_context", "conversation_context"):
+                    result[tag] = _parse_xhtml_content(el)
+                else:
+                    result[tag] = _xml_text(el)
         for prov_el in providers_el.findall("provider"):
             prov: Dict[str, Any] = {}
             prov_name = None
             for child in prov_el:
                 tag = child.tag
-                # Legacy: skip <display_name>, ignore name= attribute
-                if tag == "display_name":
-                    continue
-                # Legacy: <default_model> → "model"
-                if tag == "default_model":
-                    tag = "model"
-                val = _xml_coerce(_xml_text(child))
                 if tag == "name":
-                    prov_name = str(val)
-                prov[tag] = val
-            # Legacy fallback: old format used name= attribute
-            if prov_name is None:
-                prov_name = prov_el.get("name", "")
-            # Legacy: old format had no <type>, infer from attribute
-            if "type" not in prov and prov_el.get("name"):
-                prov["type"] = prov_el.get("name")
+                    prov_name = _xml_text(child)
+                    continue
+                if tag == "api_key":
+                    continue  # api_keys live under <client><providers>
+                prov[tag] = _xml_coerce(_xml_text(child))
             if prov_name:
-                providers[prov_name] = prov
-        data["providers"] = providers
+                result[prov_name] = prov
+        return result
+
+    def _parse_client_providers(providers_el) -> Dict[str, Any]:
+        """Parse <client><providers>: default selection + api_keys."""
+        result: Dict[str, Any] = {}
+        for tag in ("default_provider", "default_model"):
+            el = providers_el.find(tag)
+            if el is not None and (el.text or "").strip():
+                result[tag] = _xml_text(el)
+        for prov_el in providers_el.findall("provider"):
+            name_el = prov_el.find("name")
+            key_el = prov_el.find("api_key")
+            if name_el is None:
+                continue
+            name = _xml_text(name_el)
+            if not name:
+                continue
+            entry: Dict[str, Any] = {}
+            if key_el is not None and (key_el.text or "").strip():
+                entry["api_key"] = _xml_text(key_el)
+            if entry:
+                result[name] = entry
+        return result
+
+    # --- server section ---
+    server_el = root.find("server")
+    server: Dict[str, Any] = {}
+    if server_el is not None:
+        for child in server_el:
+            tag = child.tag
+            if tag == "truthset":
+                server["truthset"] = _parse_flat_children(child)
+            elif tag == "evaluation":
+                server["evaluation"] = _parse_flat_children(child)
+            elif tag == "training":
+                server["training"] = _parse_flat_children(child)
+            elif tag == "allowed_urls":
+                urls = [_xml_text(u) for u in child.findall("url") if _xml_text(u)]
+                server["allowed_urls"] = urls
+            elif tag == "dropbox":
+                dbx: Dict[str, Any] = {}
+                for attr in ("app_key", "app_secret"):
+                    val = child.get(attr, "")
+                    if val:
+                        dbx[attr] = val
+                if dbx:
+                    server["dropbox"] = dbx
+            elif tag == "providers":
+                server["providers"] = _parse_server_providers(child)
+            else:
+                server[tag] = _xml_coerce(_xml_text(child))
+    data["server"] = server
+
+    # --- client section ---
+    client_el = root.find("client")
+    client: Dict[str, Any] = {}
+    if client_el is not None:
+        _pbool = lambda t: t.lower() in ("true", "1", "yes")
+        for tag, conv in (("temperature", float),
+                          ("url_fetch", _pbool),
+                          ("thought_free", _pbool)):
+            el = client_el.find(tag)
+            if el is not None and (el.text or "").strip():
+                client[tag] = conv(el.text.strip())
+        ui_el = client_el.find("ui")
+        if ui_el is not None:
+            client["ui"] = _parse_flat_children(ui_el)
+        storage_el = client_el.find("storage")
+        if storage_el is not None:
+            storage: Dict[str, Any] = {}
+            for attr in ("state_key",):
+                val = storage_el.get(attr, "")
+                if val:
+                    storage[attr] = val
+            client["storage"] = storage
+        prov_el = client_el.find("providers")
+        if prov_el is not None:
+            client["providers"] = _parse_client_providers(prov_el)
+    data["client"] = client
 
     return data
 
 
+def _load_config_xml_string(xml_text: str) -> Dict[str, Any]:
+    """Parse a config XML string (same logic as ``_load_config_xml``)."""
+    import tempfile
+    tmp = Path(tempfile.mktemp(suffix=".xml"))
+    try:
+        tmp.write_text(xml_text, encoding="utf-8")
+        return _load_config_xml(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge *override* into *base*.
+
+    Dicts merge recursively; everything else (scalars, lists) is replaced
+    wholesale by the override.  Returns a new deep-copied dict — neither
+    input is mutated.
+    """
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if (key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
 def _load_config(project_root: Path | None = None) -> Dict[str, Any]:
-    """Load configuration from config.xml.
+    """Load configuration by overlaying a user override on the shipped baseline.
 
-    Search order:
-      1. *project_root*/config.xml       (user override)
-      2. *project_root*/data/config.xml  (shipped default)
-
-    *project_root* defaults to the parent of the bin/ directory (i.e. the
-    repo root).
+    The shipped ``data/config.xml`` is the source of all default values.
+    A user-supplied ``config.xml`` at the project root is deep-merged on
+    top (override wins on scalars and lists; dicts merge recursively).
+    There are NO in-code defaults — every parameter must originate in
+    one of the two XML files.
     """
     global _CONFIG_STATUS
     if project_root is None:
         project_root = _PROJECT_ROOT
 
-    xml_path = _find_xml(project_root, "config.xml")
-    if xml_path is not None:
+    base_path = project_root / "data" / "config.xml"
+    user_path = project_root / "config.xml"
+
+    base: Dict[str, Any] = {}
+    if base_path.exists():
         try:
-            data = _load_config_xml(xml_path)
-            if data:
-                _CONFIG_STATUS = f"loaded ({len(data)} keys) from {xml_path}"
-            else:
-                _CONFIG_STATUS = f"empty or unparseable at {xml_path}"
-            return data
+            base = _load_config_xml(base_path)
         except Exception as exc:
-            _CONFIG_STATUS = f"parse error: {exc}"
-    else:
-        _CONFIG_STATUS = "config.xml: not found"
-    return {}
+            _CONFIG_STATUS = f"baseline parse error: {exc}"
+            return {}
+
+    if user_path.exists():
+        try:
+            override = _load_config_xml(user_path)
+            merged = _deep_merge(base, override)
+            _CONFIG_STATUS = f"loaded baseline + override from {user_path}"
+            return merged
+        except Exception as exc:
+            _CONFIG_STATUS = f"override parse error: {exc} (using baseline only)"
+            return base
+
+    _CONFIG_STATUS = f"loaded baseline from {base_path}"
+    return base
 
 
 TheConfig: XMLConfig = XMLConfig(_load_config())
@@ -484,133 +583,40 @@ def init_settings(state_data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Provider configuration
 # ---------------------------------------------------------------------------
+# Section keys that live alongside <provider> entries inside
+# ``<server><providers>`` — they describe shared prompt context, not a
+# specific provider, so they must be skipped when iterating providers.
+_PROVIDER_SECTION_KEYS = ("context", "output", "truth_context", "conversation_context")
+
+
 def _build_providers() -> Dict[str, Dict[str, Any]]:
-    """Construct provider registry from defaults + config.xml overrides.
+    """Construct the runtime provider registry from the canonical config.
 
-    Providers are keyed by **name** (user-facing label).  The ``type``
-    field identifies the API protocol (openai, anthropic, gemini, etc.)
-    and is used by ``_call_provider()`` to dispatch to the right adapter.
+    Providers are keyed by **name** (the user-facing label).  Definitions
+    come from ``server.providers`` in the loaded XML; per-provider API
+    keys come from ``client.providers``.  No values are invented here:
+    everything must originate in data/config.xml or the user override.
     """
-    try:
-        cfg_providers = TheConfig.section("providers")
-    except KeyError:
-        cfg_providers = {}
+    server_provs = TheConfig.get("server.providers", {}) or {}
+    client_provs = TheConfig.get("client.providers", {}) or {}
 
-    # Hardcoded defaults — keyed by name
-    providers: Dict[str, Dict[str, Any]] = {
-        "WikiOracle": {
-            "type": "wikioracle",
-            "api_key": "StrongDemocracy",
-            "streaming": True,
-            "sequence_len": 2048,
-            "trust": 1.0,
-        },
-        "OpenAI": {
-            "type": "openai",
-            "url": "https://api.openai.com/v1/chat/completions",
-            "api_key": os.getenv("OPENAI_API_KEY", ""),
-            "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
-            "streaming": False,
-            "trust": 0.6,
-        },
-        "Anthropic": {
-            "type": "anthropic",
-            "url": "https://api.anthropic.com/v1/messages",
-            "api_key": os.getenv("ANTHROPIC_API_KEY", ""),
-            "model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-            "streaming": False,
-            "trust": 0.6,
-        },
-        "Gemini": {
-            "type": "gemini",
-            "url": "https://generativelanguage.googleapis.com/v1beta/models",
-            "api_key": os.getenv("GEMINI_API_KEY", ""),
-            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            "streaming": False,
-            "trust": 0.6,
-        },
-        "Grok": {
-            "type": "grok",
-            "url": "https://api.x.ai/v1/chat/completions",
-            "api_key": os.getenv("XAI_API_KEY", ""),
-            "model": os.getenv("XAI_MODEL", "grok-3-mini"),
-            "streaming": False,
-            "trust": 0.6,
-        },
-        "OpenRouter": {
-            "type": "openrouter",
-            "url": "https://openrouter.ai/api/v1/chat/completions",
-            "api_key": os.getenv("OPENROUTER_API_KEY", ""),
-            "model": os.getenv("OPENROUTER_MODEL", "google/gemma-3-4b-it:free"),
-            "streaming": False,
-            "trust": 0.6,
-        },
-    }
-
-    # Merge config.xml values (config overrides defaults; env vars still win)
-    for name, ycfg in cfg_providers.items():
-        if not isinstance(ycfg, dict):
+    providers: Dict[str, Dict[str, Any]] = {}
+    for name, definition in server_provs.items():
+        if name in _PROVIDER_SECTION_KEYS or not isinstance(definition, dict):
             continue
-        if name not in providers:
-            providers[name] = {"type": ycfg.get("type", "openai"), "streaming": False}
-        pcfg = providers[name]
-        if ycfg.get("type"):
-            pcfg["type"] = ycfg["type"]
-        if ycfg.get("username"):
-            pcfg["username"] = ycfg["username"]
-        if ycfg.get("url"):
-            pcfg["url"] = ycfg["url"]
-        if ycfg.get("model"):
-            env_model_var = _MODEL_ENV_VARS.get(pcfg.get("type", ""))
-            if not env_model_var or not os.getenv(env_model_var):
-                pcfg["model"] = ycfg["model"]
-        # Config api_key fills in when no env var is set
-        if ycfg.get("api_key") and not pcfg.get("api_key"):
-            pcfg["api_key"] = ycfg["api_key"]
-        if ycfg.get("timeout"):
-            pcfg["timeout"] = ycfg["timeout"]
-        if ycfg.get("sequence_len"):
-            pcfg["sequence_len"] = int(ycfg["sequence_len"])
-        if ycfg.get("trust") is not None:
-            pcfg["trust"] = float(ycfg["trust"])
+        providers[name] = dict(definition)
+
+    # Overlay client-owned API keys onto the matching provider definition.
+    for name, entry in client_provs.items():
+        if name in ("default_provider", "default_model"):
+            continue
+        if not isinstance(entry, dict):
+            continue
+        api_key = entry.get("api_key")
+        if api_key and name in providers:
+            providers[name]["api_key"] = api_key
 
     return providers
-
-
-# Default context strings for provider consultations
-DEFAULT_TRUTH_CONTEXT = (
-    "You are a participant in a distributed truth system. "
-    "Respond with truth statements as XHTML. "
-    "Use <fact> for verifiable claims and <feeling> for subjective opinions."
-)
-DEFAULT_CONVERSATION_CONTEXT = (
-    "You are a participant in a distributed truth system. "
-    "Respond with truth statements as XHTML. "
-    "Use <conversation> to answer the query, <fact> for verifiable claims "
-    "or citations, and <feeling> for subjective opinions."
-)
-
-# Default output format instruction for the main provider.
-# Tells the LLM to structure its response with <conversation>, <fact>,
-# and <feeling> tags rather than returning plain text.
-DEFAULT_OUTPUT = (
-    "Structure your response as XHTML with the following tags:\n"
-    "- <conversation>Your main answer visible to the user.</conversation>\n"
-    "- <fact trust=\"0.8\">A verifiable claim (trust -1..+1).</fact>\n"
-    "- <feeling>A subjective opinion or emotional response.</feeling>\n"
-    "Place each verifiable claim in its own <fact> tag with a trust attribute "
-    "reflecting your confidence (-1 to +1). Use <feeling> for opinions, "
-    "hedged statements, or meta-commentary. The <conversation> block is "
-    "the narrative answer shown to the user."
-)
-
-_MODEL_ENV_VARS: Dict[str, str] = {
-    "openai": "OPENAI_MODEL",
-    "anthropic": "ANTHROPIC_MODEL",
-    "gemini": "GEMINI_MODEL",
-    "grok": "XAI_MODEL",
-    "openrouter": "OPENROUTER_MODEL",
-}
 
 
 PROVIDERS: Dict[str, Dict[str, Any]] = _build_providers()
@@ -653,10 +659,11 @@ _PROVIDER_MODELS: Dict[str, list] = {
         "grok-4.20-beta-0309-non-reasoning",
     ],
     "openrouter": [
-        "google/gemma-3-4b-it:free",
-        "meta-llama/llama-4-scout:free",
-        "mistralai/mistral-small-3.1-24b-instruct:free",
-        "qwen/qwen3-4b:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-nano-30b-a3b:free",
+        "minimax/minimax-m2.5:free",
     ],
     "wikioracle": [
         "NanoChat",
@@ -669,16 +676,16 @@ _PROVIDER_MODELS: Dict[str, list] = {
 # Config schema + XML writer
 # ---------------------------------------------------------------------------
 # Ordered mapping of dotted config paths → human-readable descriptions.
-# Drives field ordering and inline comments when writing config.xml.
+# Drives inline comments when writing config.xml.
 CONFIG_SCHEMA = [
     ("server",                      "Runtime parameters (usually set via CLI flags)"),
     ("server.server_name",          "Human-readable server display name"),
-    ("server.server_id",            "Persistent server identity (auto-generated UUID4)"),
+    ("server.server_id",            "Persistent server identity (UUID4)"),
     ("server.stateless",            "Stateless mode — no disk writes (set via --stateless)"),
     ("server.url_prefix",           "URL path prefix, e.g. /chat (set via --url-prefix)"),
     ("server.truthset",             "TruthSet policy settings"),
     ("server.truthset.truth_symmetry", "Enforce Truth Symmetry (see doc/Ethics.md)"),
-    ("server.truthset.store_concrete", "Store concrete facts in TruthSet (see doc/Ethics.md §Entanglement Policy)"),
+    ("server.truthset.store_concrete", "Store concrete facts in TruthSet"),
     ("server.truthset.truth_weight", "Truth weight factor (0.0–1.0) for provider prompts"),
     ("server.evaluation",           "Default evaluation parameters for LLM inference"),
     ("server.evaluation.temperature", "Sampling temperature (0.0–2.0)"),
@@ -694,93 +701,42 @@ CONFIG_SCHEMA = [
     ("server.training.alpha_max",   "Maximum learning rate ceiling"),
     ("server.training.merge_rate",  "Slow-moving average rate for truth merge"),
     ("server.training.dissonance_enabled", "Detect and penalize contradictions"),
-    ("server.training.device",      "Training device: auto | cpu | cuda (default: cpu)"),
+    ("server.training.device",      "Training device: auto | cpu | cuda"),
     ("server.training.operators_dynamic_enabled", "Load custom operators"),
     ("server.training.warmup_steps", "Sigmoid warmup midpoint for training annealing"),
     ("server.training.grad_clip",   "Max gradient norm for clipping"),
     ("server.training.anchor_decay", "EMA blend-back rate toward checkpoint weights"),
     ("server.allowed_urls",         "URL prefixes allowed for authority/provider fetches"),
-    ("providers",                   "LLM provider configuration"),
-    ("providers.default",           "Provider selected on startup"),
-    ("providers.context",           "Shared XHTML context for all provider system prompts"),
-    ("providers.output",            "Output format instructions for all providers"),
-    ("providers.truth_context",     "System prompt context for truth-only providers"),
-    ("providers.conversation_context", "System prompt context for conversational providers"),
-    ("providers.WikiOracle.username", "API login / email"),
-    ("providers.WikiOracle.url",      "API endpoint URL"),
-    ("providers.WikiOracle.api_key",  "API key"),
-    ("providers.WikiOracle.model",    "Default model"),
-    ("providers.OpenAI.username",   "API login / email"),
-    ("providers.OpenAI.url",        "API endpoint URL"),
-    ("providers.OpenAI.api_key",    "API key (or set OPENAI_API_KEY env var)"),
-    ("providers.OpenAI.model",      "Default model"),
-    ("providers.Anthropic.username", "API login / email"),
-    ("providers.Anthropic.url",     "API endpoint URL"),
-    ("providers.Anthropic.api_key", "API key (or set ANTHROPIC_API_KEY env var)"),
-    ("providers.Anthropic.model",   "Default model"),
-    ("providers.Gemini.username",   "API login / email"),
-    ("providers.Gemini.url",        "API endpoint URL"),
-    ("providers.Gemini.api_key",    "API key (or set GEMINI_API_KEY env var)"),
-    ("providers.Gemini.model",      "Default model"),
-    ("providers.Grok.username",     "API login / email"),
-    ("providers.Grok.url",          "API endpoint URL"),
-    ("providers.Grok.api_key",      "API key (or set XAI_API_KEY env var)"),
-    ("providers.Grok.model",        "Default model"),
-    ("providers.OpenRouter.username", "API login / email"),
-    ("providers.OpenRouter.url",    "API endpoint URL"),
-    ("providers.OpenRouter.api_key", "API key (or set OPENROUTER_API_KEY env var)"),
-    ("providers.OpenRouter.model",  "Default model"),
+    ("server.providers",            "LLM provider definitions"),
+    ("server.providers.context",    "Shared XHTML context for all provider system prompts"),
+    ("server.providers.output",     "Output format instructions for all providers"),
+    ("server.providers.truth_context", "System prompt context for truth-only providers"),
+    ("server.providers.conversation_context", "System prompt context for conversational providers"),
+    ("client",                      "Client-facing configuration"),
+    ("client.providers",            "Client provider settings (default selection + API keys)"),
+    ("client.providers.default_provider", "Provider selected on startup"),
+    ("client.providers.default_model", "Model selected on startup for the default provider"),
+    ("client.ui",                   "UI preferences"),
 ]
 
 
-def _get_nested(data: dict, dotted: str):
-    """Walk a dotted path into a nested dict, returning (value, found)."""
-    keys = dotted.split(".")
-    obj = data
-    for k in keys:
-        if not isinstance(obj, dict) or k not in obj:
-            return None, False
-        obj = obj[k]
-    return obj, True
-
-
-def _set_nested(data: dict, dotted: str, value) -> None:
-    """Set a value at a dotted path, creating intermediate dicts as needed."""
-    keys = dotted.split(".")
-    obj = data
-    for k in keys[:-1]:
-        obj = obj.setdefault(k, {})
-    obj[keys[-1]] = value
-
-
 def config_to_xml(data: dict) -> str:
-    """Serialize a parsed config dict to pretty-printed XML with comments.
+    """Serialize the canonical config dict to pretty-printed XML with comments.
 
-    Produces the same ``<config>`` structure that ``_load_config_xml()``
-    expects.  Uses ``xml.etree.ElementTree`` for construction and
-    ``xml.dom.minidom`` for pretty-printing.
-
-    Providers are written as ``<provider>`` elements with ``<name>``,
-    ``<type>``, and ``<model>`` child elements (no attributes).
+    Consumes the canonical ``{server: ..., client: ...}`` shape produced
+    by :func:`_load_config_xml` and emits the matching XML.  Provider
+    definitions are written under ``<server><providers>`` with explicit
+    ``<name>`` child elements; ``default_provider`` / ``default_model``
+    plus per-provider API keys are written under ``<client><providers>``.
     """
     if not isinstance(data, dict):
         return '<?xml version="1.0" encoding="UTF-8"?>\n<config/>\n'
 
-    # Strip runtime-only field injected by _normalize_config
-    data = dict(data)
-    srv = data.get("server")
-    if isinstance(srv, dict):
-        srv = dict(srv)
-        srv.pop("providers", None)
-        data["server"] = srv
-
-    # Build a description lookup from CONFIG_SCHEMA
     desc_map: Dict[str, str] = {dotted: desc for dotted, desc in CONFIG_SCHEMA}
 
     root = ET.Element("config")
 
     def _val_str(value) -> str:
-        """Convert a Python value to its XML text representation."""
         if isinstance(value, bool):
             return "true" if value else "false"
         if value is None:
@@ -788,16 +744,10 @@ def config_to_xml(data: dict) -> str:
         return str(value)
 
     def _add_comment(parent: ET.Element, text: str) -> None:
-        """Append an XML comment to *parent*.
-
-        Double-dashes (``--``) are illegal inside XML comments, so they
-        are replaced with en-dashes to keep the output well-formed.
-        """
-        safe = text.replace("--", "\u2013")  # en-dash
+        safe = text.replace("--", "\u2013")  # en-dash; -- is illegal in XML comments
         parent.append(ET.Comment(f" {safe} "))
 
     def _write_subsection(parent_el, section_name, section_data, schema_prefix):
-        """Write a subsection element with its children."""
         desc = desc_map.get(schema_prefix)
         if desc:
             _add_comment(parent_el, desc)
@@ -810,60 +760,55 @@ def config_to_xml(data: dict) -> str:
             child.text = _val_str(val)
 
     # --- server ---
-    server_data = data.get("server")
-    if isinstance(server_data, dict):
-        _add_comment(root, "Runtime parameters (usually set via CLI flags)")
-        server_el = ET.SubElement(root, "server")
-        # Flat server fields
-        for key in ("server_name", "server_id", "stateless", "url_prefix"):
-            val = server_data.get(key)
-            if val is not None:
-                desc = desc_map.get(f"server.{key}")
-                if desc:
-                    _add_comment(server_el, desc)
-                child = ET.SubElement(server_el, key)
-                child.text = _val_str(val)
-        # Subsections
-        truthset_data = server_data.get("truthset")
-        if isinstance(truthset_data, dict):
-            _write_subsection(server_el, "truthset", truthset_data, "server.truthset")
-        evaluation_data = server_data.get("evaluation")
-        if isinstance(evaluation_data, dict):
-            _write_subsection(server_el, "evaluation", evaluation_data, "server.evaluation")
-        training_data = server_data.get("training")
-        if isinstance(training_data, dict):
-            _write_subsection(server_el, "training", training_data, "server.training")
-        # allowed_urls
-        urls = server_data.get("allowed_urls")
-        if isinstance(urls, list):
-            _add_comment(server_el, "URL prefixes allowed for authority/provider fetches")
-            urls_el = ET.SubElement(server_el, "allowed_urls")
-            for url_str in urls:
-                url_child = ET.SubElement(urls_el, "url")
-                url_child.text = str(url_str)
+    server_data = data.get("server") or {}
+    _add_comment(root, "Runtime parameters (usually set via CLI flags)")
+    server_el = ET.SubElement(root, "server")
+    for key in ("server_name", "server_id", "stateless", "url_prefix"):
+        if key in server_data:
+            desc = desc_map.get(f"server.{key}")
+            if desc:
+                _add_comment(server_el, desc)
+            child = ET.SubElement(server_el, key)
+            child.text = _val_str(server_data[key])
+    for sub_name, schema_prefix in (("truthset",   "server.truthset"),
+                                     ("evaluation", "server.evaluation"),
+                                     ("training",   "server.training")):
+        sub = server_data.get(sub_name)
+        if isinstance(sub, dict):
+            _write_subsection(server_el, sub_name, sub, schema_prefix)
+    urls = server_data.get("allowed_urls")
+    if isinstance(urls, list):
+        _add_comment(server_el, desc_map["server.allowed_urls"])
+        urls_el = ET.SubElement(server_el, "allowed_urls")
+        for url_str in urls:
+            url_child = ET.SubElement(urls_el, "url")
+            url_child.text = str(url_str)
+    dbx_data = server_data.get("dropbox")
+    if isinstance(dbx_data, dict):
+        _add_comment(server_el, "Dropbox app credentials (server-only, never sent to client)")
+        dbx_el = ET.SubElement(server_el, "dropbox")
+        for attr in ("app_key", "app_secret"):
+            if dbx_data.get(attr):
+                dbx_el.set(attr, str(dbx_data[attr]))
 
-    # --- providers ---
-    providers_data = data.get("providers")
-    if isinstance(providers_data, dict):
-        _add_comment(root, "LLM provider configuration")
-        providers_el = ET.SubElement(root, "providers")
-        # Section-level elements
-        for section_key in ("default", "context", "output", "truth_context", "conversation_context"):
-            val = providers_data.get(section_key)
+    server_provs = server_data.get("providers")
+    if isinstance(server_provs, dict):
+        _add_comment(server_el, desc_map["server.providers"])
+        providers_el = ET.SubElement(server_el, "providers")
+        for section_key in _PROVIDER_SECTION_KEYS:
+            val = server_provs.get(section_key)
             if val is not None:
-                desc = desc_map.get(f"providers.{section_key}")
+                desc = desc_map.get(f"server.providers.{section_key}")
                 if desc:
                     _add_comment(providers_el, desc)
                 child = ET.SubElement(providers_el, section_key)
                 child.text = _val_str(val)
-        # Per-provider entries — no attributes, all child elements
-        for prov_name, prov_cfg in providers_data.items():
-            if prov_name in ("default", "context", "output", "truth_context", "conversation_context"):
+        for prov_name, prov_cfg in server_provs.items():
+            if prov_name in _PROVIDER_SECTION_KEYS:
                 continue
             if not isinstance(prov_cfg, dict):
                 continue
             prov_el = ET.SubElement(providers_el, "provider")
-            # Write <name> first, then <type>, then remaining fields
             name_el = ET.SubElement(prov_el, "name")
             name_el.text = prov_name
             if prov_cfg.get("type"):
@@ -872,11 +817,56 @@ def config_to_xml(data: dict) -> str:
             for field_key, field_val in prov_cfg.items():
                 if field_key in ("name", "type"):
                     continue
-                desc = desc_map.get(f"providers.{prov_name}.{field_key}")
-                if desc:
-                    _add_comment(prov_el, desc)
                 child = ET.SubElement(prov_el, field_key)
                 child.text = _val_str(field_val)
+
+    # --- client section ---
+    client_data = data.get("client") or {}
+    _add_comment(root, desc_map["client"])
+    client_el = ET.SubElement(root, "client")
+
+    storage_data = client_data.get("storage")
+    if isinstance(storage_data, dict):
+        _add_comment(client_el, "Cloud storage backend")
+        ET.SubElement(client_el, "storage")
+
+    for tag in ("temperature", "url_fetch", "thought_free"):
+        if tag in client_data:
+            child = ET.SubElement(client_el, tag)
+            child.text = _val_str(client_data[tag])
+
+    ui_data = client_data.get("ui")
+    if isinstance(ui_data, dict):
+        _add_comment(client_el, desc_map["client.ui"])
+        ui_el = ET.SubElement(client_el, "ui")
+        for key, val in ui_data.items():
+            child = ET.SubElement(ui_el, key)
+            child.text = _val_str(val)
+
+    client_provs = client_data.get("providers")
+    if isinstance(client_provs, dict):
+        _add_comment(client_el, desc_map["client.providers"])
+        client_prov_el = ET.SubElement(client_el, "providers")
+        for sel_key in ("default_provider", "default_model"):
+            if client_provs.get(sel_key):
+                desc = desc_map.get(f"client.providers.{sel_key}")
+                if desc:
+                    _add_comment(client_prov_el, desc)
+                sel_child = ET.SubElement(client_prov_el, sel_key)
+                sel_child.text = _val_str(client_provs[sel_key])
+        for prov_name, prov_entry in client_provs.items():
+            if prov_name in ("default_provider", "default_model"):
+                continue
+            if not isinstance(prov_entry, dict):
+                continue
+            api_key = prov_entry.get("api_key")
+            if not api_key:
+                continue
+            prov_el = ET.SubElement(client_prov_el, "provider")
+            name_el = ET.SubElement(prov_el, "name")
+            name_el.text = prov_name
+            key_el = ET.SubElement(prov_el, "api_key")
+            key_el.text = str(api_key)
 
     # Pretty-print with minidom
     rough_xml = ET.tostring(root, encoding="unicode", xml_declaration=False)
@@ -891,51 +881,16 @@ def config_to_xml(data: dict) -> str:
 # ---------------------------------------------------------------------------
 # Allowed URL prefixes for authority/provider fetches
 # ---------------------------------------------------------------------------
-def _default_allowed_urls() -> list:
-    """Default URL prefixes that authority and dynamic provider fetches may target.
-
-    Only https:// URLs whose prefix matches one of these entries are allowed.
-    file:// URLs are blocked unless explicitly whitelisted here.
-    """
-    return [
-        "https://api.openai.com/",
-        "https://api.anthropic.com/",
-        "https://generativelanguage.googleapis.com/",
-        "https://api.x.ai/",
-        "https://en.wikipedia.org/",
-        "http://127.0.0.1:",
-        "https://127.0.0.1:",
-        "http://localhost:",
-        "https://localhost:",
-        "file://data/",
-        "file://output/",
-    ]
-
-
 def get_allowed_urls() -> list:
     """Return the allowed URL prefixes for authority/provider fetches.
 
-    Checks the in-memory ``TheConfig`` first, then falls back to
-    re-reading config.xml from disk (so admin edits take effect without
-    a server restart).  If neither source has ``allowed_urls``, returns
-    the built-in defaults.
+    Reads ``server.allowed_urls`` from the canonical config.  This list
+    must be defined in ``data/config.xml`` (and may be overridden in the
+    user-level ``config.xml``); there is no in-code fallback.
     """
-    urls = TheConfig.get("server.allowed_urls", None)
-    if not urls:
-        # Re-read disk in case config.xml was edited after server start.
-        fresh = _load_config()
-        urls = fresh.get("server", {}).get("allowed_urls")
-    if not urls:
-        return _default_allowed_urls()
-    # Guard against the list being parsed as a string.
-    if isinstance(urls, str):
-        import ast
-        try:
-            urls = ast.literal_eval(urls)
-        except (ValueError, SyntaxError):
-            return _default_allowed_urls()
+    urls = TheConfig.get("server.allowed_urls")
     if not isinstance(urls, list):
-        return _default_allowed_urls()
+        return []
     return urls
 
 
@@ -949,78 +904,51 @@ def is_url_allowed(url: str) -> bool:
     """
     if not isinstance(url, str):
         return False
+    allowed = get_allowed_urls()
+    url_lower = url.lower()
     # file:// URLs are allowed only when explicitly whitelisted.
     if url.startswith("file://"):
-        allowed = get_allowed_urls()
-        url_lower = url.lower()
         return any(
             prefix.lower().startswith("file://") and url_lower.startswith(prefix.lower())
             for prefix in allowed
         )
-    if not url.startswith("https://") and not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
+    if not (url.startswith("https://")
+            or url.startswith("http://127.0.0.1")
+            or url.startswith("http://localhost")):
         return False
-    allowed = get_allowed_urls()
-    url_lower = url.lower()
     return any(url_lower.startswith(prefix.lower()) for prefix in allowed)
 
 
 # ---------------------------------------------------------------------------
-# Config normalization (fill defaults)
+# Client-facing projection
 # ---------------------------------------------------------------------------
-def _normalize_config(cfg_data: dict) -> dict:
-    """Ensure all expected fields exist with defaults in a config dict.
+def _client_safe_config(cfg_data: dict) -> dict:
+    """Project the canonical config into a form safe to send to the browser.
 
-    Missing sections/keys are filled with sensible defaults.
+    - Strips server-only secrets (``server.dropbox``, any
+      ``server.providers[name].api_key``).
+    - Augments each provider definition with a ``models`` list drawn
+      from :data:`_PROVIDER_MODELS` so the UI can populate dropdowns.
+
+    No defaults are filled in here — the caller's ``cfg_data`` is the
+    sole source of values, exactly as loaded from XML.
     """
-    cfg = dict(cfg_data) if isinstance(cfg_data, dict) else {}
-    # --- server ---
-    server = cfg.setdefault("server", {})
-    if not server.get("server_id"):
-        server["server_id"] = str(_uuid.uuid4())
-    server.setdefault("stateless", False)
-    server.setdefault("url_prefix", "")
-    # server.truthset
-    ts = server.setdefault("truthset", {})
-    ts.setdefault("truth_symmetry", True)
-    ts.setdefault("store_concrete", False)
-    ts.setdefault("truth_weight", 0.7)
-    # server.evaluation
-    ev = server.setdefault("evaluation", {})
-    ev.setdefault("temperature", 0.7)
-    ev.setdefault("max_tokens", 128)
-    ev.setdefault("timeout", 120)
-    ev.setdefault("url_fetch", False)
-    # server.training
-    tr = server.setdefault("training", {})
-    tr.setdefault("enabled", False)
-    tr.setdefault("truth_corpus_path", "data/truth.xml")
-    tr.setdefault("truth_max_entries", 1000)
-    tr.setdefault("alpha_base", 0.01)
-    tr.setdefault("alpha_min", 0.001)
-    tr.setdefault("alpha_max", 0.1)
-    tr.setdefault("merge_rate", 0.1)
-    tr.setdefault("device", "cpu")
-    tr.setdefault("dissonance_enabled", True)
-    tr.setdefault("operators_dynamic_enabled", True)
-    tr.setdefault("warmup_steps", 50)
-    tr.setdefault("grad_clip", 1.0)
-    tr.setdefault("anchor_decay", 0.001)
-    server.setdefault("allowed_urls", _default_allowed_urls())
-    # --- providers ---
-    prov = cfg.setdefault("providers", {})
-    prov.setdefault("default", "WikiOracle")
-    # Non-secret provider metadata for UI dropdowns / key-status badges
-    prov_meta = {}
-    for name, pcfg in PROVIDERS.items():
-        prov_type = pcfg.get("type", "")
-        prov_meta[name] = {
-            "name": name,
-            "type": prov_type,
-            "streaming": pcfg.get("streaming", False),
-            "model": pcfg.get("model", ""),
-            "models": _PROVIDER_MODELS.get(prov_type, []),
-        }
-    server["providers"] = prov_meta
+    if not isinstance(cfg_data, dict):
+        return {}
+    cfg = copy.deepcopy(cfg_data)
+
+    server = cfg.get("server")
+    if isinstance(server, dict):
+        server.pop("dropbox", None)
+        provs = server.get("providers")
+        if isinstance(provs, dict):
+            for name, entry in provs.items():
+                if name in _PROVIDER_SECTION_KEYS or not isinstance(entry, dict):
+                    continue
+                entry.pop("api_key", None)
+                prov_type = entry.get("type", "")
+                entry["name"] = name
+                entry["models"] = _PROVIDER_MODELS.get(prov_type, [])
     return cfg
 
 

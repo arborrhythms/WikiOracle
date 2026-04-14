@@ -1,26 +1,20 @@
-// config.js — Config persistence and normalization (no deps).
+// config.js — Config persistence and XML (de)serialization (no deps).
 // Loaded first; owns the config global.
 //
-// The config object has the same shape as config.xml — server and providers
-// sections only.  UI preferences and client identity live in state, not here.
-// Missing sections/keys are filled with sensible defaults by
-// _normalizeConfig().
+// The config object mirrors config.xml exactly — { server: {...}, client: {...} }.
+// There are NO defaults in code: the server's /bootstrap response is the
+// canonical source.  Every value the UI displays must originate in
+// data/config.xml (or its user override).
 //
 // Exports:
-//   config                — shared global: current config (XML-shaped)
-//   _loadLocalConfig()    — read config from sessionStorage
-//   _saveLocalConfig()    — write config to sessionStorage
-//   _normalizeConfig(cfg) — fill defaults, keep XML shape
-//   _migrateOldPrefs()    — one-time migration from legacy wikioracle_prefs
+//   config              — shared global: current config (canonical shape)
+//   _loadLocalConfig()  — read config from sessionStorage
+//   _saveLocalConfig()  — write config to sessionStorage
+//   configToXml(obj)    — serialize config object to XML string
+//   xmlToConfig(text)   — parse XML string into canonical shape
 
 // ─── Config global (owned here, used everywhere) ───
-let config = {
-  server: { stateless: false, url_prefix: "", providers: {},
-            truthset: { truth_symmetry: true, store_concrete: false, truth_weight: 0.7 },
-            evaluation: { temperature: 0.7, max_tokens: 128, timeout: 120, url_fetch: false },
-            training: { enabled: false } },
-  providers: { default: "WikiOracle" },
-};
+let config = { server: {}, client: {} };
 
 // ─── Storage persistence (sessionStorage + localStorage mirror) ───
 
@@ -31,15 +25,13 @@ function _loadLocalConfig() {
   try {
     var raw = sessionStorage.getItem(_CONFIG_KEY);
     if (!raw) {
-      // Fallback: restore from localStorage (survives tab close)
       raw = localStorage.getItem(_CONFIG_KEY);
       if (raw) sessionStorage.setItem(_CONFIG_KEY, raw);
     }
     if (!raw) return null;
     var data = JSON.parse(raw);
-    // Handle legacy formats (raw string or old { parsed, config } bundle)
     if (typeof data === "string") return null;
-    if (data.parsed && data.config) return data.config;  // upgrade old bundle
+    if (data && data.parsed && data.config) return data.config;  // legacy bundle
     return data;
   } catch { return null; }
 }
@@ -52,34 +44,12 @@ function _saveLocalConfig(cfg) {
   } catch {}
 }
 
-// ─── Config normalization ───
-
-// Fill defaults in a config dict — mirrors server's _normalize_config().
-function _normalizeConfig(cfg) {
-  cfg = cfg || {};
-  // --- server ---
-  if (!cfg.server) cfg.server = {};
-  if (cfg.server.stateless === undefined) cfg.server.stateless = false;
-  if (cfg.server.url_prefix === undefined) cfg.server.url_prefix = "";
-  if (!cfg.server.providers) cfg.server.providers = {};
-  // server.truthset
-  if (!cfg.server.truthset) cfg.server.truthset = {};
-  if (cfg.server.truthset.truth_symmetry === undefined) cfg.server.truthset.truth_symmetry = true;
-  if (cfg.server.truthset.store_concrete === undefined) cfg.server.truthset.store_concrete = false;
-  if (cfg.server.truthset.truth_weight === undefined) cfg.server.truthset.truth_weight = 0.7;
-  // server.evaluation
-  if (!cfg.server.evaluation) cfg.server.evaluation = {};
-  if (cfg.server.evaluation.temperature === undefined) cfg.server.evaluation.temperature = 0.7;
-  if (cfg.server.evaluation.max_tokens === undefined) cfg.server.evaluation.max_tokens = 128;
-  if (cfg.server.evaluation.timeout === undefined) cfg.server.evaluation.timeout = 120;
-  if (cfg.server.evaluation.url_fetch === undefined) cfg.server.evaluation.url_fetch = false;
-  // --- providers ---
-  if (!cfg.providers) cfg.providers = {};
-  if (!cfg.providers.default) cfg.providers.default = "WikiOracle";
-  return cfg;
-}
-
 // ─── XML serializer / parser (config editor) ───
+
+// Section keys that live alongside <provider> entries inside
+// <server><providers> — they describe shared prompt context, not a
+// specific provider, so they must be skipped when iterating providers.
+var _SERVER_PROVIDER_SECTION_KEYS = ["context", "output", "truth_context", "conversation_context"];
 
 // Coerce XML text to bool / number / string (matches server _xml_coerce).
 function _xmlCoerce(text) {
@@ -104,79 +74,115 @@ function _xmlEsc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+// Serialize a flat key→scalar dict as one XML subsection.
+function _addFlatSubsection(lines, indent, tag, data) {
+  if (!data || typeof data !== "object") return;
+  lines.push(indent + "<" + tag + ">");
+  for (var key in data) {
+    if (!data.hasOwnProperty(key)) continue;
+    lines.push(indent + "  <" + key + ">" + _xmlEsc(_xmlValStr(data[key])) + "</" + key + ">");
+  }
+  lines.push(indent + "</" + tag + ">");
+}
+
 // Serialize config dict → XML string (matches server config_to_xml).
 function configToXml(obj) {
-  if (!obj || typeof obj !== "object") return '<?xml version="1.0" encoding="UTF-8"?>\n<config/>\n';
+  if (!obj || typeof obj !== "object") {
+    return '<?xml version="1.0" encoding="UTF-8"?>\n<config/>\n';
+  }
   var lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<config>"];
 
-  function addSubsection(indent, tag, data) {
-    if (!data || typeof data !== "object") return;
-    lines.push(indent + "<" + tag + ">");
-    for (var key in data) {
-      if (!data.hasOwnProperty(key)) continue;
-      lines.push(indent + "  <" + key + ">" + _xmlEsc(_xmlValStr(data[key])) + "</" + key + ">");
+  // ── server ──
+  var srv = obj.server || {};
+  lines.push("  <server>");
+  ["server_name", "server_id", "stateless", "url_prefix"].forEach(function(sk) {
+    if (srv[sk] !== undefined) {
+      lines.push("    <" + sk + ">" + _xmlEsc(_xmlValStr(srv[sk])) + "</" + sk + ">");
     }
-    lines.push(indent + "</" + tag + ">");
+  });
+  if (srv.truthset)   _addFlatSubsection(lines, "    ", "truthset",   srv.truthset);
+  if (srv.evaluation) _addFlatSubsection(lines, "    ", "evaluation", srv.evaluation);
+  if (srv.training)   _addFlatSubsection(lines, "    ", "training",   srv.training);
+  if (Array.isArray(srv.allowed_urls)) {
+    lines.push("    <allowed_urls>");
+    srv.allowed_urls.forEach(function(u) {
+      lines.push("      <url>" + _xmlEsc(u) + "</url>");
+    });
+    lines.push("    </allowed_urls>");
   }
-
-  // server
-  var srv = obj.server;
-  if (srv && typeof srv === "object") {
-    lines.push("  <server>");
-    // Flat server fields
-    var flatKeys = ["server_name", "server_id", "stateless", "url_prefix"];
-    flatKeys.forEach(function(sk) {
-      if (srv[sk] !== undefined && sk !== "providers") {
-        lines.push("    <" + sk + ">" + _xmlEsc(_xmlValStr(srv[sk])) + "</" + sk + ">");
+  // Provider definitions under <server><providers>.
+  var srvProvs = srv.providers;
+  if (srvProvs && typeof srvProvs === "object") {
+    lines.push("    <providers>");
+    _SERVER_PROVIDER_SECTION_KEYS.forEach(function(sk) {
+      if (srvProvs[sk] !== undefined) {
+        lines.push("      <" + sk + ">" + _xmlEsc(_xmlValStr(srvProvs[sk])) + "</" + sk + ">");
       }
     });
-    // Subsections
-    if (srv.truthset && typeof srv.truthset === "object") addSubsection("    ", "truthset", srv.truthset);
-    if (srv.evaluation && typeof srv.evaluation === "object") addSubsection("    ", "evaluation", srv.evaluation);
-    if (srv.training && typeof srv.training === "object") addSubsection("    ", "training", srv.training);
-    // allowed_urls
-    if (Array.isArray(srv.allowed_urls)) {
-      lines.push("    <allowed_urls>");
-      srv.allowed_urls.forEach(function(u) { lines.push("      <url>" + _xmlEsc(u) + "</url>"); });
-      lines.push("    </allowed_urls>");
-    }
-    lines.push("  </server>");
-  }
-
-  // providers — section-level elements + <provider> with child elements
-  var provs = obj.providers;
-  if (provs && typeof provs === "object") {
-    lines.push("  <providers>");
-    // Section-level elements
-    var sectionKeys = ["default", "context", "output", "truth_context", "conversation_context"];
-    sectionKeys.forEach(function(sk) {
-      if (provs[sk] !== undefined) {
-        lines.push("    <" + sk + ">" + _xmlEsc(_xmlValStr(provs[sk])) + "</" + sk + ">");
-      }
-    });
-    // Per-provider entries — no attributes, all child elements
-    for (var pk in provs) {
-      if (!provs.hasOwnProperty(pk)) continue;
-      if (sectionKeys.indexOf(pk) !== -1) continue;
-      var prov = provs[pk];
+    for (var pk in srvProvs) {
+      if (!srvProvs.hasOwnProperty(pk)) continue;
+      if (_SERVER_PROVIDER_SECTION_KEYS.indexOf(pk) !== -1) continue;
+      var prov = srvProvs[pk];
       if (!prov || typeof prov !== "object") continue;
-      lines.push("    <provider>");
-      // Write <name> first (the dict key is the name)
-      lines.push("      <name>" + _xmlEsc(pk) + "</name>");
+      lines.push("      <provider>");
+      lines.push("        <name>" + _xmlEsc(pk) + "</name>");
       for (var fk in prov) {
-        if (!prov.hasOwnProperty(fk) || fk === "name") continue;
-        lines.push("      <" + fk + ">" + _xmlEsc(_xmlValStr(prov[fk])) + "</" + fk + ">");
+        if (!prov.hasOwnProperty(fk)) continue;
+        if (fk === "name" || fk === "api_key" || fk === "models") continue;
+        lines.push("        <" + fk + ">" + _xmlEsc(_xmlValStr(prov[fk])) + "</" + fk + ">");
       }
-      lines.push("    </provider>");
+      lines.push("      </provider>");
     }
-    lines.push("  </providers>");
+    lines.push("    </providers>");
   }
+  lines.push("  </server>");
+
+  // ── client ──
+  var cli = obj.client || {};
+  lines.push("  <client>");
+  if (cli.storage) lines.push("    <storage/>");
+  ["temperature", "url_fetch", "thought_free"].forEach(function(k) {
+    if (cli[k] !== undefined) {
+      lines.push("    <" + k + ">" + _xmlEsc(_xmlValStr(cli[k])) + "</" + k + ">");
+    }
+  });
+  if (cli.ui && typeof cli.ui === "object") {
+    lines.push("    <ui>");
+    for (var uk in cli.ui) {
+      if (!cli.ui.hasOwnProperty(uk)) continue;
+      lines.push("      <" + uk + ">" + _xmlEsc(_xmlValStr(cli.ui[uk])) + "</" + uk + ">");
+    }
+    lines.push("    </ui>");
+  }
+  var cliProvs = cli.providers;
+  if (cliProvs && typeof cliProvs === "object") {
+    lines.push("    <providers>");
+    if (cliProvs.default_provider) {
+      lines.push("      <default_provider>" + _xmlEsc(_xmlValStr(cliProvs.default_provider)) + "</default_provider>");
+    }
+    if (cliProvs.default_model) {
+      lines.push("      <default_model>" + _xmlEsc(_xmlValStr(cliProvs.default_model)) + "</default_model>");
+    }
+    for (var pk2 in cliProvs) {
+      if (!cliProvs.hasOwnProperty(pk2)) continue;
+      if (pk2 === "default_provider" || pk2 === "default_model") continue;
+      var p = cliProvs[pk2];
+      if (p && typeof p === "object" && p.api_key) {
+        lines.push("      <provider>");
+        lines.push("        <name>" + _xmlEsc(pk2) + "</name>");
+        lines.push("        <api_key>" + _xmlEsc(_xmlValStr(p.api_key)) + "</api_key>");
+        lines.push("      </provider>");
+      }
+    }
+    lines.push("    </providers>");
+  }
+  lines.push("  </client>");
 
   lines.push("</config>");
   return lines.join("\n") + "\n";
 }
 
-// Parse XML string → config dict (matches server _load_config_xml).
+// Parse XML string → canonical config dict (matches server _load_config_xml).
 // Returns null on parse error.
 function xmlToConfig(text) {
   try {
@@ -186,7 +192,6 @@ function xmlToConfig(text) {
     if (err) return null;
     var root = doc.documentElement;
     if (root.tagName !== "config") return null;
-    var data = {};
 
     function readSimple(el) {
       var obj = {};
@@ -197,94 +202,96 @@ function xmlToConfig(text) {
       return obj;
     }
 
-    // server
-    var srvEl = root.querySelector("server");
+    var data = { server: {}, client: {} };
+
+    // ── server ──
+    var srvEl = root.querySelector(":scope > server");
     if (srvEl) {
       var srv = {};
       for (var i = 0; i < srvEl.children.length; i++) {
         var child = srvEl.children[i];
-        if (child.tagName === "truthset" || child.tagName === "evaluation" || child.tagName === "training") {
-          srv[child.tagName] = readSimple(child);
-        } else if (child.tagName === "allowed_urls") {
+        var tag = child.tagName;
+        if (tag === "providers" || tag === "dropbox") continue;
+        if (tag === "truthset" || tag === "evaluation" || tag === "training") {
+          srv[tag] = readSimple(child);
+        } else if (tag === "allowed_urls") {
           var urls = [];
-          var urlEls = child.querySelectorAll("url");
-          urlEls.forEach(function(u) { var t = u.textContent.trim(); if (t) urls.push(t); });
+          child.querySelectorAll("url").forEach(function(u) {
+            var t = u.textContent.trim();
+            if (t) urls.push(t);
+          });
           srv.allowed_urls = urls;
         } else {
-          srv[child.tagName] = _xmlCoerce(child.textContent);
+          srv[tag] = _xmlCoerce(child.textContent);
         }
+      }
+      // Server provider definitions (shared sections + per-provider defs)
+      var srvProvsEl = srvEl.querySelector(":scope > providers");
+      if (srvProvsEl) {
+        var sProvs = {};
+        _SERVER_PROVIDER_SECTION_KEYS.forEach(function(sk) {
+          var el = srvProvsEl.querySelector(":scope > " + sk);
+          if (el) sProvs[sk] = el.textContent.trim();
+        });
+        srvProvsEl.querySelectorAll(":scope > provider").forEach(function(pel) {
+          var prov = {};
+          var provName = null;
+          for (var i = 0; i < pel.children.length; i++) {
+            var child = pel.children[i];
+            var tag = child.tagName;
+            var val = _xmlCoerce(child.textContent);
+            if (tag === "name") provName = String(val);
+            else if (tag === "api_key") continue;
+            else prov[tag] = val;
+          }
+          if (provName) sProvs[provName] = prov;
+        });
+        srv.providers = sProvs;
       }
       data.server = srv;
     }
 
-    // providers — section-level + per-provider
-    var provsEl = root.querySelector("providers");
-    if (provsEl) {
-      data.providers = {};
-      // Section-level elements
-      var sectionKeys = ["default", "context", "output", "truth_context", "conversation_context"];
-      sectionKeys.forEach(function(sk) {
-        var el = provsEl.querySelector(":scope > " + sk);
-        if (el) data.providers[sk] = (sk === "default") ? el.textContent.trim() : el.textContent.trim();
-      });
-      // Per-provider entries — keyed by <name> child element
-      var provEls = provsEl.querySelectorAll("provider");
-      provEls.forEach(function(pel) {
-        var prov = {};
-        var provName = null;
-        for (var i = 0; i < pel.children.length; i++) {
-          var child = pel.children[i];
-          var tag = child.tagName;
-          // Legacy: <display_name> → skip, <default_model> → "model"
-          if (tag === "display_name") continue;
-          if (tag === "default_model") tag = "model";
-          var val = _xmlCoerce(child.textContent);
-          if (tag === "name") provName = String(val);
-          prov[tag] = val;
+    // ── client ──
+    var clientEl = root.querySelector(":scope > client");
+    if (clientEl) {
+      var cli = {};
+      var storageEl = clientEl.querySelector(":scope > storage");
+      if (storageEl) {
+        cli.storage = {};
+        if (storageEl.getAttribute("state_key")) {
+          cli.storage.state_key = storageEl.getAttribute("state_key");
         }
-        // Legacy fallback: old format used name= attribute
-        if (!provName) provName = pel.getAttribute("name") || "";
-        if (!prov.type && pel.getAttribute("name")) prov.type = pel.getAttribute("name");
-        if (provName) data.providers[provName] = prov;
+      }
+      ["temperature", "url_fetch", "thought_free"].forEach(function(f) {
+        var el = clientEl.querySelector(":scope > " + f);
+        if (el) cli[f] = _xmlCoerce(el.textContent);
       });
+      var uiEl = clientEl.querySelector(":scope > ui");
+      if (uiEl) cli.ui = readSimple(uiEl);
+
+      var clientProvsEl = clientEl.querySelector(":scope > providers");
+      if (clientProvsEl) {
+        var cProvs = {};
+        var dpEl = clientProvsEl.querySelector(":scope > default_provider");
+        if (dpEl) cProvs.default_provider = dpEl.textContent.trim();
+        var dmEl = clientProvsEl.querySelector(":scope > default_model");
+        if (dmEl) cProvs.default_model = dmEl.textContent.trim();
+        clientProvsEl.querySelectorAll(":scope > provider").forEach(function(pel) {
+          var nameEl = pel.querySelector("name");
+          var keyEl = pel.querySelector("api_key");
+          if (nameEl && keyEl) {
+            var pName = nameEl.textContent.trim();
+            if (!cProvs[pName]) cProvs[pName] = {};
+            cProvs[pName].api_key = keyEl.textContent.trim();
+          }
+        });
+        cli.providers = cProvs;
+      }
+      data.client = cli;
     }
 
     return data;
   } catch (e) {
     return null;
   }
-}
-
-// ─── Legacy migration ───
-
-// One-time migration: wikioracle_prefs → XML-shaped config
-async function _migrateOldPrefs() {
-  const _OLD_PREFS_KEY = "wikioracle_prefs";
-  let oldPrefs;
-  try {
-    const raw = sessionStorage.getItem(_OLD_PREFS_KEY);
-    if (!raw) return; // nothing to migrate
-    oldPrefs = JSON.parse(raw);
-  } catch { return; }
-
-  const existing = _loadLocalConfig();
-  if (existing && existing.providers) {
-    // Config already exists — just clean up
-    sessionStorage.removeItem(_OLD_PREFS_KEY);
-    return;
-  }
-
-  // Build XML-shaped config from old prefs (user name migrates to state, not config)
-  const migrated = _normalizeConfig({
-    providers: {
-      default: oldPrefs.provider || "WikiOracle",
-    },
-  });
-  // Store old username in state (will be picked up by _initStateful/_initStateless)
-  if (oldPrefs.username && typeof state !== "undefined" && state) {
-    state.client_name = oldPrefs.username;
-  }
-
-  _saveLocalConfig(migrated);
-  sessionStorage.removeItem(_OLD_PREFS_KEY);
 }

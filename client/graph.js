@@ -190,7 +190,7 @@ function syncConversationSelection(conversations, selectedId, explicitPath) {
 function buildAncestorSubtree(conversations, convId) {
   if (!convId || !conversations) return [];
   function _copyMsg(m) {
-    return {
+    var out = {
       id: m.id,
       role: m.role,
       username: m.username,
@@ -199,6 +199,8 @@ function buildAncestorSubtree(conversations, convId) {
       selected: !!m.selected,
       _pending: !!m._pending,
     };
+    if (m.attachments && m.attachments.length) out.attachments = m.attachments;
+    return out;
   }
   function _search(convs, target) {
     for (var i = 0; i < convs.length; i++) {

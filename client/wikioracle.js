@@ -1116,16 +1116,19 @@ async function sendMessage() {
   console.log("[WikiOracle] sendMessage: convId=", conversationId,
               "branchFrom=", branchFrom, "newRoot=", isNewRoot);
 
+  // Wait for any in-flight FileReader operations so late onloads don't
+  // push attachments after we've already collected them.
+  if (window._pendingReads && window._pendingReads.length) {
+    try { await Promise.all(window._pendingReads.slice()); } catch (_) {}
+  }
+
   // Optimistic UI: show user message immediately (skip for empty sends)
   const optimisticMsgId = generateUUID();
   const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  // Collect pending attachments
+  // Collect pending attachments and clear the chip row.
   const msgAttachments = (window._pendingAttachments || []).splice(0);
-  if (typeof _renderAttachmentChips === "function") {
-    // _renderAttachmentChips is local to bindEvents, trigger via DOM
-    var chipsEl = document.getElementById("attachmentChips");
-    if (chipsEl) { chipsEl.innerHTML = ""; chipsEl.style.display = "none"; }
-  }
+  const chipsEl = document.getElementById("attachmentChips");
+  if (chipsEl) { chipsEl.innerHTML = ""; chipsEl.style.display = "none"; }
 
   const userEntry = (text || msgAttachments.length) ? {
     id: optimisticMsgId,
@@ -1444,18 +1447,11 @@ function bindEvents() {
   }
 
   document.getElementById("btnExport").addEventListener("click", function() {
-    if (_dropboxConnected) {
-      _showHeaderDropdown(this, [
-        { label: "Save to Dropbox", action: _saveToDropbox },
-        { label: "Share to Dropbox", action: _shareStateToDropbox },
-        { label: "Save to local", action: function() { _doLocalExport("state"); } },
-      ]);
-    } else {
-      _showHeaderDropdown(this, [
-        { label: "state.xml to local", action: function() { _doLocalExport("state"); } },
-        { label: "config.xml to local", action: function() { _doLocalExport("config"); } },
-      ]);
-    }
+    _showHeaderDropdown(this, [
+      { label: "Save to Dropbox", action: _saveToDropbox },
+      { label: "Share to Dropbox", action: _shareStateToDropbox },
+      { label: "Save to local", action: function() { _doLocalExport("state"); } },
+    ]);
   });
 
   // Import (dropdown: local file, Dropbox, New)
@@ -1716,7 +1712,9 @@ function bindEvents() {
 
   // Attachment button
   var _pendingAttachments = [];
+  var _pendingReads = [];
   window._pendingAttachments = _pendingAttachments;  // expose for sendMessage
+  window._pendingReads = _pendingReads;              // expose for sendMessage
 
   function _renderAttachmentChips() {
     var container = document.getElementById("attachmentChips");
@@ -1754,21 +1752,29 @@ function bindEvents() {
     var files = this.files;
     for (var i = 0; i < files.length; i++) {
       var file = files[i];
-      var isImage = file.type && file.type.startsWith("image/");
-      (function(f, img) {
-        var reader = new FileReader();
-        reader.onload = function() {
-          _pendingAttachments.push({
-            name: f.name,
-            type: f.type || "application/octet-stream",
-            data: img ? reader.result : null,
-            url: img ? null : "file://" + f.name,
-          });
-          _renderAttachmentChips();
-        };
-        if (img) reader.readAsDataURL(f);
-        else { _pendingAttachments.push({ name: f.name, type: f.type || "application/octet-stream", url: "file://" + f.name }); _renderAttachmentChips(); }
-      })(file, isImage);
+      (function(f) {
+        var p = new Promise(function(resolve) {
+          var reader = new FileReader();
+          reader.onload = function() {
+            _pendingAttachments.push({
+              name: f.name,
+              type: f.type || "application/octet-stream",
+              data: reader.result,
+            });
+            _renderAttachmentChips();
+            resolve();
+          };
+          reader.onerror = function() {
+            showErrorDialog("Attachment failed", "Could not read " + f.name + ".");
+            resolve();
+          };
+          reader.readAsDataURL(f);
+        }).finally(function() {
+          var idx = _pendingReads.indexOf(p);
+          if (idx >= 0) _pendingReads.splice(idx, 1);
+        });
+        _pendingReads.push(p);
+      })(file);
     }
     this.value = "";
   });

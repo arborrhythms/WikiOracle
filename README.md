@@ -21,7 +21,15 @@ WikiOracle does not optimize for fluency and bolt on truthfulness as an aftertho
 
 ### Data Soverignty
 
-WikiOracle is local-first. Your conversation state, your trust entries, and your configuration live on your machine — not on a corporate server accumulating hidden central memory. The remote server is strictly stateless. You can export, merge, and port your sessions freely. Your data is yours.
+WikiOracle is local-first. Your conversation state, your trust entries, and your configuration live on your machine — not on a corporate server accumulating hidden central memory. You can export, merge, and port your sessions freely. Your data is yours.
+
+The remote server is strictly stateless: it holds no per-user conversation, no trust table, and no session memory between requests. Every call arrives with the state it needs and leaves nothing behind.
+
+For off-machine backup and sharing, WikiOracle can optionally stage your `state.xml` and `config.xml` to your own Dropbox as AES-256 encrypted ZIP archives (via `pyzipper`). The encryption password is held only by you — Dropbox sees ciphertext, and the server never persists either the password or the decrypted contents.
+
+### Sharing Truth via QR Code
+
+You can share a conversation or a truth set by publishing its encrypted state bundle to Dropbox and exposing the Dropbox link plus the decryption key inside an `<authority>` XML element. WikiOracle renders that element as a QR code in the client — scan it from another device to copy the authority URI, paste it into the recipient's Truth editor, and their client will fetch and decrypt the bundle, importing your conversation and trust entries at whatever trust weight they choose to grant it.
 
 ### Democracy
 

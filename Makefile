@@ -3,7 +3,7 @@
 # Top-level workflow:
 #   make install          — create .venv (shim + NanoChat), install all deps
 #   make build            — train model (alias for 'make train')
-#   make sync HOST=local|remote|build — sync app to ArborMini, production, or active build host
+#   make sync HOST=local|mb|remote|build — sync app to ArborMini, MetalBaby, production, or active build host
 #   make run HOST=local   — start WikiOracle Flask shim locally
 #
 # Contributors: install → build → run gets you a working local instance.
@@ -11,7 +11,7 @@
 #
 # Key variables:
 #   ARCH=cpu|gpu   — target architecture (default: cpu)
-#   HOST=local|remote|build — host mode (sync: local|remote|build; services: local|remote; train: local|build)
+#   HOST=local|mb|remote|build — host mode (sync: local|mb|remote|build; services: local|remote; train: local|build)
 
 SHELL := /bin/bash
 
@@ -131,7 +131,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         train_remote train_retrieve train_ssh train_status train_logs train_deploy \
         test test_all test_eval test_unit test_basicmodel basic_test_all \
         run_init run_server run_debug run_cli run_web parse \
-        sync_local sync_build sync_remote sync_checkpoint_pull sync_checkpoint_push \
+        sync_local sync_mb sync_build sync_remote sync_checkpoint_pull sync_checkpoint_push \
         tunnel_start tunnel_stop tunnel_status \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
@@ -176,6 +176,7 @@ help:
 	@echo "  make install            Create .venv and install all dependencies (ARCH=cpu|gpu)"
 	@echo "  make build              Train model (alias for 'make train', ARCH=cpu|gpu)"
 	@echo "  make sync HOST=local    Sync app to ArborMini"
+	@echo "  make sync HOST=mb       Sync app to MetalBaby via local shared folder"
 	@echo "  make sync HOST=remote   Sync app + checkpoints to/from production"
 	@echo "  make sync HOST=build    Deploy active remote training artifacts to WikiOracle"
 	@echo "  make run HOST=local     Start WikiOracle local shim (foreground)"
@@ -211,6 +212,7 @@ help:
 	@echo ""
 	@echo "Sync (sync_*):"
 	@echo "  make sync HOST=local             Sync app to ArborMini"
+	@echo "  make sync HOST=mb                Sync app to MetalBaby via local shared folder"
 	@echo "  make sync HOST=remote            Sync app + checkpoints to/from production"
 	@echo "  make sync HOST=build             Deploy active remote training artifacts to WikiOracle"
 	@echo "  make sync_checkpoint_pull/push   Backup/restore fine-tuning weights"
@@ -236,7 +238,7 @@ help:
 	@echo ""
 	@echo "Key variables:"
 	@echo "  ARCH=cpu|gpu            Target architecture (default: cpu)"
-	@echo "  HOST=local|remote|build Host mode; sync uses local|remote|build, train uses local|build, run/test use local, services use local|remote (default: local)"
+	@echo "  HOST=local|mb|remote|build Host mode; sync uses local|mb|remote|build, train uses local|build, run/test use local, services use local|remote (default: local)"
 	@echo "  NANO_PORT=8000          NanoChat server port (local mode)"
 	@echo "  NPROC=8                 GPUs per node for torchrun"
 
@@ -377,6 +379,23 @@ LOCAL_SYNC_OPTS      ?= -av --progress \
 		--exclude __pycache__/ \
 		--exclude .DS_Store \
 
+MB_DEST           ?= /Users/arogers/Public/WikiOracle
+MB_SYNC_OPTS      ?= -rltv --progress \
+		--exclude .venv \
+		--exclude .git/ \
+		--exclude output/ \
+		--exclude /config.xml \
+		--exclude /state.xml \
+		--exclude '*.pem' \
+		--exclude '*.pid' \
+		--exclude __pycache__/ \
+		--exclude .DS_Store \
+
+sync_mb:
+	@echo "=== Syncing app → $(MB_DEST) ==="
+	@mkdir -p "$(MB_DEST)"
+	rsync $(MB_SYNC_OPTS) './' '$(MB_DEST)/'
+
 sync_local:
 	@echo "=== Syncing app → $(LOCAL_HOST):$(LOCAL_DEST) ==="
 	rsync $(LOCAL_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
@@ -406,6 +425,8 @@ WO_RSYNC := rsync -avz -e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10"
 sync:
 ifeq ($(HOST),local)
 	@$(MAKE) sync_local
+else ifeq ($(HOST),mb)
+	@$(MAKE) sync_mb
 else ifeq ($(HOST),remote)
 	@echo "=== Syncing app → $(WO_HOST):$(WO_DEST) ==="
 	$(WO_RSYNC) --delete \
@@ -436,7 +457,7 @@ else ifeq ($(HOST),remote)
 else ifeq ($(HOST),build)
 	@$(MAKE) sync_build
 else
-	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=remote, or HOST=build)
+	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=mb, HOST=remote, or HOST=build)
 endif
 
 nano_deploy: sync

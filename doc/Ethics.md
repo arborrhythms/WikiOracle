@@ -14,20 +14,20 @@ Example:
 > "Group X deserves harm."
 
 Symmetry test: swap identities. If the claim collapses or becomes
-contradictory, it reveals an ethical inconsistency — the claim is
+contradictory, it reveals an ethical inconsistency -- the claim is
 asymmetric and should not be admitted as fact. The system offers to
 record the statement as a feeling instead, preserving the user's
 expression without endorsing the claim as truth.
 
 This is controlled by the `truth_symmetry` config option (default: true).
-See [Config.md](./Config.md) §5a and the implementation in
+See [Config.md](./Config.md) Section 5a and the implementation in
 `bin/truth.py` (`detect_asymmetric_claim()`).
 
 ## Architectural ethics vs policy ethics
 
 Most AI systems attempt to enforce ethics **after generation**:
 
-    model → output → moderation filter
+    model $\rightarrow$ output $\rightarrow$ moderation filter
 
 This approach fails because:
 
@@ -115,7 +115,7 @@ This is the core of the Truth Symmetry enforcement described above.
 If swapping identity references makes a claim contradictory or
 indefensible, it reveals an ethical inconsistency that the system flags.
 
-## Universality (Golden Rule) — architectural enforcement
+## Universality (Golden Rule) -- architectural enforcement
 
 The symmetry tests described above operate at truth admission time.
 Universality operates during model training, enforcing the Golden Rule
@@ -144,7 +144,7 @@ totalLoss = totalLoss * (1 + LuminosityWeight * (1 - luminosity)
 In addition, an **additive** TruthLoss penalty directly penalizes
 propositions that contradict stored truths. It measures the union norm
 reduction when a proposition is folded into the TruthSet via
-`Basis.disjunction()` — contradicting dimensions cancel, reducing the
+`Basis.disjunction()` -- contradicting dimensions cancel, reducing the
 norm, which produces a positive penalty. Agreeing or unknown
 propositions pass through with no penalty. DoT weighting is implicit:
 stored truth vectors carry DoT in their magnitude.
@@ -153,7 +153,7 @@ stored truth vectors carry DoT in their magnitude.
 totalLoss = totalLoss + TruthLoss * falsity_penalty
 ```
 
-Together, these make unkind and false propositions harder to learn —
+Together, these make unkind and false propositions harder to learn --
 not by filtering output, but by making them structurally costly during
 training. Moral axioms (e.g. "causing harm leads to suffering") enter
 as regular TruthSet entries; no special API is needed.
@@ -162,7 +162,7 @@ See [Config.md](./Config.md) for the `LuminosityWeight`,
 `UniversalityWeight`, and `TruthLoss` parameters.
 See [Grammar.md](../basicmodel/doc/Grammar.md) for the ternary LIFT rule
 that identifies subject, verb, and object. See
-[Reasoning](../basicmodel/doc/reasoning.md) §TruthLoss for the full
+[Reasoning](../basicmodel/doc/reasoning.md) Section TruthLoss for the full
 specification.
 
 ## Truth improves ethics
@@ -172,7 +172,7 @@ We do not wish to predict Lies.
 In fact, we wish to develop an aversion to lies.
 Epistemic ignorance is often desireable. 
 
-*All lies are harmful because they undermine the dignity of others. Lies prevent people acting freely and rationally. When someone lies, he interferes with his audience’s right to receive information that is correct. Also, lies distort the ability to make informed decisions. Kant goes further and argues that lies cause broader harm by undermining a speaker’s credibility, which, in turn, causes people to distrust each other’s contentions. Kant even goes as far as to say lying is immoral, under all conditions.*
+*All lies are harmful because they undermine the dignity of others. Lies prevent people acting freely and rationally. When someone lies, he interferes with his audience's right to receive information that is correct. Also, lies distort the ability to make informed decisions. Kant goes further and argues that lies cause broader harm by undermining a speaker's credibility, which, in turn, causes people to distrust each other's contentions. Kant even goes as far as to say lying is immoral, under all conditions.*
     ~ Immanuel Kant
 
 Examples:

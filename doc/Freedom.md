@@ -27,7 +27,7 @@ histories**.
 | feelings         | $\times$     | $\times$      | $\checkmark$ |
 
 This table is the architectural foundation. It separates knowledge into
-three channels — knowing, learning, and valuing — each with a different
+three channels -- knowing, learning, and valuing -- each with a different
 persistence policy. Universal facts (broad spatiotemporal extent) persist
 as reasoning premises and train weights. Particular facts (narrow
 spatiotemporal extent) always train weights and optionally persist to the
@@ -45,7 +45,7 @@ See [Entanglement.md](./Entanglement.md) for the full policy,
 Three design considerations fix row 2 of the table:
 
 1. **Pluralism requires inspectable particulars.** WikiOracle supports
-   plural truth — different epistemic frames may hold different
+   plural truth -- different epistemic frames may hold different
    particular claims (e.g. "the universe was created in seven days").
    Recording such claims as facts with explicit certainty values makes
    them inspectable and contestable. Relegating them to weight-space
@@ -55,7 +55,7 @@ Three design considerations fix row 2 of the table:
 2. **The fact/feeling boundary is the privacy boundary.** If a user
    considers content too personal or sensitive to train on, the correct
    action is to label it a *feeling*, not a fact. Feelings are
-   session-only by design — they never train weights or enter the truth
+   session-only by design -- they never train weights or enter the truth
    table. The privacy boundary is therefore controlled by the user's
    choice of tag, not by the universal/particular distinction.
 
@@ -94,7 +94,7 @@ allowing individual reasoning to remain flexible.
 | cryptography            | verification rules    | selective disclosure   |
 | surveillance capitalism | behavioral prediction | (suppressed)           |
 
-WikiOracle aims to implement **epistemic LFGC** — freedom exists
+WikiOracle aims to implement **epistemic LFGC** -- freedom exists
 *inside constraint geometry*.
 
 ---
@@ -158,7 +158,7 @@ This maintains sovereignty over personal data.
 
 ### Universal Knowledge (Database)
 
-Stored knowledge should be **spatiotemporally broad generalizations** —
+Stored knowledge should be **spatiotemporally broad generalizations** --
 propositions whose validity extends over a large subspace of spacetime.
 
 Examples:
@@ -171,17 +171,17 @@ These populate the **TruthSet**.
 
 Criterion:
 
-    remove(entity,time) → proposition still meaningful
+    remove(entity,time) $\rightarrow$ proposition still meaningful
 
 ### Particular Knowledge (Training Input)
 
 Particular statements are **observations tied to narrow spatiotemporal
-subspaces** — specific events, measurements, or comparisons.
+subspaces** -- specific events, measurements, or comparisons.
 
 Examples:
 
 -   study X measured Y
--   the temperature yesterday was 20°C
+-   the temperature yesterday was 20degC
 -   model A outperformed model B
 
 | Action              | Reason                             |
@@ -191,7 +191,7 @@ Examples:
 
 Pipeline:
 
-    particular facts → pattern extraction → weight update
+    particular facts $\rightarrow$ pattern extraction $\rightarrow$ weight update
 
 Weights encode **statistical structure**, not specific historical
 events.
@@ -218,29 +218,29 @@ This avoids turning subjective states into truth claims.
 ## Spatiotemporal Extent
 
 The universal/particular distinction is not a binary between "eternal"
-and "momentary." All times and places are **ranges, not points** —
+and "momentary." All times and places are **ranges, not points** --
 every proposition occupies a spatiotemporal subspace that is larger or
 smaller, never infinite or infinitesimal.
 
-"Smoking increases cancer risk" is not timeless — it encodes a
+"Smoking increases cancer risk" is not timeless -- it encodes a
 historical discovery and is bounded by the conditions under which it
 was established. But its spatiotemporal extent is *broad*: it holds
 across many populations, decades, and geographies. "The temperature
-yesterday was 20°C" is *narrow*: it holds at one place, one day.
+yesterday was 20degC" is *narrow*: it holds at one place, one day.
 
 The policy table operationalizes this gradient:
 
--   **Broad extent** (universal) → TruthSet + training.
+-   **Broad extent** (universal) $\rightarrow$ TruthSet + training.
     The proposition is stable enough to serve as a reasoning premise.
--   **Narrow extent** (particular) → training + optionally TruthSet.
+-   **Narrow extent** (particular) $\rightarrow$ training + optionally TruthSet.
     The observation carries empirical signal.  Whether it persists as a
     stored premise is the user's choice (`store_concrete` in
     config.xml, default false).  Storing particulars supports communal
     remembrance; omitting them prevents worldline anchoring.
--   **No extent** (feelings) → session only.
+-   **No extent** (feelings) $\rightarrow$ session only.
     Subjective reports have no spatiotemporal generalizability.
 
-The criterion `remove(entity, time) → proposition still meaningful`
+The criterion `remove(entity, time) $\rightarrow$ proposition still meaningful`
 is a heuristic for identifying broad extent. When a universal-looking
 fact is later discovered to be narrower than assumed, it should be
 reclassified as particular.
@@ -250,9 +250,9 @@ reclassified as particular.
 
 | Mode     | Function            | Pipeline                                        |
 | -------- | ------------------- | ----------------------------------------------- |
-| knowing  | universal structure | universal rules → TruthSet → reasoning          |
-| learning | particular evidence | particular observations → abstraction → weights |
-| valuing  | feelings            | feelings → response evaluation                  |
+| knowing  | universal structure | universal rules $\rightarrow$ TruthSet $\rightarrow$ reasoning          |
+| learning | particular evidence | particular observations $\rightarrow$ abstraction $\rightarrow$ weights |
+| valuing  | feelings            | feelings $\rightarrow$ response evaluation                  |
 
 
 ## Zero-Knowledge and Selective Disclosure
@@ -263,14 +263,14 @@ decisions should determine the *location of a space* in which an
 individual occupies, rather than collapsing to a *point* that identifies
 them.
 
-Instead of "when was this person born?" → verify "are they over 21?"
-Instead of "what is their credit history?" → verify "do they have more
+Instead of "when was this person born?" $\rightarrow$ verify "are they over 21?"
+Instead of "what is their credit history?" $\rightarrow$ verify "do they have more
 than X dollars?"
-Instead of "where was this user at 9:14 PM?" → verify "does this claim
+Instead of "where was this user at 9:14 PM?" $\rightarrow$ verify "does this claim
 hold across broad spatiotemporal conditions?"
 
 These are not just rhetorical distinctions.  Point-based observation
-constrains the observed to a single trajectory — it destroys the space
+constrains the observed to a single trajectory -- it destroys the space
 of freedom within which an agent can operate.  Forgetting is nihilistic:
 it does not change the world.  True change requires retrocausal or
 causal shift.  The system should support communal remembrance (shared
@@ -278,7 +278,7 @@ knowledge that generalizes) without surveillance (particular facts that
 identify).
 
 The `detect_identifiability()` function enforces this boundary at the
-content level — even when `store_concrete=true`, entries containing
+content level -- even when `store_concrete=true`, entries containing
 PII patterns (emails, phone numbers, GPS coordinates, named individuals
 with temporal markers) are always filtered before persistence.
 
@@ -296,7 +296,7 @@ context window during inference.
 The policy table enforces the separation structurally. The rule that
 particular facts train weights but enter the TruthSet only at the
 user's discretion (`store_concrete` in config.xml) is the key
-architectural move — the system can learn from experience without
+architectural move -- the system can learn from experience without
 accumulating a *personal history* unless the user explicitly opts in.
 A system with a personal history is a system that can be captured: by
 its own past, by the biases of its training corpus, or by adversarial
@@ -310,7 +310,7 @@ epistemic capture: trained preferences about what is "helpful" reshape
 what the model treats as true.
 
 **The abstraction boundary is load-bearing.** The pipeline
-`particular → abstraction → weights` depends on the quality of the
+`particular $\rightarrow$ abstraction $\rightarrow$ weights` depends on the quality of the
 abstraction step. Too faithful, and it preserves worldline information
 in the weights (entanglement through the back door). Too aggressive,
 and it discards genuine empirical signal. The hard work happens at this
@@ -320,7 +320,7 @@ boundary, not in the policy table itself.
 the system to remember shared history, feel loyalty, or maintain
 continuity of relationship are attempting to entangle the system with
 their worldline from the outside. This pressure comes from genuine
-human emotional needs, not malice — but a system that accumulates a
+human emotional needs, not malice -- but a system that accumulates a
 personal relationship history is a system that can be emotionally
 captured, and emotional capture is the most effective vector for
 epistemic capture. The session-only constraint on feelings is the

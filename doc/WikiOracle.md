@@ -92,14 +92,14 @@ Each of those facts is then compared to the TruthSet stored by the server.
 
 ## TruthSet
 
-* **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic — from certainly true (+1) through ignorance (0) to certainly false (-1).
+* **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic -- from certainly true (+1) through ignorance (0) to certainly false (-1).
 * **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the TruthSet.
 * **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
 * **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
 * **Feelings** are subjective statements (opinions, poetry, hedged claims) occupying the "neither" position in the tetralemma. They influence evaluation but are excluded from training and TruthSets.
 * **References** are external source citations (Wikipedia, Snopes, etc.) that ground claims in verifiable sources, participating in the TruthSet alongside facts.
 
-The UI-selected provider acts as the "mastermind," synthesizing all evidence — facts, references, operator-derived certainty, authority imports, and provider consultations — into a final response.
+The UI-selected provider acts as the "mastermind," synthesizing all evidence -- facts, references, operator-derived certainty, authority imports, and provider consultations -- into a final response.
 
 ## Example
 

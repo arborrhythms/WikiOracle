@@ -8,7 +8,7 @@ WikiOracle conversation state is persisted as XML, validated by `data/state.xsd`
 A state file has three top-level parts in order:
 
 ```
-State → Client + Conversation* + Truth?
+State $\rightarrow$ Client + Conversation* + Truth?
 ```
 
 ```xml
@@ -51,7 +51,7 @@ The state file is an XML document containing a `<truth>` section. It may be a fu
 * **URL scheme restriction**: Only `https://` and `file://` (within `ALLOWED_DATA_DIR`) are permitted
 * **Max response size**: Fetched data is capped at 1 MB
 * **Max entries per authority**: At most 1000 trust entries are imported per authority
-* **No recursive authorities**: If a remote state file contains `<authority>` entries, they are skipped. There is no transitive fetch chain — only one level of authority delegation is supported.
+* **No recursive authorities**: If a remote state file contains `<authority>` entries, they are skipped. There is no transitive fetch chain -- only one level of authority delegation is supported.
 * **Rate limiting**: The in-memory cache prevents excessive re-fetching within the refresh interval
 
 ## Client
@@ -117,8 +117,8 @@ Conversations form a recursive tree. In XML, each `<conversation>` contains a re
 ### Grammar
 
 ```
-Conversation → title + (Message | Conversation)*
-Message      → <message id="" role="" username="" time=""><content>...</content></message>
+Conversation $\rightarrow$ title + (Message | Conversation)*
+Message      $\rightarrow$ <message id="" role="" username="" time=""><content>...</content></message>
 ```
 
 ### Conversation attributes
@@ -309,7 +309,7 @@ The state schema is (`data/state.xsd`)[state.xsd].
 
 ## Data model
 
-### On disk — XML
+### On disk -- XML
 
 State is persisted as XML (WikiOracle State format, validated by `data/state.xsd`). The XML surface is:
 
@@ -345,7 +345,7 @@ State is persisted as XML (WikiOracle State format, validated by `data/state.xsd
 </state>
 ```
 
-### In memory — nested tree
+### In memory -- nested tree
 
 On load, conversations are normalized into a nested tree in memory. The same
 shape in XML is:
@@ -379,10 +379,10 @@ Each **message** has: `id`, `role` (user | assistant | system), `username`, `tim
 ### Grammar
 
 ```
-State        → Client + Conversation* + Truth?
-Conversation → title + (Message | Conversation)*
-Message      → <message id="" role="" username="" time=""><content>...</content></message>
-Truth        → Fact | Feeling | Reference | Logic | Provider | Authority
+State        $\rightarrow$ Client + Conversation* + Truth?
+Conversation $\rightarrow$ title + (Message | Conversation)*
+Message      $\rightarrow$ <message id="" role="" username="" time=""><content>...</content></message>
+Truth        $\rightarrow$ Fact | Feeling | Reference | Logic | Provider | Authority
 ```
 
 In memory, `bin/state.py` still normalizes conversations into `messages[]` and `children[]`.

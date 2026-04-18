@@ -1,4 +1,4 @@
-# Swiss AI Initiative – Small Compute Project Request (Apertus)
+# Swiss AI Initiative - Small Compute Project Request (Apertus)
 
 Principal Investigator: Alec Rogers (ArborRhythms)\
 Project Type: Small Compute Request (Apertus / Swiss AI Initiative)\
@@ -79,4 +79,4 @@ communities.
 All artifacts will be released under permissive open-source licenses. No
 new data collection is proposed. Emphasis is placed on auditability,
 provenance tracking, and resistance to deceptive or unsupported outputs,
-in alignment with the Swiss AI Initiative’s goals.
+in alignment with the Swiss AI Initiative's goals.

@@ -19,10 +19,10 @@ WikiOracle separates artifacts into distinct licensing domains.
 
 Conceptual summary:
 
-    code → algorithms
-    data → facts
-    weights → learned structure
-    content → explanations
+    code $\rightarrow$ algorithms
+    data $\rightarrow$ facts
+    weights $\rightarrow$ learned structure
+    content $\rightarrow$ explanations
 
 This layered separation mirrors successful open knowledge systems while
 extending them for AI systems.
@@ -151,16 +151,16 @@ This ensures transparency regarding machine involvement.
 
 WikiOracle licensing stack:
 
-    Layer 1 — Software
+    Layer 1 -- Software
     GPL-3.0
 
-    Layer 2 — Knowledge Content
+    Layer 2 -- Knowledge Content
     CC BY-SA 4.0
 
-    Layer 3 — Structured Data
+    Layer 3 -- Structured Data
     CC0
 
-    Layer 3B — Model Weights
+    Layer 3B -- Model Weights
     Apache-2.0
 
 The architecture protects the software commons, maintains a global

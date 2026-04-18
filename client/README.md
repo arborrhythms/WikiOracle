@@ -1,4 +1,4 @@
-# WikiOracle — Client UI
+# WikiOracle -- Client UI
 
 Browser-based interface for the WikiOracle local LLM shim. All front-end assets live in this directory and are served by `bin/wikioracle.py`.
 
@@ -8,25 +8,25 @@ WikiOracle uses a **hierarchical conversation tree**. Each conversation contains
 
 ```
 Root (/)
-├── Animals  (2 msgs)
-│   ├── Dogs  (2 msgs)
-│   └── Cats  (2 msgs)
-└── Climate  (4 msgs)
-    └── Oceans  (3 msgs)
++-- Animals  (2 msgs)
+|   +-- Dogs  (2 msgs)
+|   `-- Cats  (2 msgs)
+`-- Climate  (4 msgs)
+    `-- Oceans  (3 msgs)
 ```
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `index.html` | Single-page app shell — layout, settings panel |
-| `wikioracle.css` | Stylesheet — layout, dark mode, chat and tree panel styles |
+| `index.html` | Single-page app shell -- layout, settings panel |
+| `wikioracle.css` | Stylesheet -- layout, dark mode, chat and tree panel styles |
 | `config.js` | Config global, sessionStorage persistence, normalization, legacy migration |
 | `state.js` | State global, sessionStorage persistence |
-| `util.js` | Shared helpers — `escapeHtml`, `stripTags`, `truncate`, `tempId`, `findInTree`, settings/context/output editors |
-| `query.js` | Server communication layer — `api()`, conversation tree helpers, `_buildRuntimeConfig` |
-| `tree.js` | D3.js tree renderer — hierarchy layout, click/double-click/right-click navigation, drag-to-merge |
-| `wikioracle.js` | Main app — XHTML validation, layout/theme, provider metadata, chat, tree navigation, init |
+| `util.js` | Shared helpers -- `escapeHtml`, `stripTags`, `truncate`, `tempId`, `findInTree`, settings/context/output editors |
+| `query.js` | Server communication layer -- `api()`, conversation tree helpers, `_buildRuntimeConfig` |
+| `tree.js` | D3.js tree renderer -- hierarchy layout, click/double-click/right-click navigation, drag-to-merge |
+| `wikioracle.js` | Main app -- XHTML validation, layout/theme, provider metadata, chat, tree navigation, init |
 | `404.html` | Fallback error page |
 
 ## Interactions
@@ -38,7 +38,7 @@ Root (/)
 | **Click** | Navigate to that conversation (show its messages) |
 | **Double-click** | Open context menu (Branch / Delete) |
 | **Right-click** | Open context menu (same as double-click) |
-| **Drag node → drop on node** | Merge — appends source's messages into target, removes source |
+| **Drag node $\rightarrow$ drop on node** | Merge -- appends source's messages into target, removes source |
 
 ### Chat panel (messages)
 
@@ -85,8 +85,8 @@ In memory, conversations are nested via `children` arrays.
 
 ## Development
 
-The server (`bin/wikioracle.py`) serves everything in this directory for extensions matching `.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.xml`. No build step is required — edit files and refresh.
+The server (`bin/wikioracle.py`) serves everything in this directory for extensions matching `.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.xml`. No build step is required -- edit files and refresh.
 
 Cache-busting is handled via query-string versions on the script tags in `index.html` (e.g. `tree.js?v=10`). Bump the version number after changes.
 
-JS load order: `config.js → state.js → util.js → query.js → tree.js → wikioracle.js`.
+JS load order: `config.js $\rightarrow$ state.js $\rightarrow$ util.js $\rightarrow$ query.js $\rightarrow$ tree.js $\rightarrow$ wikioracle.js`.

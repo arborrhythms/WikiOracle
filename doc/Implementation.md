@@ -2,7 +2,7 @@
 
 ## System overview
 
-WikiOracle is a local-first Flask shim that sits between a browser UI and one or more upstream LLM providers. Conversations are stored as a hierarchical tree — each conversation is an ordered list of messages that may branch into child conversations.
+WikiOracle is a local-first Flask shim that sits between a browser UI and one or more upstream LLM providers. Conversations are stored as a hierarchical tree -- each conversation is an ordered list of messages that may branch into child conversations.
 
 ```
 Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
@@ -15,20 +15,20 @@ Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
 
 | Layer         | File(s)                                                         | Role                                                                                                                                            |
 | ------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Server        | `bin/wikioracle.py`                                             | Flask app — `/chat`, `/state`, `/merge`, `/config`, `/bootstrap` endpoints; reads/writes `state.xml`                                            |
+| Server        | `bin/wikioracle.py`                                             | Flask app -- `/chat`, `/state`, `/merge`, `/config`, `/bootstrap` endpoints; reads/writes `state.xml`                                            |
 | Config        | `bin/config.py`                                                 | Config dataclass, XML loader, provider registry, schema-driven XML writer, normalization                                                        |
 | State library | `bin/state.py`                                                  | Pure-Python tree operations, XML serialisation, merge with deterministic ID suffixing                                                           |
-| Response      | `bin/response.py`                                               | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2–4)                                                          |
+| Response      | `bin/response.py`                                               | Chat pipeline, provider coordination, state I/O, online training pipeline (Stages 2-4)                                                          |
 | Truth         | `bin/truth.py`                                                  | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, spacetime fact classification, PII detection               |
 | Sensation     | `bin/sensation.py`                                              | Preprocessing: Korzybski IS detection, XML tagging (`<fact>`/`<feeling>`/`<Q>`/`<R>` with `<place>`/`<time>` child elements), corpus conversion |
-| OpenClaw      | `openclaw/` (git submodule) + `openclaw/extensions/wikioracle/` | Multi-channel front-end (Slack/Discord/Telegram) — TypeScript extension routes messages through `bin/wo` CLI to WikiOracle's full pipeline      |
+| OpenClaw      | `openclaw/` (git submodule) + `openclaw/extensions/wikioracle/` | Multi-channel front-end (Slack/Discord/Telegram) -- TypeScript extension routes messages through `bin/wo` CLI to WikiOracle's full pipeline      |
 | NanoChat ext  | `bin/nanochat_ext.py`                                           | `POST /train` route mounted onto NanoChat's FastAPI app for online SFT                                                                          |
 | Client app    | `client/wikioracle.js`                                          | State management, API calls, message rendering, drag/context-menu interactions                                                                  |
 | Client config | `client/config.js`                                              | Config global, sessionStorage persistence, normalization, legacy migration                                                                      |
 | Client state  | `client/state.js`                                               | State global, sessionStorage persistence                                                                                                        |
 | Client utils  | `client/util.js`                                                | Shared helpers, settings panel, config editor, context/output editors                                                                           |
 | Client query  | `client/query.js`                                               | Server communication layer, conversation tree helpers                                                                                           |
-| Tree renderer | `client/tree.js`                                                | D3.js top-down hierarchy — layout, navigation, drag-to-merge                                                                                    |
+| Tree renderer | `client/tree.js`                                                | D3.js top-down hierarchy -- layout, navigation, drag-to-merge                                                                                    |
 | Shell         | `client/index.html`                                             | Single-page app: layout, CSS, settings panel                                                                                                    |
 | State schema  | `data/state.xsd`                                                | XSD schema for XML state files (WikiOracle State)                                                                                               |
 | Config schema | `data/config.xsd`                                               | XSD schema for `config.xml` validation (WikiOracle Config)                                                                                      |
@@ -46,7 +46,7 @@ Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
 | GET    | `/state`       | Return current in-memory state                                               |
 | POST   | `/state`       | Replace state                                                                |
 | GET    | `/state_size`  | State file size in bytes (progress bar)                                      |
-| POST   | `/chat`        | Send a message — append to existing conversation, branch, or create new root |
+| POST   | `/chat`        | Send a message -- append to existing conversation, branch, or create new root |
 | POST   | `/merge`       | Merge an imported state file into current state                              |
 | GET    | `/config`      | Normalized config (includes provider metadata and defaults)                  |
 | POST   | `/config`      | Accept full config dict; write config.xml to disk                            |
@@ -55,7 +55,7 @@ Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
 
 ### Data flow: client <-> server
 
-Truth, context, and output are **client-owned**. They flow client → server only; the server never sends them back in a chat response.
+Truth, context, and output are **client-owned**. They flow client $\rightarrow$ server only; the server never sends them back in a chat response.
 
 ```
 POST /chat request:   client sends truth + context + output + message
@@ -65,15 +65,15 @@ POST /chat response:  server returns text + conversation delta
 
 In stateful mode, the server persists the full state (including the client-supplied truth) to `state.xml`. On error rollback, the client reloads conversations from the server but preserves its own truth, context, and output.
 
-In stateless mode, the server has no disk — the client sends and receives the full state.
+In stateless mode, the server has no disk -- the client sends and receives the full state.
 
 ### Chat routing
 
 `POST /chat` accepts:
 
-* `conversation_id` — append user message + LLM response to an existing conversation
-* `branch_from` — create a new child conversation under the specified parent, seed it with the user message + LLM response
-* Neither — create a new root-level conversation
+* `conversation_id` -- append user message + LLM response to an existing conversation
+* `branch_from` -- create a new child conversation under the specified parent, seed it with the user message + LLM response
+* Neither -- create a new root-level conversation
 
 ## Thought-Free Mode
 
@@ -82,15 +82,15 @@ constraints:
 
 1. **LLM providers:** `build_query()` prepends a 10-rule constraint prompt to
    `bundle.system` that enforces one-pointed, non-discursive output (no
-   epistemic verbs, no observer, no comparisons, sentences ≤ 10 words).
+   epistemic verbs, no observer, no comparisons, sentences $\leq$ 10 words).
 
 2. **BasicModel provider:** `_call_basicmodel()` sends `"thought_free": true`
    in the JSON payload.  `serve.py` sets `TheGrammar.thought_free = True`
-   before inference (restricting S-tier to the S→C transition only) and resets
+   before inference (restricting S-tier to the S$\rightarrow$C transition only) and resets
    it in a `finally` block.
 
-The flag flows: `wikioracle.js` query config → `POST /chat` → `process_chat()`
-→ `_call_provider()` → `build_query()` / `_call_basicmodel()`.
+The flag flows: `wikioracle.js` query config $\rightarrow$ `POST /chat` $\rightarrow$ `process_chat()`
+$\rightarrow$ `_call_provider()` $\rightarrow$ `build_query()` / `_call_basicmodel()`.
 
 ## Reducing Inferential Truth to Facts and Feelings
 
@@ -146,8 +146,8 @@ Key functions:
 
 | Function                                          | Purpose                                            |
 | ------------------------------------------------- | -------------------------------------------------- |
-| `state_to_xml(state)`                             | Serialise nested tree → XML string                 |
-| `xml_to_state(text)`                              | Parse XML → nested tree                            |
+| `state_to_xml(state)`                             | Serialise nested tree $\rightarrow$ XML string                 |
+| `xml_to_state(text)`                              | Parse XML $\rightarrow$ nested tree                            |
 | `atomic_write_xml(path, state)`                   | Atomic XML file write (temp + fsync + rename)      |
 | `load_state_file(path)`                           | Load state from XML file                           |
 | `find_conversation(convs, id)`                    | Recursive tree lookup                              |

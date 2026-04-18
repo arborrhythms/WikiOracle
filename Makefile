@@ -13,7 +13,22 @@
 #   ARCH=cpu|gpu   — target architecture (default: cpu)
 #   HOST=local|mb|remote|build — host mode (sync: local|mb|remote|build; services: local|remote; train: local|build)
 
+ifeq ($(OS),Windows_NT)
+SHELL := C:/msys64/usr/bin/bash.exe
+else
 SHELL := /bin/bash
+endif
+ifeq ($(OS),Windows_NT)
+VENV_BIN_DIR      := Scripts
+VENV_PYTHON_NAME  := python.exe
+VENV_PIP_NAME     := pip.exe
+PYTHONPATH_SEP    := ;
+else
+VENV_BIN_DIR      := bin
+VENV_PYTHON_NAME  := python
+VENV_PIP_NAME     := pip
+PYTHONPATH_SEP    := :
+endif
 
 # --- PDF generation options (inlined from Make.mk) ----------------------------
 PD_TEMPLATE := /bits/projects/custom_template.tex
@@ -37,6 +52,9 @@ SHIM_VENV        := .venv
 SHIM_ACTIVATE    := source "$(CURDIR)/$(SHIM_VENV)/bin/activate"
 NANOCHAT_BASE    := $(CURDIR)/$(NANOCHAT_DIR)
 IDENTITY_DATA    := $(NANOCHAT_BASE)/identity_conversations.jsonl
+NANOCHAT_PYTHON_ABS := $(CURDIR)/$(VENV_DIR)/$(VENV_BIN_DIR)/$(VENV_PYTHON_NAME)
+SHIM_PYTHON      := $(CURDIR)/$(SHIM_VENV)/$(VENV_BIN_DIR)/$(VENV_PYTHON_NAME)
+SHIM_PIP         := $(CURDIR)/$(SHIM_VENV)/$(VENV_BIN_DIR)/$(VENV_PIP_NAME)
 
 # Checkpoint backup (for rollback before/after online training)
 CHECKPOINT_BAK   := output/checkpoints
@@ -176,7 +194,7 @@ help:
 	@echo "  make install            Create .venv and install all dependencies (ARCH=cpu|gpu)"
 	@echo "  make build              Train model (alias for 'make train', ARCH=cpu|gpu)"
 	@echo "  make sync HOST=local    Sync app to ArborMini"
-	@echo "  make sync HOST=mb       Sync app to MetalBaby via local shared folder"
+	@echo "  make sync HOST=mb       Sync app to MetalBaby over SSH rsync"
 	@echo "  make sync HOST=remote   Sync app + checkpoints to/from production"
 	@echo "  make sync HOST=build    Deploy active remote training artifacts to WikiOracle"
 	@echo "  make run HOST=local     Start WikiOracle local shim (foreground)"
@@ -212,7 +230,7 @@ help:
 	@echo ""
 	@echo "Sync (sync_*):"
 	@echo "  make sync HOST=local             Sync app to ArborMini"
-	@echo "  make sync HOST=mb                Sync app to MetalBaby via local shared folder"
+	@echo "  make sync HOST=mb                Sync app to MetalBaby over SSH rsync"
 	@echo "  make sync HOST=remote            Sync app + checkpoints to/from production"
 	@echo "  make sync HOST=build             Deploy active remote training artifacts to WikiOracle"
 	@echo "  make sync_checkpoint_pull/push   Backup/restore fine-tuning weights"
@@ -379,10 +397,18 @@ LOCAL_SYNC_OPTS      ?= -av --progress \
 		--exclude __pycache__/ \
 		--exclude .DS_Store \
 
-MB_DEST           ?= /Users/arogers/Public/WikiOracle
+MB_KEY_FILE       ?= $(HOME)/.ssh/id_ed25519_metalbaby
+MB_USER           ?= alec
+MB_HOST           ?= metalbaby.local
+MB_DEST           ?= /c/Users/alec/OneDrive/Desktop/WikiOracle
+MB_RSYNC_PATH     ?= C:/msys64/usr/bin/rsync.exe
 MB_SYNC_OPTS      ?= -rltv --progress \
 		--exclude .venv \
 		--exclude .git/ \
+		--exclude .claude/ \
+		--exclude memory/ \
+		--exclude node_modules/ \
+		--exclude openclaw/ \
 		--exclude output/ \
 		--exclude /config.xml \
 		--exclude /state.xml \
@@ -392,9 +418,12 @@ MB_SYNC_OPTS      ?= -rltv --progress \
 		--exclude .DS_Store \
 
 sync_mb:
-	@echo "=== Syncing app → $(MB_DEST) ==="
-	@mkdir -p "$(MB_DEST)"
-	rsync $(MB_SYNC_OPTS) './' '$(MB_DEST)/'
+	@echo "=== Syncing app → $(MB_USER)@$(MB_HOST):$(MB_DEST) ==="
+	@test -n "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE is required for HOST=mb" >&2; exit 2; }
+	@test -f "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE not found: $(MB_KEY_FILE)" >&2; exit 2; }
+	rsync $(MB_SYNC_OPTS) --rsync-path=$(MB_RSYNC_PATH) \
+		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
+		'./' '$(MB_USER)@$(MB_HOST):$(MB_DEST)/'
 
 sync_local:
 	@echo "=== Syncing app → $(LOCAL_HOST):$(LOCAL_DEST) ==="
@@ -476,7 +505,7 @@ ifeq ($(HOST),local)
 		echo "NanoChat already running (PID $$(cat $(NANO_PID)), port $(NANO_PORT))"; \
 	else \
 		rm -f $(NANO_PID); \
-		if "$(CURDIR)/$(VENV_DIR)/bin/python" "$(CURDIR)/bin/launch_background.py" \
+		if "$(NANOCHAT_PYTHON_ABS)" "$(CURDIR)/bin/launch_background.py" \
 			--cwd "$(CURDIR)/$(NANOCHAT_DIR)" \
 			--pid-file "$(NANO_PID)" \
 			--log-file "$(NANO_LOG)" \
@@ -484,7 +513,7 @@ ifeq ($(HOST),local)
 			--ready-url "http://127.0.0.1:$(NANO_PORT)/health" \
 			--ready-timeout $(NANO_READY_TIMEOUT) \
 			--env NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
-			-- "$(CURDIR)/$(VENV_DIR)/bin/python" -m scripts.chat_web \
+			-- "$(NANOCHAT_PYTHON_ABS)" -m scripts.chat_web \
 				-p $(NANO_PORT) \
 				-d $(NANO_DTYPE) \
 				--device-type $(NANO_DEVICE_TYPE) \
@@ -615,7 +644,7 @@ ifeq ($(HOST),local)
 		echo "WikiOracle already running (PID $$(cat $(WO_PID)))"; \
 	else \
 		rm -f $(WO_PID); \
-		if "$(CURDIR)/$(SHIM_VENV)/bin/python3" "$(CURDIR)/bin/launch_background.py" \
+		if "$(SHIM_PYTHON)" "$(CURDIR)/bin/launch_background.py" \
 			--cwd "$(CURDIR)" \
 			--pid-file "$(WO_PID)" \
 			--log-file "$(WO_LOG)" \
@@ -625,7 +654,7 @@ ifeq ($(HOST),local)
 			--ready-insecure \
 			--env WIKIORACLE_BIND_HOST="$(WO_BIND_HOST)" \
 			--env WIKIORACLE_PORT="$(WO_PORT)" \
-			-- "$(CURDIR)/$(SHIM_VENV)/bin/python3" "$(CURDIR)/$(WIKIORACLE_APP)" \
+			-- "$(SHIM_PYTHON)" "$(CURDIR)/$(WIKIORACLE_APP)" \
 			> /dev/null; then \
 			echo "WikiOracle starting (PID $$(cat $(WO_PID)))"; \
 		else \
@@ -705,7 +734,7 @@ endif
 build: train
 
 run:
-	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP)
+	"$(SHIM_PYTHON)" "$(WIKIORACLE_APP)"
 
 # --- Build / Setup (legacy aliases) ------------------------------------------
 
@@ -839,18 +868,18 @@ run_init:
 	@echo "State files removed — server will create a fresh one on next start."
 
 run_server:
-	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP)
+	"$(SHIM_PYTHON)" "$(WIKIORACLE_APP)"
 
 run_debug:
-	$(SHIM_ACTIVATE) && python3 $(WIKIORACLE_APP) --debug
+	"$(SHIM_PYTHON)" "$(WIKIORACLE_APP)" --debug
 
 test: test_unit
 
 test_all: test_unit basic_test_all
 
 test_unit:
-	$(SHIM_ACTIVATE) && PYTHONPATH="$(NANOCHAT_BASE):$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
-		python3 test/run_tests.py
+	PYTHONPATH="$(NANOCHAT_BASE)$(PYTHONPATH_SEP)$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \
+		"$(SHIM_PYTHON)" test/run_tests.py
 
 test_basicmodel: basic_test
 
@@ -865,7 +894,7 @@ run_web:
 		python ../bin/nanochat_ext.py
 
 parse:
-	@$(SHIM_ACTIVATE) && python3 bin/parse.py $(SENTENCE)
+	@"$(SHIM_PYTHON)" bin/parse.py $(SENTENCE)
 
 # --- Documentation ------------------------------------------------------------
 
@@ -1090,14 +1119,14 @@ CORPUS_OUTPUT ?= data/tagged_corpus.jsonl
 
 build_preprocess:
 	@echo "Preprocessing $(CORPUS_INPUT) → $(CORPUS_OUTPUT) ..."
-	$(SHIM_ACTIVATE) && python3 bin/sensation.py corpus "$(CORPUS_INPUT)" "$(CORPUS_OUTPUT)"
+	"$(SHIM_PYTHON)" bin/sensation.py corpus "$(CORPUS_INPUT)" "$(CORPUS_OUTPUT)"
 
 SFT_INPUT   ?= $(NANOCHAT_BASE)/identity_conversations.jsonl
 SFT_OUTPUT  ?= data/sft_tagged.jsonl
 
 build_sft:
 	@echo "Preparing SFT corpus $(SFT_INPUT) → $(SFT_OUTPUT) ..."
-	$(SHIM_ACTIVATE) && python3 bin/sensation.py sft "$(SFT_INPUT)" "$(SFT_OUTPUT)"
+	"$(SHIM_PYTHON)" bin/sensation.py sft "$(SFT_INPUT)" "$(SFT_OUTPUT)"
 
 # --- PDF generation -----------------------------------------------------------
 # Generate a single PDF from all doc/*.md files with README as index.

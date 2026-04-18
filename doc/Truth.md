@@ -33,10 +33,10 @@ Most large AI systems today are built around:
 
 This produces predictable risks:
 
-**Collapse into Consensus** – Minority viewpoints are quietly averaged away.  
-**Preference Capture** – The loudest or most powerful groups shape the model at scale.  
-**Epistemic Centralization** – A single model becomes an authority node, increasing dependence.  
-**Conversion of Knowledge into Leverage** – Predictive advantage becomes economic or political dominance.  
+**Collapse into Consensus** - Minority viewpoints are quietly averaged away.  
+**Preference Capture** - The loudest or most powerful groups shape the model at scale.  
+**Epistemic Centralization** - A single model becomes an authority node, increasing dependence.  
+**Conversion of Knowledge into Leverage** - Predictive advantage becomes economic or political dominance.  
 
 When these risks manifest, wisdom stops being a shared good and becomes a strategic asset.
 
@@ -98,16 +98,16 @@ Such a system may disrupt business models that depend on opacity or information 
 
 WikiOracle attempts to achieve a distributed truth, and shares much of the design philosophy of Wikipedia:
 
-* **Radical Accessibility** — Wikipedia is freely accessible worldwide and allows anyone to both read and contribute without institutional gatekeeping.
+* **Radical Accessibility** -- Wikipedia is freely accessible worldwide and allows anyone to both read and contribute without institutional gatekeeping.
 
-* **Citation Norms** — Content presented as true must be verifiable with the trust-set supplied by the user.
+* **Citation Norms** -- Content presented as true must be verifiable with the trust-set supplied by the user.
 
-* **Decentralized Governance** — Dispute resolution is handled by a distributed volunteer community arguing about what is true.
+* **Decentralized Governance** -- Dispute resolution is handled by a distributed volunteer community arguing about what is true.
 
-* **Anti-Monetization Bias** — As a nonprofit project it should operate without advertising-driven content incentives.
+* **Anti-Monetization Bias** -- As a nonprofit project it should operate without advertising-driven content incentives.
 
-* **Self-Correcting Dynamics** — Errors and vandalism can be rapidly identified and corrected, which causes their sources to be distrusted. This requires that all data for training the weights remains visible for later error correction and modification.
+* **Self-Correcting Dynamics** -- Errors and vandalism can be rapidly identified and corrected, which causes their sources to be distrusted. This requires that all data for training the weights remains visible for later error correction and modification.
 
-* **Cultural Legitimacy** — WikiOracle is intended to function as a widely accepted public reference layer and shared knowledge commons which prevents surveillance and advertising.
+* **Cultural Legitimacy** -- WikiOracle is intended to function as a widely accepted public reference layer and shared knowledge commons which prevents surveillance and advertising.
 
-* **Open Knowledge Model** — It demonstrates that large-scale, decentralized, norm-governed collaboration can produce a coherent and durable knowledge commons.
+* **Open Knowledge Model** -- It demonstrates that large-scale, decentralized, norm-governed collaboration can produce a coherent and durable knowledge commons.

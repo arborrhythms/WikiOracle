@@ -9,26 +9,26 @@ it all together.
 
 ## DegreeOfTruth (DoT)
 
-DegreeOfTruth is a bipolar scalar on −1 .. +1 that measures how well
+DegreeOfTruth is a bipolar scalar on $-$1 .. +1 that measures how well
 a user's TruthSet agrees with the server's collected truth.
 
-    DegreeOfTruth = 2 × mean(agreement_i) − 1    for shared entries
+    DegreeOfTruth = 2 $\times$ mean(agreement_i) $-$ 1    for shared entries
 
 where:
 
-    agreement_i = 1 − |server_trust_i − client_trust_i| / 2
+    agreement_i = 1 $-$ |server_trust_i $-$ client_trust_i| / 2
 
 The bipolar range encodes both true and false statements:
 
-* **DoT = +1**: the user's claims fully agree with the server — the
+* **DoT = +1**: the user's claims fully agree with the server -- the
   exchange is true.  Train at full learning rate.
-* **DoT = −1**: the user's claims fully contradict the server — the
+* **DoT = $-$1**: the user's claims fully contradict the server -- the
   exchange is false.  Train at full learning rate (learning what is
   *not* true is as valuable as learning what *is* true).
-* **DoT $\approx$ 0**: no shared entries, or perfect cancellation — nothing
+* **DoT $\approx$ 0**: no shared entries, or perfect cancellation -- nothing
   to learn.  Skip training.
 
-Both poles (+1 and −1) train at full strength via |DoT|; only the zero
+Both poles (+1 and $-$1) train at full strength via |DoT|; only the zero
 crossing results in a skip.  The sign encodes direction (agree/disagree),
 not magnitude.
 
@@ -37,10 +37,10 @@ This is a placeholder.  A future version should incorporate
 
 ## Dynamic Systems Perspective
 
-With a bipolar DegreeOfTruth (−1 .. +1), the training loop forms a
-**dynamic equation with both poles and zeros**: DoT = +1 and DoT = −1
+With a bipolar DegreeOfTruth ($-$1 .. +1), the training loop forms a
+**dynamic equation with both poles and zeros**: DoT = +1 and DoT = $-$1
 are attracting poles where the system learns at full strength (truths
-and refuted falsehoods respectively), while DoT = 0 is a zero — an
+and refuted falsehoods respectively), while DoT = 0 is a zero -- an
 equilibrium point where no learning occurs.
 
 This structure resembles a **Hopfield network**, where the energy
@@ -52,13 +52,13 @@ saddle points.  In our system:
 * Each **training step** is a state transition that pushes the model
   toward one of the attractors (truth or refutation).
 * The **zero crossing** (DoT $\approx$ 0) is the energy barrier between
-  attractors — the point of maximum uncertainty where the system has
+  attractors -- the point of maximum uncertainty where the system has
   insufficient signal to commit to either direction.
 
 As the server TruthSet accumulates entries from multiple users, the
-poles and zeros of this dynamic equation shift.  The slow‑moving
+poles and zeros of this dynamic equation shift.  The slow-moving
 average merge ensures that attractors are stable under small
-perturbations (anti‑capture), while strong consensus can still move
+perturbations (anti-capture), while strong consensus can still move
 the landscape over time.  This is analogous to the annealing process
 in Hopfield networks, where the energy landscape gradually settles
 into deeper minima as more patterns are stored.
@@ -69,7 +69,7 @@ The DoT-annealed training algorithm has a **zero-mean balance**
 property: over many interactions with diverse DoT values, the expected
 net gradient contribution tends to zero.  This arises because:
 
-* DoT = +1 and DoT = −1 both train at full strength but push in
+* DoT = +1 and DoT = $-$1 both train at full strength but push in
   opposite directions (learning truth vs. learning falsehood).
 * DoT near 0 contributes nearly nothing (the sigmoid zero-crossing).
 * Over a diverse population of users, the average DoT tends toward
@@ -84,7 +84,7 @@ is the energy barrier between them.
 The EMA weight anchoring adds a third stabilizing force: regardless of
 the DoT distribution, the model is always gently pulled back toward
 its checkpoint state.  This is analogous to the **temperature decay**
-in simulated annealing — as training progresses, the system becomes
+in simulated annealing -- as training progresses, the system becomes
 increasingly resistant to perturbation while allowing deeper learning
 within established wells.
 
@@ -93,7 +93,7 @@ within established wells.
 The sigmoid warmup schedule serves as a **cooling schedule** for the
 annealing process.  When online training is first enabled:
 
-1. The TruthSet is empty or sparse — DoT values are unreliable.
+1. The TruthSet is empty or sparse -- DoT values are unreliable.
 2. The warmup suppresses the learning rate to near-zero.
 3. As interactions accumulate, the TruthSet gains signal.
 4. The warmup ramps up, allowing the model to learn from now-reliable
@@ -102,15 +102,15 @@ annealing process.  When online training is first enabled:
    and training proceeds at full configured strength.
 
 This mirrors the annealing schedule in physical systems: high
-temperature (high exploration, low commitment) → low temperature (low
+temperature (high exploration, low commitment) $\rightarrow$ low temperature (low
 exploration, high commitment to learned patterns).
 
-## Sensation — Preprocessing Pipeline
+## Sensation -- Preprocessing Pipeline
 
 `bin/sensation.py` transforms plain-text conversations into XML-tagged
 training data so that NanoChat learns WikiOracle's structured protocol.
 The name follows the epistemological pipeline:
-**Sensation → Perception → Cognition** — raw input data (sensation)
+**Sensation $\rightarrow$ Perception $\rightarrow$ Cognition** -- raw input data (sensation)
 is structured and tagged before it reaches the model (cognition).
 
 Sensation works for both batch retagging of the NanoChat SFT corpus
@@ -124,8 +124,8 @@ into separate User and Server records:
 
 | Type           | Tag              | Purpose                                                |
 | -------------- | ---------------- | ------------------------------------------------------ |
-| `user`         | `<User>`         | User identity — username, uid, timestamp               |
-| `server`       | `<Server>`       | Server identity — name, version, timestamp             |
+| `user`         | `<User>`         | User identity -- username, uid, timestamp               |
+| `server`       | `<Server>`       | Server identity -- name, version, timestamp             |
 | `conversation` | `<Conversation>` | Messages with `<Q>` (query) and `<R>` (response) pairs |
 | `truth`        | `<Truth>`        | Extracted factual claims with trust and spacetime      |
 
@@ -146,7 +146,7 @@ copula "is" conflates several distinct relations:
 * **IS of predication**: "The sky is blue"
 * **IS of existence**: "There are eight planets"
 
-Each asserts something verifiable about the world — a *fact* bound to
+Each asserts something verifiable about the world -- a *fact* bound to
 a specific spacetime context.  "The cup is on the table" is only true
 at a particular place and time; at a different spacetime it may not be.
 
@@ -164,7 +164,7 @@ The heuristic classifier in `sensation.py` detects these patterns:
 Sentences without an IS pattern, or with subjective markers ("I think",
 "maybe", "might be"), questions, or meta-discourse ("That's a great
 question") default to `<feeling>`.  Auto-detected facts receive
-`trust=0.5` — a conservative default that flags them for future
+`trust=0.5` -- a conservative default that flags them for future
 verification.  Spatiotemporal binding is expressed via `<place>` and
 `<time>` child elements inside `<fact>` or `<feeling>` tags.
 
@@ -178,8 +178,8 @@ Batch-convert a corpus:
 Classify a single sentence:
 
     python bin/sensation.py tag "Paris is the capital of France."
-    # → Classification: fact (identity)
-    # → Tagged: <Q><fact trust="0.5">Paris is the capital of France.</fact></Q>
+    # $\rightarrow$ Classification: fact (identity)
+    # $\rightarrow$ Tagged: <Q><fact trust="0.5">Paris is the capital of France.</fact></Q>
 
 In the online training pipeline, `response.py` calls
 `preprocess_training_example()` automatically before each `/train` POST,
@@ -196,27 +196,27 @@ fit the collective evidence.
 
 WikiOracle accomplishes this by:
 
-1. Maintaining a **server‑owned TruthSet** (`truth.xml`) that
+1. Maintaining a **server-owned TruthSet** (`truth.xml`) that
    accumulates facts from all users.
-2. Computing a **DegreeOfTruth** (−1 .. +1) per interaction.
+2. Computing a **DegreeOfTruth** ($-$1 .. +1) per interaction.
 3. Using |DegreeOfTruth| to modulate the **learning rate** of a
-   one‑step online training pass in NanoChat.
+   one-step online training pass in NanoChat.
 
 Conversations are **not** stored on the server.  Only **knowledge** truth
 entries are retained.  The server TruthSet contains knowledge facts,
-operators, authorities, and references — no feelings, provider entries,
+operators, authorities, and references -- no feelings, provider entries,
 or **news facts** (spatiotemporally bound observations).
 
 News facts (those with `<place>` or `<time>` child elements carrying real
 values) are session-only.  Persisting them would risk "worldline
-capture" — an observer could reconstruct a user's physical trajectory
+capture" -- an observer could reconstruct a user's physical trajectory
 through spatiotemporal observations.  The `filter_knowledge_only()`
 function in `bin/truth.py` enforces this boundary.
 
 ### User Identity
 
 Each user is identified by a pseudonymous GUID derived deterministically
-from `client_name` in the state file (UUID‑5 in the WikiOracle namespace).
+from `client_name` in the state file (UUID-5 in the WikiOracle namespace).
 This GUID is stored at the root level of the user's state and used
 internally when merging truth entries into the server table.
 
@@ -225,18 +225,18 @@ internally when merging truth entries into the server table.
 The pipeline is staged so the user gets a response first; truth merging
 and training happen after the response is delivered.
 
-**Stage 1 — Respond**
+**Stage 1 -- Respond**
 
 1. Receive the user's query and TruthSet.
 2. Use truth entries for RAG as usual.
 3. Return the response to the user.
 
-**Stage 2 — Compute DegreeOfTruth**
+**Stage 2 -- Compute DegreeOfTruth**
 
 4. Score the user's TruthSet against the server's current truth
    (formula above).
 
-**Stage 3 — Update server TruthSet**
+**Stage 3 -- Update server TruthSet**
 
 5. Filter client truth per the Entanglement Policy (doc/Entanglement.md):
    * When `store_concrete` is false (default), only universal
@@ -250,13 +250,13 @@ and training happen after the response is delivered.
 6. Merge the surviving truth entries into the server TruthSet
    (`truth.xml`):
    * **Match found**: nudge the server entry's trust toward the incoming
-     value using a slow‑moving average:
-     `server_trust += merge_rate × (client_trust − server_trust)`
+     value using a slow-moving average:
+     `server_trust += merge_rate $\times$ (client_trust $-$ server_trust)`
    * **No match**: insert the entry with the stated trust value.
    * Entries are restricted to facts, operators, authorities, and
      references.  Feelings and provider entries are not stored.
 
-**Stage 3a — TruthSet Trimming**
+**Stage 3a -- TruthSet Trimming**
 
 When the server TruthSet exceeds `truth_max_entries` (default 1000),
 the merge step trims the table by removing entries with `|trust|` closest
@@ -268,12 +268,12 @@ The `truth_max_entries` parameter is configurable per-user via the
 Settings dialog (see [UserInterface.md](./UserInterface.md)) and
 defaults to 1000 in the chat config.
 
-**Stage 4 — Tag and Train**
+**Stage 4 -- Tag and Train**
 
 7. Preprocess the training example through Sensation (`sensation.py`)
    to add `<Q>`/`<R>` and `<fact>`/`<feeling>` XML tags.
 8. Strip `<feeling>` blocks from training messages
-   (`strip_feelings_from_training()` in `bin/sensation.py`) — feelings
+   (`strip_feelings_from_training()` in `bin/sensation.py`) -- feelings
    must never train model parameters (Entanglement policy,
    doc/Entanglement.md).
 9. Call NanoChat's online training endpoint (`POST /train`) with the
@@ -284,15 +284,15 @@ defaults to 1000 in the chat config.
 Online training runs on the device specified by
 `server.training.device` in the config file (`config.xml`).  Valid values:
 
-* `cpu` (default) — safe for the WikiOracle production server
-* `cuda` — use NVIDIA GPU if available
-* `mps` — Apple Metal Performance Shaders (macOS)
-* `auto` — probe CUDA → MPS → CPU and use the best available
+* `cpu` (default) -- safe for the WikiOracle production server
+* `cuda` -- use NVIDIA GPU if available
+* `mps` -- Apple Metal Performance Shaders (macOS)
+* `auto` -- probe CUDA $\rightarrow$ MPS $\rightarrow$ CPU and use the best available
 
 The model is moved to the training device for the gradient step, then
 moved back to the inference device afterward.
 
-### Training Algorithm — DoT-Annealed Selective Training
+### Training Algorithm -- DoT-Annealed Selective Training
 
 The `/train` endpoint (`bin/nanochat_ext.py`) implements a carefully
 designed online training algorithm that prevents weight collapse while
@@ -304,13 +304,13 @@ All parameter groups use **AdamW** consistently.  The batch training
 regime uses Muon (Newton-Schulz orthogonalization) for transformer
 matrices, but online training uses AdamW for all groups because:
 
-1. **No persistent optimizer state** — the optimizer is created fresh
+1. **No persistent optimizer state** -- the optimizer is created fresh
    each `/train` call.  Muon's advantage comes from accumulated
    momentum; without persistent state, its Newton-Schulz
    orthogonalization provides limited benefit.
-2. **Effectively sign-SGD** — AdamW without momentum history is
+2. **Effectively sign-SGD** -- AdamW without momentum history is
    effectively sign-SGD: simpler, faster, well-understood.
-3. **Independent interactions** — each `/train` call is fully
+3. **Independent interactions** -- each `/train` call is fully
    independent.  A bad gradient cannot poison future steps because
    there is no momentum history to contaminate.  The effective step
    size is bounded by `lr`.
@@ -330,26 +330,26 @@ training regime in `nanochat/nanochat/gpt.py:GPT.setup_optimizer()`:
 | `transformer_h` | 0.02    | All transformer block matrix parameters (attention, MLP, norms) |
 
 Parameters not matching any named group are included in `transformer_h`.
-All groups use the same AdamW optimizer — no Muon.
+All groups use the same AdamW optimizer -- no Muon.
 
 #### Learning Rate Modulation
 
 The effective learning rate for each parameter group is computed as:
 
-    lr_effective = lr_base × lr_scale
+    lr_effective = lr_base $\times$ lr_scale
 
 where:
 
-    lr_scale = (truth_weight × |DoT| + (1 - truth_weight)) × sigmoid_warmup(step)
+    lr_scale = (truth_weight $\times$ |DoT| + (1 - truth_weight)) $\times$ sigmoid_warmup(step)
 
-The **truth_weight** parameter (0.0–1.0) controls how much DoT gates
+The **truth_weight** parameter (0.0-1.0) controls how much DoT gates
 the learning rate:
 
 | `truth_weight` | `lr_effective`                           | Behavior                                                 |
 | -------------- | ---------------------------------------- | -------------------------------------------------------- |
-| 0.0            | `lr_base × warmup`                       | Vanilla SFT — full LR regardless of DoT.  No truth bias. |
-| 0.5            | `lr_base × (0.5 × |DoT| + 0.5) × warmup` | Half-gated — DoT attenuates but never fully suppresses.  |
-| 1.0            | `lr_base × |DoT| × warmup`               | Fully DoT-gated — zero DoT means zero learning.          |
+| 0.0            | `lr_base $\times$ warmup`                       | Vanilla SFT -- full LR regardless of DoT.  No truth bias. |
+| 0.5            | `lr_base $\times$ (0.5 $\times$ |DoT| + 0.5) $\times$ warmup` | Half-gated -- DoT attenuates but never fully suppresses.  |
+| 1.0            | `lr_base $\times$ |DoT| $\times$ warmup`               | Fully DoT-gated -- zero DoT means zero learning.          |
 
 The `truth_weight` replaces the former boolean `rag` checkbox in the
 Settings dialog.  At `truth_weight=0`, the system trains on everything
@@ -366,13 +366,13 @@ entries are *sent to the provider for context* whenever
 The sigmoid warmup schedule prevents early random updates from
 corrupting the model when online training is first enabled:
 
-    sigmoid_warmup(step) = 1 / (1 + exp(-k × (step - midpoint)))
+    sigmoid_warmup(step) = 1 / (1 + exp(-k $\times$ (step - midpoint)))
 
 | Step         | Warmup value | Effect                                           |
 | ------------ | ------------ | ------------------------------------------------ |
-| 0            | ~0.007       | Nearly zero — first interactions barely train    |
+| 0            | ~0.007       | Nearly zero -- first interactions barely train    |
 | midpoint     | 0.5          | Half strength                                    |
-| 2 × midpoint | ~0.993       | Nearly full strength — training ramp is complete |
+| 2 $\times$ midpoint | ~0.993       | Nearly full strength -- training ramp is complete |
 
 The `warmup_steps` parameter (default 50) is the sigmoid midpoint.
 The steepness parameter `k` is fixed at 0.1.
@@ -395,7 +395,7 @@ norm.  The actual gradient norm after clipping is returned in the
 If `grad_norm` consistently hits the clip threshold, this indicates
 either: (a) the learning rate is too high for the current data, or
 (b) the training example is an outlier.  Both are handled gracefully
-by clipping — the step still proceeds, just with bounded magnitude.
+by clipping -- the step still proceeds, just with bounded magnitude.
 
 #### EMA Weight Anchoring (Anti-Capture)
 
@@ -407,7 +407,7 @@ After each optimizer step, model weights are blended back toward the
 
 where:
 
-    anchor_effective = anchor_decay × truth_weight
+    anchor_effective = anchor_decay $\times$ truth_weight
 
 The anchor weights are the original checkpoint weights, initialized on
 the first `/train` call.  The `anchor_decay` parameter (default 0.001)
@@ -415,14 +415,14 @@ controls the blend-back rate.
 
 Key properties:
 
-* **truth_weight=0**: `anchor_effective = 0` — no anchor pull.  Weights
+* **truth_weight=0**: `anchor_effective = 0` -- no anchor pull.  Weights
   drift freely (vanilla SFT mode).
-* **truth_weight=1**: `anchor_effective = anchor_decay` — full anchor
+* **truth_weight=1**: `anchor_effective = anchor_decay` -- full anchor
   pull.  Weights are always tugged back toward the checkpoint.
 * The anchor prevents **gradual drift** while allowing meaningful
   learning.  Over many steps, the weights can move significantly from
   the checkpoint, but each individual step is bounded.
-* **Reset via `make nano_restart`** — reloads both the model and the
+* **Reset via `make nano_restart`** -- reloads both the model and the
   anchor, resetting the training state.
 
 The anchor is stored in `app.state.anchor_params` as a list of cloned
@@ -469,7 +469,7 @@ cross-entropy loss value; the key name indicates the semantic direction.
 | `truth_max_entries` | `server.training.truth_max_entries` | 1000    | Max server TruthSet size                        |
 | `device`            | `server.training.device`            | `"cpu"` | Training device                                 |
 
-See [Config.md](./Config.md) §Server for the full configuration reference.
+See [Config.md](./Config.md) Section Server for the full configuration reference.
 
 #### Truth-Modulated Loss (MentalModel)
 
@@ -483,16 +483,16 @@ totalLoss = totalLoss * (1 + LuminosityWeight * (1 - luminosity)
 ```
 
 - **Luminosity** measures truth set coherence (see [Logic.md](./Logic.md)
-  §Luminosity). Low luminosity increases loss.
+  Section Luminosity). Low luminosity increases loss.
 - **Universality** measures the Golden Rule via SVO/OVS swap (see
-  [Ethics.md](./Ethics.md) §Universality). Low universality increases loss.
+  [Ethics.md](./Ethics.md) Section Universality). Low universality increases loss.
 
 Both weights default to 0.1, making the effect gentle. This operates
-independently of the DoT-annealed training described above — DoT
+independently of the DoT-annealed training described above -- DoT
 gates the learning rate, while luminosity/universality modulate the
 loss magnitude.
 
-See [Config.md](./Config.md) §MentalModel Configuration for the XML
+See [Config.md](./Config.md) Section MentalModel Configuration for the XML
 parameters.
 
 ### SFT Corpus Preparation
@@ -526,12 +526,12 @@ truth element:
 **Resolution:** Before entries reach the server TruthSet, they are
 resolved by `resolve_entries()` in `bin/truth.py`:
 
-* `<reference>` → `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
-* `<authority>` → list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
-* `<provider>` → `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
-* `<fact>`, `<feeling>`, `<logic>` → pass through unchanged
+* `<reference>` $\rightarrow$ `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
+* `<authority>` $\rightarrow$ list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
+* `<provider>` $\rightarrow$ `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
+* `<fact>`, `<feeling>`, `<logic>` $\rightarrow$ pass through unchanged
 
-Entry types stored after resolution: `<fact>` (knowledge — no `<place>`/`<time>` children)
+Entry types stored after resolution: `<fact>` (knowledge -- no `<place>`/`<time>` children)
 and `<logic>` entries (operators wrapped in `<logic><and|or|not|non>...</logic>`).
 
 Entry types **not** stored: `<feeling>`, `<provider>`, unresolved `<reference>`,
@@ -540,7 +540,7 @@ unresolved `<authority>`, and (when
 child elements.  Content matching identifiability patterns (PII) is
 always excluded.
 
-News facts are spatiotemporally bound — persisting them risks worldline
+News facts are spatiotemporally bound -- persisting them risks worldline
 capture.  Whether to store them is a user choice controlled by
 `store_concrete` in config.xml (default false), consistent with
 Zero-Knowledge / Selective Disclosure principles.  See
@@ -549,19 +549,19 @@ Zero-Knowledge / Selective Disclosure principles.  See
 doc/Entanglement.md for the full policy.
 
 The server TruthSet includes the user GUID as a trust entry, so the
-server can track per‑user trust alongside factual claims.
+server can track per-user trust alongside factual claims.
 
-### Anti‑Capture
+### Anti-Capture
 
 The online training system has multiple layers of defense against
 weight collapse and capture by any single user:
 
 **TruthSet level:**
 
-* Entries are merged with a **slow‑moving average** (`merge_rate`,
+* Entries are merged with a **slow-moving average** (`merge_rate`,
   default 0.1), so no single user can instantly override collective
   truth.
-* Disproven entries naturally drift toward −1 as contradicting evidence
+* Disproven entries naturally drift toward $-$1 as contradicting evidence
   accumulates from other users.
 * **TruthSet trimming** (`truth_max_entries`, default 1000) removes
   low-signal entries (|trust| near 0), keeping the TruthSet focused on
@@ -569,7 +569,7 @@ weight collapse and capture by any single user:
 
 **Training level:**
 
-* **DegreeOfTruth gates the learning rate** — claims that diverge
+* **DegreeOfTruth gates the learning rate** -- claims that diverge
   from consensus (DoT near 0) have minimal training impact.
 * **Gradient clipping** (`grad_clip`, default 1.0) prevents any single
   training step from making catastrophic weight changes.
@@ -580,19 +580,19 @@ weight collapse and capture by any single user:
 * **Sigmoid warmup** (`warmup_steps`, default 50) prevents the first
   few interactions from corrupting weights before the TruthSet has
   accumulated sufficient signal.
-* **Fresh optimizer per call** — no persistent momentum state means a
+* **Fresh optimizer per call** -- no persistent momentum state means a
   bad gradient cannot poison future steps.  Each interaction is
   independent.
-* **Consistent AdamW** — without accumulated Muon state, AdamW is
+* **Consistent AdamW** -- without accumulated Muon state, AdamW is
   effectively sign-SGD with bounded step size.
 
 **Operational level:**
 
 Manual rollback is available via Makefile targets:
 
-* `make checkpoint-pull` — rsync SFT checkpoints from the remote
+* `make checkpoint-pull` -- rsync SFT checkpoints from the remote
   WikiOracle server to `output/checkpoints/` for safekeeping.
-* `make checkpoint-push` — restore checkpoints from backup, then
+* `make checkpoint-push` -- restore checkpoints from backup, then
   `make wo-restart` to reload weights.
 
 The intended workflow: pull a checkpoint before enabling online training,
@@ -601,8 +601,8 @@ then push to restore if capture is detected.
 ### Dissonance Detection and Pluralistic Truth (TODO)
 
 Detecting and resolving dissonance within the server TruthSet is
-left for future work.  The goal is to support a higher‑dimensional
-truth‑space where contradictory claims can coexist when they originate
+left for future work.  The goal is to support a higher-dimensional
+truth-space where contradictory claims can coexist when they originate
 from different perspectives.
 
 For example: "the world was created in seven days" and "the world was
@@ -613,13 +613,13 @@ rather than a flat list.
 
 In the current consensus model, a DoT $\approx$ 0 simply means "nothing to
 learn" and the training step is skipped.  In a future **pluralistic**
-model — where the same claim can be true in context c_1 and false in
-context c_2 — a DoT of 0 may instead indicate that **user feedback is
+model -- where the same claim can be true in context c_1 and false in
+context c_2 -- a DoT of 0 may instead indicate that **user feedback is
 needed** to disambiguate which context applies before training should
 proceed.
 
 Possible approaches include context/perspective tags on entries,
-truth‑space embeddings with frame clustering, conditional truth values
+truth-space embeddings with frame clustering, conditional truth values
 indexed by worldview, or explicit user prompts to resolve ambiguity
 when the TruthSet produces conflicting signals.
 
@@ -632,14 +632,14 @@ OpenClaw provider by spawning `bin/wo` for each query.
 
 The extension provides three capabilities:
 
-1. **Provider** — WikiOracle appears in OpenClaw's provider selector
+1. **Provider** -- WikiOracle appears in OpenClaw's provider selector
    alongside OpenAI, Anthropic, etc.  Selecting it routes all messages
    through the WikiOracle server's full pipeline.
 
-2. **Command** (`/wo <message>`) — Direct CLI-style access from any
+2. **Command** (`/wo <message>`) -- Direct CLI-style access from any
    OpenClaw channel, bypassing the agent/LLM layer.
 
-3. **Tool** (`wikioracle_query`) — Lets OpenClaw agents invoke
+3. **Tool** (`wikioracle_query`) -- Lets OpenClaw agents invoke
    WikiOracle programmatically during agentic runs.
 
 The message flow through the training pipeline:
@@ -648,18 +648,18 @@ The message flow through the training pipeline:
 2. The wikioracle extension spawns `bin/wo` with the message.
 3. `bin/wo` sends `POST /chat` to the WikiOracle server.
 4. WikiOracle responds (Stage 1: provider routing, truth RAG).
-5. Stages 2–4 execute server-side: DoT computation, truth merge,
+5. Stages 2-4 execute server-side: DoT computation, truth merge,
    Sensation preprocessing, and NanoChat online training.
 6. `bin/wo` prints the response to stdout; the extension captures it
    and relays it back to the originating channel.
 
-In stateful mode (default), the WikiOracle server owns session state —
+In stateful mode (default), the WikiOracle server owns session state --
 conversation context persists across messages without client-side
 storage.  In stateless mode, state is serialized to a local XML file
 via `bin/wo -f`.
 
 The training pipeline treats OpenClaw messages identically to direct
-HTTP or web UI clients — the same DoT computation, TruthSet merge,
+HTTP or web UI clients -- the same DoT computation, TruthSet merge,
 Sensation preprocessing, and `/train` call apply.  The `bin/wo` CLI
 is transparent to the training system.
 

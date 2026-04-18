@@ -25,11 +25,11 @@ This gives the LLM the full path of dialogue that led to the current point, with
 
 ```
 conversationsToHierarchy(state.conversations, selectedId)
-    ↓
+    $\downarrow$
 D3 hierarchy data  { id, title, messageCount, questionCount, selected, children }
-    ↓
+    $\downarrow$
 renderTree(hierarchyData, callbacks)
-    ↓
+    $\downarrow$
 SVG with nodes (rects/pills/circles) + curved links
 ```
 
@@ -37,7 +37,7 @@ The root node is a circle labelled `/`. Selected conversations render as larger 
 
 ### Chat view
 
-`wikioracle.js → renderMessages()` displays the messages of the currently selected conversation:
+`wikioracle.js $\rightarrow$ renderMessages()` displays the messages of the currently selected conversation:
 
 1. Look up `selectedConvId` in the tree via `findConversation()`
 2. Iterate `conv.messages`, rendering each as a `.message` div with role-based styling
@@ -50,15 +50,15 @@ When no conversation is selected (root view), a placeholder prompts the user to 
 
 ```
 state.xml on disk
-    ↓  [xml_to_state]
+    $\downarrow$  [xml_to_state]
 In-memory state with nested conversation tree
-    ↓  [GET /state]
+    $\downarrow$  [GET /state]
 Client receives state payload
-    ↓  [renderMessages]
+    $\downarrow$  [renderMessages]
 Chat panel shows selected conversation's messages
-    ↓  [conversationsToHierarchy]
+    $\downarrow$  [conversationsToHierarchy]
 D3 hierarchy data
-    ↓  [renderTree]
+    $\downarrow$  [renderTree]
 SVG tree visualisation
 ```
 
@@ -68,10 +68,10 @@ SVG tree visualisation
 
 | Gesture                  | Action                                                      |
 | ------------------------ | ----------------------------------------------------------- |
-| Click                    | Navigate — select that conversation, show its messages      |
+| Click                    | Navigate -- select that conversation, show its messages      |
 | Double-click             | Open context menu (Branch, Delete)                          |
 | Right-click              | Open context menu (same)                                    |
-| Drag node → drop on node | Merge — append source's messages into target, remove source |
+| Drag node $\rightarrow$ drop on node | Merge -- append source's messages into target, remove source |
 
 A 200ms timer disambiguates click from double-click. Context menus are appended to `document.body` with fixed positioning to avoid clipping by the tree container's `overflow: hidden`.
 
@@ -98,7 +98,7 @@ branches):
        /    \
      beta1  beta2
        \    /
-        final      ← parentId: [beta1, beta2]
+        final      $\leftarrow$ parentId: [beta1, beta2]
 ```
 
 Arrow Right / Arrow Left perform standard tree preorder traversal.
@@ -107,7 +107,7 @@ In a DAG the same node appears under multiple parents; it is visited
 reading path:
 
 ```
-→  root  →  beta1  →  final  →  beta2  →  final  →  END
+$\rightarrow$  root  $\rightarrow$  beta1  $\rightarrow$  final  $\rightarrow$  beta2  $\rightarrow$  final  $\rightarrow$  END
 ```
 
 ### Chat panel
@@ -127,7 +127,7 @@ Dragging conversation A onto B:
 
 ### Branching
 
-Double-click or right-click a tree node → "Branch" creates a new empty child conversation. The next message typed seeds it. The LLM receives the full ancestor context.
+Double-click or right-click a tree node $\rightarrow$ "Branch" creates a new empty child conversation. The next message typed seeds it. The LLM receives the full ancestor context.
 
 ## Settings Dialog
 
@@ -144,12 +144,12 @@ preferences (layout, theme, confirm actions) are also saved in state.
 | Username                 | `setUsername`          | text          | `state.client_name`                         | `"User"`                                | Display name shown in chat messages.                              |
 | Provider                 | `setProvider`          | select        | `config.providers.default`                  | `"wikioracle"`                          | Active LLM provider.                                              |
 | Model                    | `setModel`             | select        | `state.ui.model`                            | provider metadata model or empty        | Explicit model override sent in `POST /chat` as `config.model`.   |
-| Provider trust           | `setProviderTrust`     | range (0–1)   | `config.server.providers.<selected>.trust`  | `1.0` for `wikioracle`, `0.6` otherwise | Per-provider trust weight; updates when the provider dropdown changes. |
+| Provider trust           | `setProviderTrust`     | range (0-1)   | `config.server.providers.<selected>.trust`  | `1.0` for `wikioracle`, `0.6` otherwise | Per-provider trust weight; updates when the provider dropdown changes. |
 | Layout                   | `setLayout`            | select        | `state.ui.layout`                           | saved value; legacy fallback `flat`     | Panel layout mode. The current selector exposes `horizontal` and `vertical`. |
 | Theme                    | `setTheme`             | select        | `state.ui.theme`                            | `"system"`                              | Colour theme (`system`, `light`, `dark`).                         |
-| Temperature              | `setTemp`              | range (0–2)   | `config.server.evaluation.temperature`      | `0.7`                                   | Sampling temperature for the LLM.                                 |
+| Temperature              | `setTemp`              | range (0-2)   | `config.server.evaluation.temperature`      | `0.7`                                   | Sampling temperature for the LLM.                                 |
 | Allow URL fetching       | `setUrlFetch`          | checkbox      | `config.server.evaluation.url_fetch`        | `false`                                 | Allow the assistant to fetch URL content.                         |
-| Thought-free mode        | `setThoughtFree`       | checkbox      | `config.server.evaluation.thought_free`     | `false`                                 | Enable shamatha speech: restricts grammar to S→C only, prepends 10-rule non-discursive constraint to LLM providers. |
+| Thought-free mode        | `setThoughtFree`       | checkbox      | `config.server.evaluation.thought_free`     | `false`                                 | Enable shamatha speech: restricts grammar to S$\rightarrow$C only, prepends 10-rule non-discursive constraint to LLM providers. |
 | Confirm deletes / merges | `setConfirm`           | checkbox      | `state.ui.confirm_actions`                  | `false`                                 | Require confirmation before destructive operations.               |
 
 ### Settings Persistence
@@ -162,7 +162,7 @@ preferences (layout, theme, confirm actions) are also saved in state.
 
 ### Truth Weight Slider
 
-The **truth weight** slider (0.0–1.0, step 0.05) replaces the former
+The **truth weight** slider (0.0-1.0, step 0.05) replaces the former
 "Use TruthSet" checkbox.  It controls two things simultaneously:
 
 1. **RAG delivery**: When `truth_weight > 0`, the TruthSet is sent
@@ -172,11 +172,11 @@ The **truth weight** slider (0.0–1.0, step 0.05) replaces the former
 2. **Training modulation**: During online training, `truth_weight`
    controls how much DegreeOfTruth gates the learning rate:
 
-   * `truth_weight = 0.0`: Vanilla SFT — trains on everything at full
+   * `truth_weight = 0.0`: Vanilla SFT -- trains on everything at full
      learning rate regardless of DoT.  No EMA anchor pull.
-   * `truth_weight = 0.7`: Default — DoT significantly gates learning,
+   * `truth_weight = 0.7`: Default -- DoT significantly gates learning,
      with moderate anchor pull toward checkpoint.
-   * `truth_weight = 1.0`: Fully DoT-gated — zero DoT means zero
+   * `truth_weight = 1.0`: Fully DoT-gated -- zero DoT means zero
      learning.  Full anchor pull toward checkpoint.
 
 The slider displays its current numeric value next to the control via
@@ -187,14 +187,14 @@ the `#setTruthWeightVal` span, updated live on input events.
 Controls the maximum size of the server TruthSet.  When the table
 exceeds this limit, entries with `|trust|` closest to 0.0 (lowest
 information value) are trimmed during the merge stage.  Range:
-100–10000, step 100.
+100-10000, step 100.
 
 ### Store Concrete Facts
 
 When enabled, spatiotemporally-bound facts (those with `<place>` or
 `<time>` child elements carrying real values) are stored in the server
 TruthSet alongside universal facts.  When disabled (default), only
-universal facts persist — consistent with Zero-Knowledge / Selective
+universal facts persist -- consistent with Zero-Knowledge / Selective
 Disclosure principles.
 
 This setting is a client-side override for the server's
@@ -206,8 +206,8 @@ sent in the query payload.
 The config system automatically migrates the former boolean `rag` flag
 to the new `truth_weight`:
 
-* `rag: true` → `truth_weight: 0.7`
-* `rag: false` → `truth_weight: 0.0`
+* `rag: true` $\rightarrow$ `truth_weight: 0.7`
+* `rag: false` $\rightarrow$ `truth_weight: 0.0`
 
 This migration runs in both `client/config.js` (client-side) and
 `bin/response.py` (server-side) to handle configs from before the
@@ -250,15 +250,15 @@ strings hard-coded in `client/util.js` match the tables below.
 
 | Key         | Description                                                       |
 | ----------- | ----------------------------------------------------------------- |
-| `feeling`   | `Feeling — a subjective, non-verifiable claim (not penalizable).` |
-| `fact`      | `Fact — a disprovable assertion with a degree of truth.`          |
-| `reference` | `Reference — a citation linking to an external source.`           |
-| `and`       | `AND — true when all children are true (min trust).`              |
-| `or`        | `OR — true when any child is true (max trust).`                   |
-| `not`       | `NOT — negation of a child entry.`                                |
-| `non`       | `NON — non-affirming negation (weakens trust toward zero).`       |
-| `provider`  | `Provider — an LLM API endpoint.`                                 |
-| `authority` | `Authority — a remote knowledge base (XML URL).`                  |
+| `feeling`   | `Feeling -- a subjective, non-verifiable claim (not penalizable).` |
+| `fact`      | `Fact -- a disprovable assertion with a degree of truth.`          |
+| `reference` | `Reference -- a citation linking to an external source.`           |
+| `and`       | `AND -- true when all children are true (min trust).`              |
+| `or`        | `OR -- true when any child is true (max trust).`                   |
+| `not`       | `NOT -- negation of a child entry.`                                |
+| `non`       | `NON -- non-affirming negation (weakens trust toward zero).`       |
+| `provider`  | `Provider -- an LLM API endpoint.`                                 |
+| `authority` | `Authority -- a remote knowledge base (XML URL).`                  |
 
 ### Templates
 

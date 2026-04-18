@@ -22,8 +22,8 @@ make install ARCH=gpu     # GPU/CUDA
 ```
 
 This sets up:
-* `.venv` — the WikiOracle shim server (`flask`, `requests`, etc. from `requirements.txt`)
-* `nanochat/.venv` — the NanoChat local LLM (managed by `uv`)
+* `.venv` -- the WikiOracle shim server (`flask`, `requests`, etc. from `requirements.txt`)
+* `nanochat/.venv` -- the NanoChat local LLM (managed by `uv`)
 
 ### Data and tokenizer bootstrap
 
@@ -215,7 +215,7 @@ python3 bin/wikioracle.py
 
 The server reads `config.xml` at startup. On first run, it auto-generates a `server_id` (UUID4) and writes it back. Provider API keys can be set in the XML or via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`).
 
-User identity (name, user_id) lives in the state file, not in the config — the client is the authority for state, and the server is the authority for config.
+User identity (name, user_id) lives in the state file, not in the config -- the client is the authority for state, and the server is the authority for config.
 
 ### Session portability
 
@@ -231,5 +231,5 @@ This provides a clean integration path with Claude Code, OpenAI Codex, or any lo
 
 * WikiOracle credentials are not copied onto EC2 training instances.
 * Deployment excludes local/dev artifacts from rsync (`.venv`, caches, local data, `.env`, etc.).
-* The local server binds to `127.0.0.1` by default — not exposed to the network.
+* The local server binds to `127.0.0.1` by default -- not exposed to the network.
 * TLS is enabled by default with a self-signed certificate (use `--no-ssl` to disable).

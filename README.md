@@ -3,11 +3,11 @@ Revision: 2026.02.27
 
 **An open-source architecture for truthful AI.**
 
-WikiOracle is a truthful, explainable LLM system designed as a public good — the Wikipedia model applied to artificial intelligence.
+WikiOracle is a truthful, explainable LLM system designed as a public good -- the Wikipedia model applied to artificial intelligence.
 
 ## The Problem
 
-For-profit corporations are using our data — sourced from billions of people — to train models that are teaching our children. Those models hallucinate. They can't explain themselves. They are vulnerable to ideological capture and data-driven manipulation, especially under online learning. And the knowledge they encode is locked behind proprietary walls.
+For-profit corporations are using our data -- sourced from billions of people -- to train models that are teaching our children. Those models hallucinate. They can't explain themselves. They are vulnerable to ideological capture and data-driven manipulation, especially under online learning. And the knowledge they encode is locked behind proprietary walls.
 
 Most large AI systems today are built around a single global objective function, centralized data aggregation, hidden alignment rules, and implicit averaging over moral and cultural differences. The result is predictable: minority viewpoints are quietly averaged away, the loudest groups shape the model at scale, a single model becomes an authority node that everyone depends on, and predictive advantage converts into economic or political dominance.
 
@@ -21,23 +21,23 @@ WikiOracle does not optimize for fluency and bolt on truthfulness as an aftertho
 
 ### Data Soverignty
 
-WikiOracle is local-first. Your conversation state, your trust entries, and your configuration live on your machine — not on a corporate server accumulating hidden central memory. You can export, merge, and port your sessions freely. Your data is yours.
+WikiOracle is local-first. Your conversation state, your trust entries, and your configuration live on your machine -- not on a corporate server accumulating hidden central memory. You can export, merge, and port your sessions freely. Your data is yours.
 
 The remote server is strictly stateless: it holds no per-user conversation, no trust table, and no session memory between requests. Every call arrives with the state it needs and leaves nothing behind.
 
-For off-machine backup and sharing, WikiOracle can optionally stage your `state.xml` and `config.xml` to your own Dropbox as AES-256 encrypted ZIP archives (via `pyzipper`). The encryption password is held only by you — Dropbox sees ciphertext, and the server never persists either the password or the decrypted contents.
+For off-machine backup and sharing, WikiOracle can optionally stage your `state.xml` and `config.xml` to your own Dropbox as AES-256 encrypted ZIP archives (via `pyzipper`). The encryption password is held only by you -- Dropbox sees ciphertext, and the server never persists either the password or the decrypted contents.
 
 ### Sharing Truth via QR Code
 
-You can share a conversation or a truth set by publishing its encrypted state bundle to Dropbox and exposing the Dropbox link plus the decryption key inside an `<authority>` XML element. WikiOracle renders that element as a QR code in the client — scan it from another device to copy the authority URI, paste it into the recipient's Truth editor, and their client will fetch and decrypt the bundle, importing your conversation and trust entries at whatever trust weight they choose to grant it.
+You can share a conversation or a truth set by publishing its encrypted state bundle to Dropbox and exposing the Dropbox link plus the decryption key inside an `<authority>` XML element. WikiOracle renders that element as a QR code in the client -- scan it from another device to copy the authority URI, paste it into the recipient's Truth editor, and their client will fetch and decrypt the bundle, importing your conversation and trust entries at whatever trust weight they choose to grant it.
 
 ### Democracy
 
-No single actor — company, state, foundation, or maintainer group — can silently become the epistemic root for everyone else. WikiOracle supports multiple points of view, each with its own trust map and standards of evidence. Where serious disagreement exists among credible sources, the system represents the dispute rather than smoothing it away. Minority viewpoints are preserved, not averaged into oblivion. And if governance ever fails these obligations, forking is a constitutional right.
+No single actor -- company, state, foundation, or maintainer group -- can silently become the epistemic root for everyone else. WikiOracle supports multiple points of view, each with its own trust map and standards of evidence. Where serious disagreement exists among credible sources, the system represents the dispute rather than smoothing it away. Minority viewpoints are preserved, not averaged into oblivion. And if governance ever fails these obligations, forking is a constitutional right.
 
 ### Distribution
 
-Instead of one model that claims to know everything, WikiOracle builds a network of trust. Authorities are pointers to external knowledge bases whose entries are imported with scaled certainty — we trust what they trust, to a degree. You choose who to trust and how much. Multiple LLM providers serve as "other minds" whose outputs become evidence, not unquestionable authority. Trust is transitive but attenuated, distributed but structured. A distributed truth network prevents appropriation. Open truth does disrupt business models that depend on information asymmetry, extractive IP capture, and strategic opacity, but that disruption is corrective.
+Instead of one model that claims to know everything, WikiOracle builds a network of trust. Authorities are pointers to external knowledge bases whose entries are imported with scaled certainty -- we trust what they trust, to a degree. You choose who to trust and how much. Multiple LLM providers serve as "other minds" whose outputs become evidence, not unquestionable authority. Trust is transitive but attenuated, distributed but structured. A distributed truth network prevents appropriation. Open truth does disrupt business models that depend on information asymmetry, extractive IP capture, and strategic opacity, but that disruption is corrective.
 
 ## Current Prototype
 

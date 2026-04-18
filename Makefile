@@ -400,7 +400,7 @@ LOCAL_SYNC_OPTS      ?= -av --progress \
 MB_KEY_FILE       ?= $(HOME)/.ssh/id_ed25519_metalbaby
 MB_USER           ?= alec
 MB_HOST           ?= metalbaby.local
-MB_DEST           ?= /c/Users/alec/OneDrive/Desktop/WikiOracle
+MB_DEST           ?= /c/Users/alec/WikiOracle
 MB_RSYNC_PATH     ?= C:/msys64/usr/bin/rsync.exe
 MB_SYNC_OPTS      ?= -rltv --progress \
 		--exclude .venv \

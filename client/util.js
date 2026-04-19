@@ -733,15 +733,15 @@ function _openTruthEditor() {
 
     // Brief description shown above the editor for each truth type
     var _truthDescriptions = {
-      feeling:   "Feeling \u2014 a subjective, non-verifiable claim (not penalizable).",
-      fact:      "Fact \u2014 a disprovable assertion with a degree of truth.",
-      reference: "Reference \u2014 a citation linking to an external source.",
-      and:       "AND \u2014 true when all children are true (min trust).",
-      or:        "OR \u2014 true when any child is true (max trust).",
-      not:       "NOT \u2014 negation of a child entry.",
-      non:       "NON \u2014 non-affirming negation (weakens trust toward zero).",
-      provider:  "Provider \u2014 an LLM API endpoint.",
-      authority: "Authority \u2014 a remote knowledge base (XML URL)."
+      feeling:   "Feeling -- a subjective, non-verifiable claim (not penalizable).",
+      fact:      "Fact -- a disprovable assertion with a degree of truth.",
+      reference: "Reference -- a citation linking to an external source.",
+      and:       "AND -- true when all children are true (min trust).",
+      or:        "OR -- true when any child is true (max trust).",
+      not:       "NOT -- negation of a child entry.",
+      non:       "NON -- non-affirming negation (weakens trust toward zero).",
+      provider:  "Provider -- an LLM API endpoint.",
+      authority: "Authority -- a remote knowledge base (XML URL)."
     };
 
     function _setTruthEditLabel(tag) {

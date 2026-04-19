@@ -112,6 +112,12 @@ WO_USER           ?= bitnami
 WO_HOST           ?= wikiOracle.org
 WO_DEST           ?= /opt/bitnami/wordpress/files/WikiOracle.org/client
 
+# Local development
+LOCAL_KEY_FILE       ?= ~/.ssh/id_ed25519_arbormini
+LOCAL_USER           ?= arogers
+LOCAL_HOST           ?= arbormini.local
+LOCAL_DEST           ?= ~/WikiOracle/
+
 ALERT_EMAIL ?=
 WIKIORACLE_APP ?= bin/wikioracle.py
 
@@ -177,9 +183,7 @@ PDF_CHAPTERS := README.md \
   doc/Config.md \
   doc/State.md \
   doc/UserInterface.md \
-  doc/ProposedLicense.md \
-  basicmodel/doc/Grammar.md \
-  basicmodel/doc/BuddhistParallels.md
+  doc/ProposedLicense.md
 
 
 # --- Help ---------------------------------------------------------------------
@@ -938,8 +942,8 @@ BASIC_XML        ?= data/BasicModel.xml
 BASIC_SHARDS     ?= 1
 BASIC_MAX_DOCS   ?= 10000
 BASIC_VEC_SIZE   ?= 100
-BASIC_EPOCHS     ?= 10
-BASIC_MIN_COUNT  ?= 5
+BASIC_EPOCHS     ?= 1
+BASIC_MIN_COUNT  ?= 10
 BASIC_BATCH_SIZE ?= 32
 BASIC_PORT       ?= 8001
 BASIC_HOST       ?= 127.0.0.1
@@ -951,13 +955,13 @@ basic_data:
 		"from embed import get_shard_paths; paths = get_shard_paths('data/fineweb', $(BASIC_SHARDS)); print(f'{len(paths)} shard(s) ready')"
 
 basic_embedding: basic_data
-	@if [ -f $(BASIC_DIR)/output/embeddings/sentence.pt ]; then \
+	@if [ -f $(BASIC_DIR)/data/BasicModel.kv ]; then \
 		echo "[BasicModel] : Embeddings already exist, skipping (delete to retrain)"; \
 	else \
 		echo "[BasicModel] : Training sentence embeddings..."; \
-		$(BASIC_PYTHON) bin/embed.py train \
+		BASICMODEL_DEVICE=gpu $(BASIC_PYTHON) bin/embed.py train \
 			--config data/sentence.cfg \
-			--output output/embeddings/sentence.pt \
+			--output data/BasicModel.kv \
 			--num-shards $(BASIC_SHARDS) --max-docs $(BASIC_MAX_DOCS) \
 			--vector-size $(BASIC_VEC_SIZE) --epochs $(BASIC_EPOCHS) \
 			--min-count $(BASIC_MIN_COUNT) \
@@ -1049,8 +1053,8 @@ ifeq ($(HOST),local)
 	else \
 		echo "  Server: not running"; \
 	fi
-	@if [ -f $(BASIC_DIR)/output/embeddings/sentence.pt ]; then \
-		echo "  Embeddings: $(BASIC_DIR)/output/embeddings/sentence.pt (exists)"; \
+	@if [ -f $(BASIC_DIR)/data/BasicModel.kv ]; then \
+		echo "  Embeddings: $(BASIC_DIR)/data/BasicModel.kv (exists)"; \
 	else \
 		echo "  Embeddings: not built (run 'make basic_train')"; \
 	fi

@@ -723,6 +723,28 @@ class TestConversationControl(unittest.TestCase):
         all_text = " ".join(m["content"] for m in msgs)
         self.assertIn("distributed truth system", all_text)
 
+    def test_truth_only_beta_uses_custom_truth_context(self):
+        """Custom truth_context should override the built-in fallback."""
+        captured_messages = {}
+
+        def mock_call(pconfig, messages):
+            captured_messages[pconfig["api_url"]] = messages
+            return "<fact>Some fact.</fact>"
+
+        truth_beta = _make_provider_entry("truth", "prov_truth", conversation=False)
+
+        evaluate_providers(
+            [truth_beta],
+            "system", [], "question", "",
+            mock_call,
+            truth_context="TRUTH XML RULES",
+        )
+
+        msgs = captured_messages["http://test/truth"]
+        all_text = " ".join(m["content"] for m in msgs)
+        self.assertIn("TRUTH XML RULES", all_text)
+        self.assertNotIn("distributed truth system", all_text)
+
     def test_conversation_beta_gets_conversation_context(self):
         """Beta with conversation=True gets conversation_context in system message."""
         captured_messages = {}
@@ -742,6 +764,28 @@ class TestConversationControl(unittest.TestCase):
         msgs = captured_messages["http://test/conv"]
         all_text = " ".join(m["content"] for m in msgs)
         self.assertIn("distributed truth system", all_text)
+
+    def test_conversation_beta_uses_custom_conversation_context(self):
+        """Custom conversation_context should override the built-in fallback."""
+        captured_messages = {}
+
+        def mock_call(pconfig, messages):
+            captured_messages[pconfig["api_url"]] = messages
+            return "<conversation>A response.</conversation>"
+
+        conv_beta = _make_provider_entry("conv", "prov_conv", conversation=True)
+
+        evaluate_providers(
+            [conv_beta],
+            "system", [], "question", "",
+            mock_call,
+            conversation_context="CONVERSATION XML RULES",
+        )
+
+        msgs = captured_messages["http://test/conv"]
+        all_text = " ".join(m["content"] for m in msgs)
+        self.assertIn("CONVERSATION XML RULES", all_text)
+        self.assertNotIn("distributed truth system", all_text)
 
     def test_mixed_conversation_betas(self):
         """When betas have different conversation settings, only conversation=True

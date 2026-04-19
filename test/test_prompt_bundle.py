@@ -80,6 +80,14 @@ class TestBuildProviderBundle(unittest.TestCase):
         # Even with empty context, XHTML instruction is present
         self.assertIn("XHTML", bundle.system)
 
+    def test_context_from_query_config(self):
+        """When query_config.context is set, bundle.system uses it."""
+        state = _make_state()
+        qc = {"context": "<div>Return valid XHTML only.</div>"}
+        bundle = build_query(state, "Hi", qc)
+        self.assertIn("Return valid XHTML only.", bundle.system)
+        self.assertIn("XHTML", bundle.system)
+
     def test_rag_sources_populated(self):
         trust = [
             _make_trust_entry("Doc A", 0.9, "Fact A", "t1"),

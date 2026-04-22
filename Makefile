@@ -1152,3 +1152,4 @@ clean:
 
 clean_all: clean
 	rm -rf $(VENV_DIR)
+	rm -rf output/*

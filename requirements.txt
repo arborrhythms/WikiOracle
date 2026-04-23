@@ -1,6 +1,5 @@
 flask>=3.0
 requests>=2.31
-nltk>=3.8
 numpy
 torch
 torchviz

@@ -162,7 +162,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         basic_data basic_smallTrain basic_train basic_remoteTrain basic_test basic_run basic_build \
         basic_start basic_stop basic_restart basic_status basic_logs \
         openclaw_setup openclaw_run openclaw_test \
-        doc_report doc_pdf clean clean_all \
+        doc clean clean_all \
         remote remote_retrieve remote_ssh remote_status remote_logs \
         remote_deploy_launch guard_service_host \
         checkpoint_pull checkpoint_push
@@ -255,7 +255,7 @@ help:
 	@echo ""
 	@echo "Other:"
 	@echo "  make openclaw_setup/run/test"
-	@echo "  make doc_pdf / doc_report"
+	@echo "  make doc"
 	@echo "  make clean / clean_all"
 	@echo ""
 	@echo "Key variables:"
@@ -266,7 +266,7 @@ help:
 
 # ---- All / Service Control ----------------------------------------------------
 
-all: install train test_eval doc_report
+all: install train test_eval
 
 update:
 	$(MAKE) sync HOST=remote
@@ -911,13 +911,6 @@ run_web:
 parse:
 	@"$(SHIM_PYTHON)" bin/parse.py $(SENTENCE)
 
-# --- Documentation ------------------------------------------------------------
-
-doc_report:
-	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
-		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
-		python -m nanochat.report generate
-
 # --- Checkpoint sync (sync_checkpoint_*) ---------------------------------------
 # Use sync_checkpoint_pull before enabling online training to snapshot the
 # current fine-tuning weights.  Use sync_checkpoint_push to restore them.
@@ -1143,12 +1136,16 @@ build_sft:
 	@echo "Preparing SFT corpus $(SFT_INPUT) → $(SFT_OUTPUT) ..."
 	"$(SHIM_PYTHON)" bin/sensation.py sft "$(SFT_INPUT)" "$(SFT_OUTPUT)"
 
-# --- PDF generation -----------------------------------------------------------
+# --- Documentation and PDFs ------------------------------------------------------------
 # Generate a single PDF from all doc/*.md files with README as index.
 
-doc_pdf : WikiOracle.pdf
-TITLE := WikiOracle Documentation
+doc : WikiOracle.pdf
+	cd basicmodel && $(MAKE) $@
+	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
+		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
+		python -m nanochat.report generate
 
+TITLE := WikiOracle Documentation
 WikiOracle.pdf : $(PDF_CHAPTERS)
 	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
 	mkdir -p output

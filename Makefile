@@ -219,8 +219,8 @@ help:
 	@echo "  make train_ssh/status/logs HOST=build"
 	@echo ""
 	@echo "Test / Evaluation (test_*):"
-	@echo "  make test HOST=local         Run WikiOracle tests only"
-	@echo "  make test_all HOST=local     Run WikiOracle + subsystem test_all targets"
+	@echo "  make test HOST=local         Run WikiOracle + BasicModel tests"
+	@echo "  make test_all HOST=local     Run WikiOracle + BasicModel test_all targets"
 	@echo "  make test_unit HOST=local    Run WikiOracle unit tests"
 	@echo "  make test_basicmodel HOST=local Run BasicModel tests"
 	@echo "  make test_eval HOST=local    Evaluate model (ARCH=cpu|gpu)"
@@ -393,6 +393,7 @@ LOCAL_DEST           ?= ~/WikiOracle/
 LOCAL_SYNC_OPTS      ?= -av --progress \
 		--exclude .venv \
 		--exclude .git/ \
+		--exclude .claude/ \
 		--exclude output/ \
 		--exclude /config.xml \
 		--exclude /state.xml \
@@ -410,8 +411,6 @@ MB_SYNC_OPTS      ?= -rltv --progress \
 		--exclude .venv \
 		--exclude .git/ \
 		--exclude .claude/ \
-		--exclude memory/ \
-		--exclude node_modules/ \
 		--exclude openclaw/ \
 		--exclude output/ \
 		--exclude /config.xml \
@@ -877,9 +876,21 @@ run_server:
 run_debug:
 	"$(SHIM_PYTHON)" "$(WIKIORACLE_APP)" --debug
 
-test: test_unit
+test:
+	@status=0; \
+		echo "=== WikiOracle tests ==="; \
+		$(MAKE) test_unit || status=1; \
+		echo "=== BasicModel tests ==="; \
+		$(MAKE) test_basicmodel || status=1; \
+		exit $$status
 
-test_all: test_unit basic_test_all
+test_all:
+	@status=0; \
+		echo "=== WikiOracle tests ==="; \
+		$(MAKE) test_unit || status=1; \
+		echo "=== BasicModel test_all ==="; \
+		$(MAKE) basic_test_all || status=1; \
+		exit $$status
 
 test_unit:
 	PYTHONPATH="$(NANOCHAT_BASE)$(PYTHONPATH_SEP)$(CURDIR)/bin" NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" \

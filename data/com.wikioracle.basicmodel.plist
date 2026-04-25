@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BasicModel — launchd LaunchAgent (macOS, arbormini)
+  Install:
+    cp data/com.wikioracle.basicmodel.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.wikioracle.basicmodel.plist
+  Uninstall:
+    launchctl unload -w ~/Library/LaunchAgents/com.wikioracle.basicmodel.plist
+
+  Binds 127.0.0.1:8001. Reached from wikiOracle.org via the reverse SSH
+  tunnel defined in com.wikioracle.basictunnel.plist.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.wikioracle.basicmodel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/arogers/WikiOracle/basicmodel/.venv/bin/python</string>
+        <string>bin/serve.py</string>
+        <string>-p</string>
+        <string>8001</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/arogers/WikiOracle/basicmodel</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/arogers/WikiOracle/output/basicmodel.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/arogers/WikiOracle/output/basicmodel.log</string>
+</dict>
+</plist>

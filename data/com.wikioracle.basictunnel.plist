@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BasicModel SSH tunnel — launchd LaunchAgent (macOS, arbormini)
+  Install:
+    cp data/com.wikioracle.basictunnel.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.wikioracle.basictunnel.plist
+  Uninstall:
+    launchctl unload -w ~/Library/LaunchAgents/com.wikioracle.basictunnel.plist
+
+  Reverse-forwards wikiOracle.org:8001 → arbormini:8001 so the WikiOracle
+  shim can reach BasicModel at 127.0.0.1:8001. KeepAlive + ThrottleInterval
+  reconnect automatically if the SSH session drops.
+
+  Key requirement: ~/WikiOracle/wikiOracle.pem must be mode 600.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.wikioracle.basictunnel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/ssh</string>
+        <string>-N</string>
+        <string>-o</string><string>ExitOnForwardFailure=yes</string>
+        <string>-o</string><string>ServerAliveInterval=30</string>
+        <string>-o</string><string>ServerAliveCountMax=3</string>
+        <string>-o</string><string>StrictHostKeyChecking=accept-new</string>
+        <string>-i</string><string>/Users/arogers/WikiOracle/wikiOracle.pem</string>
+        <string>-R</string><string>8001:localhost:8001</string>
+        <string>bitnami@wikiOracle.org</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/arogers/WikiOracle</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/arogers/WikiOracle/output/basictunnel.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/arogers/WikiOracle/output/basictunnel.log</string>
+</dict>
+</plist>

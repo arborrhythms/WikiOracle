@@ -85,8 +85,8 @@ These are the primary entry points. For a local WikiOracle + NanoChat stack, use
 
 | Target           | Purpose                          |
 | ---------------- | -------------------------------- |
-| `make test HOST=local`      | Run WikiOracle tests only                  |
-| `make test_all HOST=local`  | Run WikiOracle + subsystem `test_all` targets |
+| `make test HOST=local`      | Run WikiOracle + BasicModel tests          |
+| `make test_all HOST=local`  | Run WikiOracle + BasicModel `test_all` target |
 | `make test_unit HOST=local` | Run unit tests                             |
 | `make test_basicmodel HOST=local` | Run BasicModel tests                 |
 | `make test_eval HOST=local` | Evaluate model (`ARCH=cpu\|gpu`)           |

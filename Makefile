@@ -385,58 +385,43 @@ endif
 # Legacy alias for the old target name.
 train_remote: train_build
 
+EXCLUDE_OPTS = \
+		--exclude .venv \
+		--exclude .git/ \
+		--exclude .claude/ \
+		--exclude output/ \
+		--exclude /config.xml \
+		--exclude /state.xml \
+		--exclude '*.pem' \
+		--exclude '*.pid' \
+		--exclude __pycache__/ \
+		--exclude .DS_Store \
+
+EXCLUDE_WEIGHTS = \
+		--exclude '*.ckpt' \
+		--exclude '*.kv' \
+
+INCLUDE_WEIGHTS = \
+		--include '*/' \
+		--include '*.ckpt' \
+		--include '*.kv' \
+		--exclude '*' \
+
 # Local development
 LOCAL_KEY_FILE       ?= ~/.ssh/id_ed25519_arbormini
 LOCAL_USER           ?= arogers
 LOCAL_HOST           ?= arbormini.local
 LOCAL_DEST           ?= ~/WikiOracle/
-LOCAL_SYNC_OPTS      ?= -av --progress \
-		--exclude .venv \
-		--exclude .git/ \
-		--exclude .claude/ \
-		--exclude output/ \
-		--exclude /config.xml \
-		--exclude /state.xml \
-		--exclude '*.pem' \
-		--exclude '*.pid' \
-		--exclude __pycache__/ \
-		--exclude .DS_Store \
+LOCAL_SYNC_OPTS      ?= -av --progress $(EXCLUDE_OPTS) $(EXCLUDE_WEIGHTS)
+LOCAL_WEIGHT_SYNC_OPTS ?= -av --progress --update --prune-empty-dirs $(INCLUDE_WEIGHTS)
 
-MB_KEY_FILE       ?= $(HOME)/.ssh/id_ed25519_metalbaby
-MB_USER           ?= alec
+MB_KEY_FILE       ?= $(HOME)/.ssh/id_ed25519
+MB_USER           ?= admin
 MB_HOST           ?= metalbaby.local
-MB_DEST           ?= /c/Users/alec/WikiOracle
-MB_RSYNC_PATH     ?= C:/msys64/usr/bin/rsync.exe
-MB_SYNC_OPTS      ?= -rltv --progress \
-		--exclude .venv \
-		--exclude .git/ \
-		--exclude .claude/ \
-		--exclude openclaw/ \
-		--exclude output/ \
-		--exclude /config.xml \
-		--exclude /state.xml \
-		--exclude '*.pem' \
-		--exclude '*.pid' \
-		--exclude __pycache__/ \
-		--exclude .DS_Store \
-
-sync_mb:
-	@echo "=== Syncing app → $(MB_USER)@$(MB_HOST):$(MB_DEST) ==="
-	@test -n "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE is required for HOST=mb" >&2; exit 2; }
-	@test -f "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE not found: $(MB_KEY_FILE)" >&2; exit 2; }
-	rsync $(MB_SYNC_OPTS) --rsync-path=$(MB_RSYNC_PATH) \
-		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
-		'./' '$(MB_USER)@$(MB_HOST):$(MB_DEST)/'
-
-sync_local:
-	@echo "=== Syncing app → $(LOCAL_HOST):$(LOCAL_DEST) ==="
-	rsync $(LOCAL_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
-
-sync_build:
-	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
-
-# Legacy alias: deploy from active remote training instance to WikiOracle.
-sync_remote: sync_build
+MB_DEST           ?= /home/admin/WikiOracle
+#MB_RSYNC_PATH     ?= C:/msys64/usr/bin/rsync.exe
+MB_SYNC_OPTS      ?= -rltv --progress $(EXCLUDE_OPTS) $(EXCLUDE_WEIGHTS)
+MB_WEIGHT_SYNC_OPTS ?= -rltv --progress --update --prune-empty-dirs $(INCLUDE_WEIGHTS)
 
 # Legacy aliases for remote_* targets
 remote: train_build
@@ -456,21 +441,30 @@ WO_RSYNC := rsync -avz -e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10"
 
 sync:
 ifeq ($(HOST),local)
-	@$(MAKE) sync_local
+	@echo "=== Syncing weights ↔ $(LOCAL_HOST):$(LOCAL_DEST) ==="
+	rsync $(LOCAL_WEIGHT_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
+	rsync $(LOCAL_WEIGHT_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)' './'
+	@echo ""
+	@echo "=== Syncing app → $(LOCAL_HOST):$(LOCAL_DEST) ==="
+	rsync $(LOCAL_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
 else ifeq ($(HOST),mb)
-	@$(MAKE) sync_mb
+	@echo "=== Syncing weights ↔ $(MB_USER)@$(MB_HOST):$(MB_DEST) ==="
+	@test -n "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE is required for HOST=mb" >&2; exit 2; }
+	@test -f "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE not found: $(MB_KEY_FILE)" >&2; exit 2; }
+	rsync $(MB_WEIGHT_SYNC_OPTS) \
+		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
+		'./' '$(MB_USER)@$(MB_HOST):$(MB_DEST)/'
+	rsync $(MB_WEIGHT_SYNC_OPTS) \
+		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
+		'$(MB_USER)@$(MB_HOST):$(MB_DEST)/' './'
+	@echo ""
+	@echo "=== Syncing app → $(MB_USER)@$(MB_HOST):$(MB_DEST) ==="
+	rsync $(MB_SYNC_OPTS) \
+		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
+		'./' '$(MB_USER)@$(MB_HOST):$(MB_DEST)/'
 else ifeq ($(HOST),remote)
 	@echo "=== Syncing app → $(WO_HOST):$(WO_DEST) ==="
-	$(WO_RSYNC) --delete \
-		--exclude .venv \
-		--exclude .git/ \
-		--exclude output/ \
-		--exclude nanochat/ \
-		--exclude /config.xml \
-		--exclude state.xml \
-		--exclude '*.pem' \
-		--exclude __pycache__/ \
-		--exclude .DS_Store \
+	$(WO_RSYNC) --delete $(EXCLUDE_OPTS) \
 		. $(WO_USER)@$(WO_HOST):$(WO_DEST)/
 	@echo ""
 	@echo "=== Syncing checkpoints (bidirectional) ==="
@@ -487,7 +481,7 @@ else ifeq ($(HOST),remote)
 		sudo systemctl daemon-reload"
 	@echo "Sync complete. Run 'make up HOST=remote' to restart services."
 else ifeq ($(HOST),build)
-	@$(MAKE) sync_build
+	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
 else
 	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=mb, HOST=remote, or HOST=build)
 endif

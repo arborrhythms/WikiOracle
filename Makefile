@@ -210,6 +210,7 @@ help:
 	@echo ""
 	@echo "Training (train_*):"
 	@echo "  make train HOST=local   Train BasicModel (embeddings + model)"
+	@echo "  make train HOST=mb      Sync to MetalBaby and train there (MODEL=data/MM_5M.xml default)"
 	@echo "  make train HOST=build   Launch remote GPU (Lambda/EC2), start training"
 	@echo "  make nano_train         Full NanoChat pipeline: data + tok + pretrain + finetune"
 	@echo "  make train_pretrain     Pretrain NanoChat base model (ARCH=cpu|gpu)"
@@ -815,14 +816,34 @@ endif
 train:
 ifeq ($(HOST),local)
 	@$(MAKE) train_local
+else ifeq ($(HOST),mb)
+	@$(MAKE) train_mb
 else ifeq ($(HOST),build)
 	@$(MAKE) train_build HOST=build
 else
-	$(error Invalid HOST '$(HOST)'; use HOST=local or HOST=build)
+	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=mb, or HOST=build)
 endif
 
 train_local: basic_train
 	@echo "BasicModel training pipeline complete."
+
+# train HOST=mb: sync app + weights to MetalBaby, then SSH-run the
+# BasicModel training target there. Caller passes MODEL=data/<config>.xml
+# to pick the model; defaults to data/MM_5M.xml.
+MB_TRAIN_MODEL ?= $(if $(MODEL),$(MODEL),data/MM_5M.xml)
+train_mb:
+	@test -n "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE is required for HOST=mb" >&2; exit 2; }
+	@test -f "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE not found: $(MB_KEY_FILE)" >&2; exit 2; }
+	@$(MAKE) sync HOST=mb
+	@echo ""
+	@echo "=== Running BasicModel train on $(MB_USER)@$(MB_HOST) ($(MB_TRAIN_MODEL)) ==="
+	ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE) $(MB_USER)@$(MB_HOST) \
+		"cd $(MB_DEST) && $(MAKE) -C basicmodel train MODEL=$(MB_TRAIN_MODEL)"
+	@echo ""
+	@echo "=== Syncing weights back from $(MB_USER)@$(MB_HOST) ==="
+	rsync $(MB_WEIGHT_SYNC_OPTS) \
+		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
+		'$(MB_USER)@$(MB_HOST):$(MB_DEST)/' './'
 
 nano_train: build_data build_tokenizer train_pretrain train_finetune
 	@echo "$(ARCH) NanoChat training pipeline complete."

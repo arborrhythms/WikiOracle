@@ -1172,7 +1172,4 @@ WikiOracle.pdf : $(PDF_CHAPTERS)
 clean:
 	find $(NANOCHAT_DIR) -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find $(NANOCHAT_DIR) -name '*.pyc' -delete 2>/dev/null || true
-
-clean_all: clean
-	rm -rf $(VENV_DIR)
 	rm -rf output/*

@@ -421,7 +421,7 @@ MB_USER           ?= admin
 MB_HOST           ?= metalbaby.local
 MB_DEST           ?= /home/admin/WikiOracle
 #MB_RSYNC_PATH     ?= C:/msys64/usr/bin/rsync.exe
-MB_SYNC_OPTS      ?= -rltv --progress $(EXCLUDE_OPTS) $(EXCLUDE_WEIGHTS)
+MB_SYNC_OPTS      ?= -rltv --delete --progress $(EXCLUDE_OPTS) $(EXCLUDE_WEIGHTS)
 MB_WEIGHT_SYNC_OPTS ?= -rltv --progress --update --prune-empty-dirs $(INCLUDE_WEIGHTS)
 
 # Legacy aliases for remote_* targets

@@ -160,9 +160,9 @@ as regular TruthSet entries; no special API is needed.
 
 See [Config.md](./Config.md) for the `LuminosityWeight`,
 `UniversalityWeight`, and `TruthLoss` parameters.
-See [Grammar.md](../basicmodel/doc/Grammar.md) for the ternary LIFT rule
+See [Language.md](../basicmodel/doc/Language.md) for the ternary LIFT rule
 that identifies subject, verb, and object. See
-[Reasoning](../basicmodel/doc/reasoning.md) Section TruthLoss for the full
+[Reasoning.md](../basicmodel/doc/Reasoning.md) Section TruthLoss for the full
 specification.
 
 ## Truth improves ethics

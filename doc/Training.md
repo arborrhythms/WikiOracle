@@ -238,7 +238,7 @@ and training happen after the response is delivered.
 
 **Stage 3 -- Update server TruthSet**
 
-5. Filter client truth per the Entanglement Policy (doc/Entanglement.md):
+5. Filter client truth per the Entanglement Policy ([Freedom.md](./Freedom.md)):
    * When `store_concrete` is false (default), only universal
      facts pass through (`filter_knowledge_only()`).
    * Entries with identifiable content are always filtered regardless
@@ -275,7 +275,7 @@ defaults to 1000 in the chat config.
 8. Strip `<feeling>` blocks from training messages
    (`strip_feelings_from_training()` in `bin/sensation.py`) -- feelings
    must never train model parameters (Entanglement policy,
-   doc/Entanglement.md).
+   [Freedom.md](./Freedom.md)).
 9. Call NanoChat's online training endpoint (`POST /train`) with the
    tagged prompt, DegreeOfTruth, and training hyperparameters.
 
@@ -546,7 +546,7 @@ capture.  Whether to store them is a user choice controlled by
 Zero-Knowledge / Selective Disclosure principles.  See
 `filter_knowledge_only()` in `bin/truth.py` and
 `detect_identifiability()` for PII detection.  See
-doc/Entanglement.md for the full policy.
+[Freedom.md](./Freedom.md) for the full policy.
 
 The server TruthSet includes the user GUID as a trust entry, so the
 server can track per-user trust alongside factual claims.

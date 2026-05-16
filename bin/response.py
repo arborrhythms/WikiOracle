@@ -2165,7 +2165,7 @@ def process_chat(
             dot = compute_degree_of_truth(server_truth, client_truth)
 
             # Stage 3: merge client truth into server truth
-            # Filter per Entanglement Policy (doc/Entanglement.md):
+            # Filter per Entanglement Policy (doc/Freedom.md):
             # - When store_concrete is false (default), only universal
             #   facts persist to the TruthSet.
             # - Identifiable content is always filtered regardless.

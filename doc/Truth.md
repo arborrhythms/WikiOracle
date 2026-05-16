@@ -98,16 +98,12 @@ Such a system may disrupt business models that depend on opacity or information 
 
 WikiOracle attempts to achieve a distributed truth, and shares much of the design philosophy of Wikipedia:
 
-* **Radical Accessibility** -- Wikipedia is freely accessible worldwide and allows anyone to both read and contribute without institutional gatekeeping.
-
-* **Citation Norms** -- Content presented as true must be verifiable with the trust-set supplied by the user.
-
-* **Decentralized Governance** -- Dispute resolution is handled by a distributed volunteer community arguing about what is true.
-
-* **Anti-Monetization Bias** -- As a nonprofit project it should operate without advertising-driven content incentives.
-
-* **Self-Correcting Dynamics** -- Errors and vandalism can be rapidly identified and corrected, which causes their sources to be distrusted. This requires that all data for training the weights remains visible for later error correction and modification.
-
-* **Cultural Legitimacy** -- WikiOracle is intended to function as a widely accepted public reference layer and shared knowledge commons which prevents surveillance and advertising.
-
-* **Open Knowledge Model** -- It demonstrates that large-scale, decentralized, norm-governed collaboration can produce a coherent and durable knowledge commons.
+| Principle                  | What it means                                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Radical Accessibility      | Freely accessible worldwide; anyone can both read and contribute without institutional gatekeeping.                                                                      |
+| Citation Norms             | Content presented as true must be verifiable against the trust-set supplied by the user.                                                                                  |
+| Decentralized Governance   | Dispute resolution is handled by a distributed volunteer community arguing about what is true.                                                                            |
+| Anti-Monetization Bias     | A nonprofit posture: operate without advertising-driven content incentives.                                                                                              |
+| Self-Correcting Dynamics   | Errors and vandalism are rapidly identified and corrected; their sources lose trust. Requires that training data stays visible for later error correction.                |
+| Cultural Legitimacy        | Functions as a widely accepted public reference layer and shared knowledge commons which prevents surveillance and advertising.                                          |
+| Open Knowledge Model       | Demonstrates that large-scale, decentralized, norm-governed collaboration can produce a coherent and durable knowledge commons.                                          |

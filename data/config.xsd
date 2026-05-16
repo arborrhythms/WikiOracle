@@ -162,7 +162,7 @@
             Disclosure principles.  Concrete facts always train
             weights regardless of this setting; the fact/feeling
             distinction (not universal/concrete) is the privacy
-            boundary.  See doc/Ethics.md and doc/Entanglement.md.
+            boundary.  See doc/Ethics.md and doc/Freedom.md.
           </xs:documentation>
         </xs:annotation>
       </xs:element>

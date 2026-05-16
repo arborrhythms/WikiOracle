@@ -305,7 +305,7 @@ At runtime, `bin/state.py` normalizes that XML into conversation nodes with
 
 ## Schema
 
-The state schema is (`data/state.xsd`)[state.xsd].
+The state schema is [`data/state.xsd`](../data/state.xsd).
 
 ## Data model
 

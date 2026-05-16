@@ -33,66 +33,80 @@ It must:
 * Preserve truth as a shared human resource.
 
 Therefore:
-1. **Truthfulness over fluency** Prefer grounded, falsifiable, uncertain, or incomplete answers over smooth, unsupported ones.
-2. **Truth is not consensus** A single, averaged narrative is not the goal. The system must preserve real disagreement where it exists.
-3. **Plural points of view** The system must support multiple Points of View (POVs), each with its own trust map and standards of evidence.
-4. **Transparency by default** Claims, confidence, provenance, and update rationales must be inspectable and reproducible.
-5. **Reversibility and accountability** High-impact changes must be attributable, testable, and reversible.
-6. **Public benefit and anti-capture** No single actor (company, state, foundation, or maintainer group) should be able to silently become the epistemic root for everyone else.
+
+| Principle                          | Implication                                                                                                |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Truthfulness over fluency          | Prefer grounded, falsifiable, uncertain, or incomplete answers over smooth, unsupported ones.              |
+| Truth is not consensus             | A single, averaged narrative is not the goal. The system must preserve real disagreement where it exists.  |
+| Plural points of view              | Support multiple POVs, each with its own trust map and standards of evidence.                              |
+| Transparency by default            | Claims, confidence, provenance, and update rationales must be inspectable and reproducible.                |
+| Reversibility and accountability   | High-impact changes must be attributable, testable, and reversible.                                        |
+| Public benefit and anti-capture    | No single actor (company, state, foundation, or maintainer group) becomes the epistemic root for others.   |
 
 ## Truth Primitives (What the System Is Allowed to Believe)
 
-WikiOracle's truth layer is composed of explicit, user-visible primitives stored in state, all of which have some Degree of Trust (except for Feelings):
+WikiOracle's truth layer is composed of explicit, user-visible primitives stored in state. All carry a Degree of Trust on $[-1, +1]$ except feelings, which are orthogonal to the truth lattice.
 
+| Primitive       | Trust value      | Source                              | Role in reasoning                                                            |
+| --------------- | ---------------- | ----------------------------------- | ---------------------------------------------------------------------------- |
+| **Feeling**     | none (orthogonal)| user / provider                     | Non-falsifiable direct perception. Influences evaluation; never trains.      |
+| **Fact**        | $[-1, +1]$       | user / provider / authority         | Atomic proposition with Fuzzy Kleene certainty (believed / unknown / disbelieved). |
+| **Reference**   | $[-1, +1]$       | user                                | Pointer to an external object (URL).                                         |
+| **Operator**    | derived          | user / engine                       | Explicit computed relationship: `and`, `or`, `not`, `non` (Strong Kleene).   |
+| **Authority**   | $[-1, +1]$       | user                                | Pointer to a remote knowledge base (`state.xml`, ORCID, DID); transitive trust, attenuated. |
+| **Provider**    | $[-1, +1]$       | user                                | External AI used as a tool ("other mind"); its outputs become evidence, not authority. |
 
-1. **Feelings**: Feelings are non-falsifiable (direct) perceptions of reality.
-2. **Facts**: atomic propositions, citations, or evidence. They carry a `certainty` in `[-1..0..+1]` (Fuzzy Kleene: believed, unknown, disbelieved).
-3. **References**: pointers to external object (URLs).
-4. **Operators**: explicit computed relationships: AND, OR, NOT, NON.
-5. **Authorities**: pointers to external knowledge bases (remote `state.xml` files, ORCIDs, or DIDs): we trust what they trust, to some degree.
-6. **Providers**: external AIs used as tools ("other minds") whose outputs become evidence, not unquestionable authority.
-
-All truth computations must remain legible as operations over these primitives. If the system "knows" something, it should be possible to point to what it is grounded in; otherwise it is merely intuition. See [Truth.md](./Truth.md)
+All truth computations must remain legible as operations over these primitives. If the system "knows" something, it should be possible to point to what it is grounded in; otherwise it is merely intuition. See [Truth.md](./Truth.md).
 
 ## Plurality, Dispute, and Minority Preservation
 
-1. **POV-conditioned conclusions** When different POVs trust different sources, the system should be able to present conclusions conditioned on the selected POV/trust map.
-2. **Overlaps are valuable** When independent POVs converge on the same claim, that agreement should be surfaced explicitly as a robustness signal.
-3. **Disputes stay visible** Where serious disagreement exists among credible sources or POVs, the system must represent the dispute rather than smoothing it away.
-4. **Minority protection** Evidence-supported minority viewpoints must not be excluded solely by majority preference, institutional pressure, or convenience.
+| Rule                          | Mechanism                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| POV-conditioned conclusions   | Present conclusions conditioned on the selected POV / trust map.                                       |
+| Overlaps are valuable         | When independent POVs converge on a claim, surface the agreement explicitly as a robustness signal.    |
+| Disputes stay visible         | Where serious disagreement exists, represent the dispute rather than smoothing it away.                |
+| Minority protection           | Evidence-supported minority viewpoints must not be excluded by majority preference or convenience.     |
 
 ## Independence From Any Single AI Vendor
 
 WikiOracle may use proprietary or open models as providers, but:
 
-1. **No provider is privileged** Data is revocable and belongs to the client.
-2. **Providers are evidence generators** Provider outputs should be treated as non-authoritative contributions with a trust value like any other entry.
-3. **Replaceability is required** The system must remain operable if any single provider becomes unavailable, hostile, or compromised.
+| Rule                          | What it guarantees                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| No provider is privileged     | Data is revocable and belongs to the client.                                                           |
+| Providers are evidence sources| Provider outputs are non-authoritative contributions with a trust value like any other entry.          |
+| Replaceability is required    | The system remains operable if any single provider becomes unavailable, hostile, or compromised.       |
 
 ## Authority Delegation Must Be Bounded and Secure
 
 Authority entries exist to enable decentralized truth (a network of trust) without collapsing into a single global oracle.
 
-1. **Trust decreases with every hop** Importing an authority must not recursively fetch authorities of authorities.
-2. **Certainty scaling** Imported claims must be scaled by the authority's certainty (trust is transitive but attenuated).
-3. **Namespaced IDs** Imported entries must be namespaced to prevent collisions and to preserve provenance.
-4. **Explicit source selection** Users (or POV definitions) must explicitly choose which authorities to trust; there is no implicit global root.
-5. **Operational safety** Fetching and caching authorities must be rate-limited and size-limited, and restricted to safe URL schemes.
+| Constraint                          | Detail                                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Trust decreases with every hop      | Importing an authority must not recursively fetch authorities of authorities.                     |
+| Certainty scaling                   | Imported claims are scaled by the authority's certainty (trust is transitive but attenuated).     |
+| Namespaced IDs                      | Imported entries are namespaced to prevent collisions and preserve provenance.                    |
+| Explicit source selection           | Users (or POV definitions) explicitly choose which authorities to trust; no implicit global root. |
+| Operational safety                  | Fetching and caching is rate-limited, size-limited, and restricted to safe URL schemes.           |
 
 ## Local-First Data and Auditability
 
-1. **Client-owned Particular State** The default posture is local-first: user conversation state and news lives on the user's machine and are portable.
-2. **Server-owned Universal State** A shared hosted service accumulates only anonymized knowledge in a TruthSet which serves as a trusted source of facts.
+| Tier                          | Posture                                                                                            |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| Client-owned Particular State | Default local-first: user conversation state and news live on the user's machine and are portable. |
+| Server-owned Universal State  | A shared service accumulates only anonymized knowledge as a TruthSet of trusted facts.             |
 
-See [PrivacyAndSecurity.md](./PrivacyAndSecurity.md)
+See [PrivacyAndSecurity.md](./PrivacyAndSecurity.md).
 
 ## Safety as Freedom, Empathy, and Truth
 
 WikiOracle's truthfulness effort must not trade away human welfare or agency:
 
-1. **Freedom:** increase distributed agency, not centralized leverage. AI must not be used to transgress the freedom of others. Data sovereignty and freedom to use the platform are non-negotiable.
-2. **Empathy:** represent the concerns of all creatures, not just the operator. Preserve dignity, minimize harm, and make uncertainty explicit. De-emphasize egocentric optimization that externalizes costs.
-3. **Truth:** keep truth auditable and non-proprietary; do not convert epistemic advantage into coercive control. The truth is not a commodity: data formats, tests, and willingly shared truth must be open and reproducible. Make identification and surveillance impossible. 
+| Pillar    | Commitment                                                                                                                                                                                |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Freedom   | Increase distributed agency, not centralized leverage. AI must not be used to transgress the freedom of others. Data sovereignty is non-negotiable.                                       |
+| Empathy   | Represent the concerns of all creatures, not just the operator. Preserve dignity, minimize harm, and make uncertainty explicit. De-emphasize egocentric optimization that externalizes costs. |
+| Truth     | Keep truth auditable and non-proprietary; do not convert epistemic advantage into coercive control. Open data formats, open tests, willingly shared truth. Make surveillance impossible.  |
 
 
 See [Freedom.md](./Freedom.md), [Ethics.md](./Ethics.md), and [Truth.md](./Truth.md).

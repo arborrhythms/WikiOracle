@@ -2,22 +2,6 @@
 
 ## Entanglement Policy
 
-To avoid **worldline entanglement**, the system separates knowledge
-into three channels, each with a different persistence policy:
-
-| Data type        | TruthSet     | Train weights | Session only |
-| ---------------- | ------------ | ------------- | ------------ |
-| universal facts  | $\checkmark$ | $\checkmark$  | $\checkmark$ |
-| particular facts | optional     | $\checkmark$  | $\checkmark$ |
-| feelings         | $\times$     | $\times$      | $\checkmark$ |
-
-This preserves empirical learning while preventing historical worldline
-capture. The system **learns from events but never stores worldline
-histories**.
-
-
-## Entanglement Policy
-
 **No spacetime particulars $\to$ no worldline capture**
 
 | Data type        | TruthSet     | Train weights | Session only |
@@ -36,8 +20,7 @@ TruthSet when `store_concrete` is true. Feelings are session-only.
 The result: the system **learns from events but never stores worldline
 histories** (unless the user explicitly opts in).
 
-See [Entanglement.md](./Entanglement.md) for the full policy,
-[Config.md](./Config.md) for the `store_concrete` setting that controls particular-fact persistence, and
+See [Config.md](./Config.md) for the `store_concrete` setting that controls particular-fact persistence, and
 [Training.md](./Training.md) for the online training pipeline.
 
 ### Why particular facts always train weights

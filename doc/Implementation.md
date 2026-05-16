@@ -4,6 +4,8 @@
 
 WikiOracle is a local-first Flask shim that sits between a browser UI and one or more upstream LLM providers. Conversations are stored as a hierarchical tree -- each conversation is an ordered list of messages that may branch into child conversations.
 
+![WikiOracle Architecture](diagrams/wikioracle_architecture.svg)
+
 ```
 Browser  --HTTP-->  wikioracle.py  --HTTP-->  Upstream LLM
                         |

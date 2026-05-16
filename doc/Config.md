@@ -14,7 +14,7 @@ Runtime parameters. These values serve as defaults and are typically overridden 
 | -------------- | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `server_name`  | string  | `"WikiOracle"` | Human-readable display name for this server instance.                                                                                |
 | `server_id`    | string  | `"wikioracle"` | Stable identifier for this server instance. Used as the `source` field in server truth entries returned to the client in debug mode. |
-| `stateless`    | boolean | `false`        | Stateless mode -- no disk writes. Equivalent to `--stateless` CLI flag. See [Entanglement.md](./Entanglement.md).                     |
+| `stateless`    | boolean | `false`        | Stateless mode -- no disk writes. Equivalent to `--stateless` CLI flag. See [Freedom.md](./Freedom.md) Section Entanglement Policy.   |
 | `url_prefix`   | string  | `""`           | URL path prefix prepended to all routes (e.g. `/chat`) for reverse-proxy deployments. Equivalent to `--url-prefix`.                  |
 | `truthset`     | section | --              | TruthSet policy settings. See [Truthset](#truthset) below.                                                                           |
 | `evaluation`   | section | --              | LLM inference defaults. See [Evaluation](#evaluation) below.                                                                         |

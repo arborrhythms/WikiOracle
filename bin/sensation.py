@@ -43,7 +43,8 @@ Facts are classified by kind:
 
 The server persists only knowledge facts.  News facts are session-only
 to avoid worldline capture (identity collapse through spatiotemporal
-observation).  See doc/BuddhistLogic.md for the philosophical basis.
+observation).  See doc/Freedom.md (Entanglement Policy) and
+basicmodel/doc/BuddhistParallels.md for the philosophical basis.
 
 This is deliberately conservative: hedged claims ("might be"),
 questions, and subjective markers ("I think") override IS detection
@@ -450,7 +451,7 @@ def strip_feelings_from_training(messages: list[dict]) -> list[dict]:
     """Remove ``<feeling>`` blocks from training messages.
 
     Feelings must not be used to train model parameters (Entanglement
-    policy, doc/Entanglement.md).  This function strips all
+    policy, doc/Freedom.md).  This function strips all
     ``<feeling>...</feeling>`` and ``<feeling .../>`` blocks from
     message content.  Messages that become empty after stripping are
     removed entirely.
@@ -484,7 +485,7 @@ def preprocess_training_example(
 
     Returns the same messages list shape with XML tags in content,
     with ``<feeling>`` blocks stripped — feelings must not train
-    model parameters (doc/Entanglement.md).
+    model parameters (doc/Freedom.md).
 
     The degree_of_truth is NOT used for trust assignment here — it
     controls learning rate scaling in nanochat_ext.py.  Trust values

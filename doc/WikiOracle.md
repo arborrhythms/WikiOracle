@@ -1,6 +1,8 @@
 # WikiOracle
 Revision: 2026.02.27
 
+![WikiOracle Architecture: wikioracle.org production deployment](diagrams/wikioracle_architecture.svg)
+
 ## Architectural Overview
 
 The system is governed by two file types:
@@ -86,7 +88,7 @@ The result of that is a TruthSet that consists only of Direct Truths.
 
 All truths (except Feelings) have a Degree of Trust in the range [-1, 1], where -1 is fully untrusted, 0 is unknown, and 1 is fully trusted. 
 Feelings are always trusted, but do not count as evidence when deliberating.
-So computation over these truths looks like a network of trust that involves various sources and our own intuitions (whihc count, even though they cant provide evidence). 
+So computation over these truths looks like a network of trust that involves various sources and our own intuitions (which count, even though they can't provide evidence).
 
 Each of those facts is then compared to the TruthSet stored by the server.
 

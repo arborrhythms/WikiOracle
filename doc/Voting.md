@@ -74,9 +74,11 @@ Voters are encouraged to express *only* truth statements in their responses. `<f
 
 The recognized truth types in a vote response are:
 
-* **`<fact>`** -- a verifiable claim. Lying (asserting facts that contradict available evidence) is penalised by reducing the provider's trust value. Because each `<provider>` entry carries a trust score, repeated dishonesty degrades a provider's influence on future votes.
-* **`<feeling>`** -- a subjective, non-verifiable statement (opinion, intuition, preference). Not falsifiable, not penalizable, but carries no evidential weight.
-* **`<reference>`** -- a citation to an external source. Verifiable by the alpha or any downstream consumer.
+| Tag           | Verifiable? | Penalisable?       | Evidential weight | Notes                                                                                        |
+| ------------- | ----------- | ------------------ | ----------------- | -------------------------------------------------------------------------------------------- |
+| `<fact>`      | yes         | yes (trust drops)  | yes               | Lying (asserting facts that contradict available evidence) reduces the provider's trust score. Repeated dishonesty degrades influence on future votes. |
+| `<feeling>`   | no          | no                 | none              | Subjective, non-verifiable (opinion, intuition, preference). Not falsifiable.                |
+| `<reference>` | yes         | only if fabricated | yes (transitive)  | Citation to an external source; verifiable by the alpha or any downstream consumer.          |
 
 ```xml
 <fact id="vote_01" trust="0.9" title="Socrates was mortal">

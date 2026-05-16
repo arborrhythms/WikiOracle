@@ -1,0 +1,302 @@
+<svg width='1280' height='960' xmlns='http://www.w3.org/2000/svg' font-family='Georgia, serif' viewBox='0 0 1280 960'>
+  <rect width='1280' height='960' fill='#fafafa'/>
+  <defs>
+    <marker id='arr' markerWidth='8' markerHeight='5.6' refX='7' refY='2.8' orient='auto'>
+      <polygon points='0 0, 8 2.8, 0 5.6' fill='#2c3e50'/>
+    </marker>
+    <marker id='arrb' markerWidth='8' markerHeight='5.6' refX='7' refY='2.8' orient='auto'>
+      <polygon points='0 0, 8 2.8, 0 5.6' fill='#2980b9'/>
+    </marker>
+    <marker id='arrg' markerWidth='8' markerHeight='5.6' refX='7' refY='2.8' orient='auto'>
+      <polygon points='0 0, 8 2.8, 0 5.6' fill='#27ae60'/>
+    </marker>
+    <marker id='arro' markerWidth='8' markerHeight='5.6' refX='7' refY='2.8' orient='auto'>
+      <polygon points='0 0, 8 2.8, 0 5.6' fill='#ca6f1e'/>
+    </marker>
+    <marker id='arrp' markerWidth='8' markerHeight='5.6' refX='7' refY='2.8' orient='auto'>
+      <polygon points='0 0, 8 2.8, 0 5.6' fill='#8e44ad'/>
+    </marker>
+  </defs>
+
+  <!-- ═══ Title bar ═══ -->
+  <rect x='0' y='0' width='1280' height='50' fill='#2c3e50'/>
+  <text x='640' y='32' text-anchor='middle' font-size='20' fill='white' font-weight='bold'>WikiOracle Architecture: wikioracle.org production deployment</text>
+
+  <!-- ═══ LEFT COLUMN: Client + Apache + Flask + Providers ═══ -->
+
+  <!-- Browser / Client -->
+  <rect x='40' y='70' width='720' height='105' fill='#d6eaf8' stroke='#2980b9' stroke-width='2' rx='8'/>
+  <rect x='40' y='70' width='720' height='28' fill='#2980b9' rx='8'/>
+  <rect x='40' y='84' width='720' height='14' fill='#2980b9'/>
+  <text x='400' y='89' text-anchor='middle' font-size='14' fill='white' font-weight='bold'>Browser  —  client/ single-page app</text>
+  <text x='400' y='118' text-anchor='middle' font-size='12' fill='#2c3e50'>index.html  •  wikioracle.js (state, render, drag/menu)  •  tree.js (D3 hierarchy + DAG traversal)</text>
+  <text x='400' y='137' text-anchor='middle' font-size='12' fill='#2c3e50'>state.js  •  config.js (sessionStorage)  •  util.js (settings, validators, escapeHtml)  •  query.js (fetch shim)</text>
+  <text x='400' y='160' text-anchor='middle' font-size='11' fill='#626567' font-style='italic'>Layouts: horizontal / vertical  •  Themes: system / light / dark  •  CSP: enforced (no inline scripts)</text>
+
+  <!-- HTTPS arrow down to Apache -->
+  <line x1='400' y1='176' x2='400' y2='205' stroke='#2980b9' stroke-width='2' marker-end='url(#arrb)'/>
+  <text x='414' y='194' text-anchor='start' font-size='11' fill='#2980b9' font-style='italic'>HTTPS :443  •  Bearer token  •  same-origin CORS</text>
+
+  <!-- Apache reverse proxy -->
+  <rect x='40' y='208' width='720' height='62' fill='#d4efdf' stroke='#1a7a38' stroke-width='2' rx='8'/>
+  <rect x='40' y='208' width='720' height='28' fill='#1a7a38' rx='8'/>
+  <rect x='40' y='222' width='720' height='14' fill='#1a7a38'/>
+  <text x='400' y='227' text-anchor='middle' font-size='14' fill='white' font-weight='bold'>wikioracle.org  —  Apache 2.4 reverse proxy</text>
+  <text x='400' y='258' text-anchor='middle' font-size='12' fill='#2c3e50'>TLS termination (Let's Encrypt)  •  ProxyPass /chat → 127.0.0.1:8888  •  static asset cache</text>
+
+  <line x1='400' y1='270' x2='400' y2='300' stroke='#1a7a38' stroke-width='2' marker-end='url(#arrg)'/>
+  <text x='414' y='289' text-anchor='start' font-size='11' fill='#1a7a38' font-style='italic'>HTTP loopback :8888  •  bin/wo CLI bypass for OpenClaw</text>
+
+  <!-- Flask shim (the heart) -->
+  <rect x='40' y='303' width='720' height='370' fill='#f5eef8' stroke='#8e44ad' stroke-width='2' rx='8'/>
+  <rect x='40' y='303' width='720' height='28' fill='#8e44ad' rx='8'/>
+  <rect x='40' y='317' width='720' height='14' fill='#8e44ad'/>
+  <text x='400' y='322' text-anchor='middle' font-size='14' fill='white' font-weight='bold'>bin/wikioracle.py  —  Flask shim (stateless: no disk writes)</text>
+
+  <!-- Endpoints box -->
+  <rect x='56' y='342' width='332' height='110' fill='white' stroke='#aab7b8' stroke-width='1' rx='4'/>
+  <text x='222' y='358' text-anchor='middle' font-size='12' fill='#8e44ad' font-weight='bold'>HTTP endpoints</text>
+  <text x='66' y='378' text-anchor='start' font-size='11' fill='#2c3e50' font-family='Menlo, monospace'>GET  /health        liveness</text>
+  <text x='66' y='393' text-anchor='start' font-size='11' fill='#2c3e50' font-family='Menlo, monospace'>GET  /server_info   stateless flag + url_prefix</text>
+  <text x='66' y='408' text-anchor='start' font-size='11' fill='#2c3e50' font-family='Menlo, monospace'>GET  /bootstrap     state + config seed</text>
+  <text x='66' y='423' text-anchor='start' font-size='11' fill='#2c3e50' font-family='Menlo, monospace'>GET  /config        provider metadata (has_key only)</text>
+  <text x='66' y='438' text-anchor='start' font-size='11' fill='#2c3e50' font-family='Menlo, monospace'>POST /chat          query dispatch + voting + train</text>
+
+  <!-- Pipeline summary box -->
+  <rect x='400' y='342' width='344' height='110' fill='white' stroke='#aab7b8' stroke-width='1' rx='4'/>
+  <text x='572' y='358' text-anchor='middle' font-size='12' fill='#8e44ad' font-weight='bold'>POST /chat pipeline (response.py)</text>
+  <text x='572' y='376' text-anchor='middle' font-size='11' fill='#2c3e50'>1. static_truth(state.truth)  →  facts/feelings/refs</text>
+  <text x='572' y='392' text-anchor='middle' font-size='11' fill='#2c3e50'>2. dynamic_truth: operators, authorities, providers</text>
+  <text x='572' y='408' text-anchor='middle' font-size='11' fill='#2c3e50'>3. Voting fan-out to beta providers (call-chain guard)</text>
+  <text x='572' y='424' text-anchor='middle' font-size='11' fill='#2c3e50'>4. Alpha synthesis  →  XHTML response</text>
+  <text x='572' y='440' text-anchor='middle' font-size='11' fill='#2c3e50'>5. Stages 2-4: DoT, merge, sensation, /train</text>
+
+  <!-- Module boxes -->
+  <rect x='56' y='464' width='160' height='90' fill='#e8daef' stroke='#8e44ad' stroke-width='1.5' rx='4'/>
+  <text x='136' y='481' text-anchor='middle' font-size='12' fill='#5b2c6f' font-weight='bold'>response.py</text>
+  <text x='136' y='498' text-anchor='middle' font-size='10' fill='#2c3e50'>chat pipeline</text>
+  <text x='136' y='513' text-anchor='middle' font-size='10' fill='#2c3e50'>provider coord</text>
+  <text x='136' y='528' text-anchor='middle' font-size='10' fill='#2c3e50'>voting fan-out</text>
+  <text x='136' y='543' text-anchor='middle' font-size='10' fill='#2c3e50'>online training</text>
+
+  <rect x='226' y='464' width='160' height='90' fill='#e8daef' stroke='#8e44ad' stroke-width='1.5' rx='4'/>
+  <text x='306' y='481' text-anchor='middle' font-size='12' fill='#5b2c6f' font-weight='bold'>truth.py</text>
+  <text x='306' y='498' text-anchor='middle' font-size='10' fill='#2c3e50'>Strong Kleene logic</text>
+  <text x='306' y='513' text-anchor='middle' font-size='10' fill='#2c3e50'>and/or/not/non</text>
+  <text x='306' y='528' text-anchor='middle' font-size='10' fill='#2c3e50'>authority fetch</text>
+  <text x='306' y='543' text-anchor='middle' font-size='10' fill='#2c3e50'>PII detection</text>
+
+  <rect x='396' y='464' width='160' height='90' fill='#e8daef' stroke='#8e44ad' stroke-width='1.5' rx='4'/>
+  <text x='476' y='481' text-anchor='middle' font-size='12' fill='#5b2c6f' font-weight='bold'>state.py</text>
+  <text x='476' y='498' text-anchor='middle' font-size='10' fill='#2c3e50'>XML I/O</text>
+  <text x='476' y='513' text-anchor='middle' font-size='10' fill='#2c3e50'>tree operations</text>
+  <text x='476' y='528' text-anchor='middle' font-size='10' fill='#2c3e50'>atomic write</text>
+  <text x='476' y='543' text-anchor='middle' font-size='10' fill='#2c3e50'>collision-safe merge</text>
+
+  <rect x='566' y='464' width='178' height='90' fill='#e8daef' stroke='#8e44ad' stroke-width='1.5' rx='4'/>
+  <text x='655' y='481' text-anchor='middle' font-size='12' fill='#5b2c6f' font-weight='bold'>config.py</text>
+  <text x='655' y='498' text-anchor='middle' font-size='10' fill='#2c3e50'>XSD-validated XML</text>
+  <text x='655' y='513' text-anchor='middle' font-size='10' fill='#2c3e50'>provider registry</text>
+  <text x='655' y='528' text-anchor='middle' font-size='10' fill='#2c3e50'>env-var precedence</text>
+  <text x='655' y='543' text-anchor='middle' font-size='10' fill='#2c3e50'>normalization</text>
+
+  <rect x='56' y='564' width='250' height='90' fill='#e8daef' stroke='#8e44ad' stroke-width='1.5' rx='4'/>
+  <text x='181' y='581' text-anchor='middle' font-size='12' fill='#5b2c6f' font-weight='bold'>sensation.py — preprocessing</text>
+  <text x='181' y='598' text-anchor='middle' font-size='10' fill='#2c3e50'>Korzybski IS classifier  →  fact/feeling</text>
+  <text x='181' y='613' text-anchor='middle' font-size='10' fill='#2c3e50'>spatiotemporal binding  (place/time)</text>
+  <text x='181' y='628' text-anchor='middle' font-size='10' fill='#2c3e50'>knowledge vs news classification</text>
+  <text x='181' y='643' text-anchor='middle' font-size='10' fill='#2c3e50'>strip feelings from training corpus</text>
+
+  <rect x='316' y='564' width='216' height='90' fill='#e8daef' stroke='#8e44ad' stroke-width='1.5' rx='4'/>
+  <text x='424' y='581' text-anchor='middle' font-size='12' fill='#5b2c6f' font-weight='bold'>nanochat_ext.py</text>
+  <text x='424' y='598' text-anchor='middle' font-size='10' fill='#2c3e50'>POST /train mounted on NanoChat</text>
+  <text x='424' y='613' text-anchor='middle' font-size='10' fill='#2c3e50'>DoT-annealed AdamW (sign-SGD)</text>
+  <text x='424' y='628' text-anchor='middle' font-size='10' fill='#2c3e50'>sigmoid warmup + grad clip</text>
+  <text x='424' y='643' text-anchor='middle' font-size='10' fill='#2c3e50'>EMA anchor → checkpoint</text>
+
+  <rect x='542' y='564' width='202' height='90' fill='#e8daef' stroke='#8e44ad' stroke-width='1.5' rx='4'/>
+  <text x='643' y='581' text-anchor='middle' font-size='12' fill='#5b2c6f' font-weight='bold'>graph.py</text>
+  <text x='643' y='598' text-anchor='middle' font-size='10' fill='#2c3e50'>conversation tree / DAG ops</text>
+  <text x='643' y='613' text-anchor='middle' font-size='10' fill='#2c3e50'>ancestor chain, selection</text>
+  <text x='643' y='628' text-anchor='middle' font-size='10' fill='#2c3e50'>diamond-aware traversal</text>
+  <text x='643' y='643' text-anchor='middle' font-size='10' fill='#2c3e50'>(DAG, not pure tree)</text>
+
+  <!-- Arrow Flask -> Providers -->
+  <line x1='400' y1='673' x2='400' y2='705' stroke='#ca6f1e' stroke-width='2' marker-end='url(#arro)'/>
+  <text x='414' y='693' text-anchor='start' font-size='11' fill='#ca6f1e' font-style='italic'>HTTP /chat/completions  •  per-provider key resolution  •  SSE streaming</text>
+
+  <!-- Providers row -->
+  <rect x='40' y='708' width='720' height='110' fill='#fdebd0' stroke='#ca6f1e' stroke-width='2' rx='8'/>
+  <rect x='40' y='708' width='720' height='28' fill='#ca6f1e' rx='8'/>
+  <rect x='40' y='722' width='720' height='14' fill='#ca6f1e'/>
+  <text x='400' y='727' text-anchor='middle' font-size='14' fill='white' font-weight='bold'>Upstream LLM providers  —  pluggable, runtime-selected</text>
+
+  <rect x='56' y='744' width='108' height='62' fill='white' stroke='#ca6f1e' stroke-width='1.5' rx='4'/>
+  <text x='110' y='760' text-anchor='middle' font-size='11' fill='#ca6f1e' font-weight='bold'>WikiOracle</text>
+  <text x='110' y='775' text-anchor='middle' font-size='10' fill='#2c3e50'>nanochat</text>
+  <text x='110' y='790' text-anchor='middle' font-size='9' fill='#626567'>127.0.0.1:8000</text>
+  <text x='110' y='802' text-anchor='middle' font-size='9' fill='#626567'>local SFT</text>
+
+  <rect x='170' y='744' width='95' height='62' fill='white' stroke='#ca6f1e' stroke-width='1.5' rx='4'/>
+  <text x='217' y='760' text-anchor='middle' font-size='11' fill='#ca6f1e' font-weight='bold'>OpenAI</text>
+  <text x='217' y='775' text-anchor='middle' font-size='10' fill='#2c3e50'>gpt-4o</text>
+  <text x='217' y='790' text-anchor='middle' font-size='9' fill='#626567'>api.openai.com</text>
+  <text x='217' y='802' text-anchor='middle' font-size='9' fill='#626567'>OPENAI_API_KEY</text>
+
+  <rect x='271' y='744' width='110' height='62' fill='white' stroke='#ca6f1e' stroke-width='1.5' rx='4'/>
+  <text x='326' y='760' text-anchor='middle' font-size='11' fill='#ca6f1e' font-weight='bold'>Anthropic</text>
+  <text x='326' y='775' text-anchor='middle' font-size='10' fill='#2c3e50'>claude-sonnet-4-6</text>
+  <text x='326' y='790' text-anchor='middle' font-size='9' fill='#626567'>api.anthropic.com</text>
+  <text x='326' y='802' text-anchor='middle' font-size='9' fill='#626567'>ANTHROPIC_API_KEY</text>
+
+  <rect x='387' y='744' width='95' height='62' fill='white' stroke='#ca6f1e' stroke-width='1.5' rx='4'/>
+  <text x='434' y='760' text-anchor='middle' font-size='11' fill='#ca6f1e' font-weight='bold'>Gemini</text>
+  <text x='434' y='775' text-anchor='middle' font-size='10' fill='#2c3e50'>2.5-flash</text>
+  <text x='434' y='790' text-anchor='middle' font-size='9' fill='#626567'>generativelanguage</text>
+  <text x='434' y='802' text-anchor='middle' font-size='9' fill='#626567'>GEMINI_API_KEY</text>
+
+  <rect x='488' y='744' width='90' height='62' fill='white' stroke='#ca6f1e' stroke-width='1.5' rx='4'/>
+  <text x='533' y='760' text-anchor='middle' font-size='11' fill='#ca6f1e' font-weight='bold'>Grok</text>
+  <text x='533' y='775' text-anchor='middle' font-size='10' fill='#2c3e50'>grok-3-mini</text>
+  <text x='533' y='790' text-anchor='middle' font-size='9' fill='#626567'>api.x.ai</text>
+  <text x='533' y='802' text-anchor='middle' font-size='9' fill='#626567'>XAI_API_KEY</text>
+
+  <rect x='584' y='744' width='160' height='62' fill='white' stroke='#ca6f1e' stroke-width='1.5' rx='4'/>
+  <text x='664' y='760' text-anchor='middle' font-size='11' fill='#ca6f1e' font-weight='bold'>OpenRouter</text>
+  <text x='664' y='775' text-anchor='middle' font-size='10' fill='#2c3e50'>google/gemma-3-4b-it:free</text>
+  <text x='664' y='790' text-anchor='middle' font-size='9' fill='#626567'>openrouter.ai</text>
+  <text x='664' y='802' text-anchor='middle' font-size='9' fill='#626567'>OPENROUTER_API_KEY</text>
+
+  <!-- Storage row -->
+  <rect x='40' y='830' width='720' height='100' fill='#f2f3f4' stroke='#aab7b8' stroke-width='1.5' rx='8'/>
+  <text x='400' y='852' text-anchor='middle' font-size='13' fill='#2c3e50' font-weight='bold'>Storage  —  XML, schema-validated  (stateful mode; wikioracle.org runs stateless)</text>
+
+  <rect x='60' y='862' width='220' height='58' fill='white' stroke='#16a085' stroke-width='1.5' rx='4'/>
+  <text x='170' y='878' text-anchor='middle' font-size='12' fill='#16a085' font-weight='bold'>config.xml</text>
+  <text x='170' y='894' text-anchor='middle' font-size='10' fill='#2c3e50'>server policy + providers</text>
+  <text x='170' y='909' text-anchor='middle' font-size='10' fill='#626567'>validated by data/config.xsd</text>
+
+  <rect x='290' y='862' width='220' height='58' fill='white' stroke='#16a085' stroke-width='1.5' rx='4'/>
+  <text x='400' y='878' text-anchor='middle' font-size='12' fill='#16a085' font-weight='bold'>state.xml</text>
+  <text x='400' y='894' text-anchor='middle' font-size='10' fill='#2c3e50'>client conversations + TruthSet</text>
+  <text x='400' y='909' text-anchor='middle' font-size='10' fill='#626567'>validated by data/state.xsd</text>
+
+  <rect x='520' y='862' width='220' height='58' fill='white' stroke='#16a085' stroke-width='1.5' rx='4'/>
+  <text x='630' y='878' text-anchor='middle' font-size='12' fill='#16a085' font-weight='bold'>data/truth.xml</text>
+  <text x='630' y='894' text-anchor='middle' font-size='10' fill='#2c3e50'>server-owned TruthSet (training)</text>
+  <text x='630' y='909' text-anchor='middle' font-size='10' fill='#626567'>knowledge facts only, no PII</text>
+
+  <!-- ═══ RIGHT COLUMN: Voting topology + Truth pipeline + Privacy ═══ -->
+
+  <!-- Voting topology -->
+  <rect x='780' y='70' width='460' height='280' fill='#fef9e7' stroke='#b7950b' stroke-width='2' rx='8'/>
+  <rect x='780' y='70' width='460' height='28' fill='#b7950b' rx='8'/>
+  <rect x='780' y='84' width='460' height='14' fill='#b7950b'/>
+  <text x='1010' y='89' text-anchor='middle' font-size='14' fill='white' font-weight='bold'>Voting topology  —  HME diamond  (doc/Voting.md)</text>
+
+  <!-- Diamond shape -->
+  <circle cx='1010' cy='130' r='22' fill='#fef9e7' stroke='#b7950b' stroke-width='2'/>
+  <text x='1010' y='135' text-anchor='middle' font-size='14' fill='#2c3e50' font-weight='bold'>Q</text>
+  <text x='1010' y='112' text-anchor='middle' font-size='10' fill='#626567'>user query</text>
+
+  <circle cx='850' cy='210' r='30' fill='#fdebd0' stroke='#ca6f1e' stroke-width='2'/>
+  <text x='850' y='208' text-anchor='middle' font-size='11' fill='#2c3e50' font-weight='bold'>beta_1</text>
+  <text x='850' y='222' text-anchor='middle' font-size='9' fill='#626567'>fact + feel</text>
+
+  <circle cx='950' cy='210' r='30' fill='#fdebd0' stroke='#ca6f1e' stroke-width='2'/>
+  <text x='950' y='208' text-anchor='middle' font-size='11' fill='#2c3e50' font-weight='bold'>beta_2</text>
+  <text x='950' y='222' text-anchor='middle' font-size='9' fill='#626567'>fact + feel</text>
+
+  <text x='1010' y='215' text-anchor='middle' font-size='14' fill='#2c3e50'>...</text>
+
+  <circle cx='1070' cy='210' r='30' fill='#fdebd0' stroke='#ca6f1e' stroke-width='2'/>
+  <text x='1070' y='208' text-anchor='middle' font-size='11' fill='#2c3e50' font-weight='bold'>beta_3</text>
+  <text x='1070' y='222' text-anchor='middle' font-size='9' fill='#626567'>fact + feel</text>
+
+  <circle cx='1170' cy='210' r='30' fill='#fdebd0' stroke='#ca6f1e' stroke-width='2'/>
+  <text x='1170' y='208' text-anchor='middle' font-size='11' fill='#2c3e50' font-weight='bold'>beta_n</text>
+  <text x='1170' y='222' text-anchor='middle' font-size='9' fill='#626567'>fact + feel</text>
+
+  <line x1='995' y1='150' x2='865' y2='185' stroke='#ca6f1e' stroke-width='1.5' marker-end='url(#arro)'/>
+  <line x1='1003' y1='152' x2='955' y2='180' stroke='#ca6f1e' stroke-width='1.5' marker-end='url(#arro)'/>
+  <line x1='1017' y1='152' x2='1065' y2='180' stroke='#ca6f1e' stroke-width='1.5' marker-end='url(#arro)'/>
+  <line x1='1025' y1='150' x2='1155' y2='185' stroke='#ca6f1e' stroke-width='1.5' marker-end='url(#arro)'/>
+
+  <circle cx='1010' cy='290' r='28' fill='#e8daef' stroke='#8e44ad' stroke-width='2'/>
+  <text x='1010' y='293' text-anchor='middle' font-size='13' fill='#5b2c6f' font-weight='bold'>R_α</text>
+  <text x='1010' y='327' text-anchor='middle' font-size='10' fill='#626567'>final synthesis (UI-selected provider)</text>
+
+  <line x1='865' y1='235' x2='995' y2='270' stroke='#8e44ad' stroke-width='1.5' marker-end='url(#arrp)'/>
+  <line x1='955' y1='240' x2='1003' y2='268' stroke='#8e44ad' stroke-width='1.5' marker-end='url(#arrp)'/>
+  <line x1='1065' y1='240' x2='1017' y2='268' stroke='#8e44ad' stroke-width='1.5' marker-end='url(#arrp)'/>
+  <line x1='1155' y1='235' x2='1025' y2='270' stroke='#8e44ad' stroke-width='1.5' marker-end='url(#arrp)'/>
+
+  <text x='1010' y='344' text-anchor='middle' font-size='10' fill='#626567' font-style='italic'>Cycle prevention: each vote carries the alpha call chain; provider stays silent if in ancestry.</text>
+
+  <!-- Truth pipeline -->
+  <rect x='780' y='362' width='460' height='340' fill='#d4efdf' stroke='#1a7a38' stroke-width='2' rx='8'/>
+  <rect x='780' y='362' width='460' height='28' fill='#1a7a38' rx='8'/>
+  <rect x='780' y='376' width='460' height='14' fill='#1a7a38'/>
+  <text x='1010' y='381' text-anchor='middle' font-size='14' fill='white' font-weight='bold'>TruthSet pipeline  —  Stages 2–4  (doc/Training.md)</text>
+
+  <rect x='800' y='404' width='420' height='44' fill='white' stroke='#1a7a38' stroke-width='1.5' rx='4'/>
+  <text x='1010' y='422' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>Stage 1  —  Respond</text>
+  <text x='1010' y='438' text-anchor='middle' font-size='10' fill='#2c3e50'>state.truth → static_truth + dynamic_truth → provider → XHTML response</text>
+
+  <line x1='1010' y1='450' x2='1010' y2='464' stroke='#1a7a38' stroke-width='1.5' marker-end='url(#arrg)'/>
+
+  <rect x='800' y='466' width='420' height='44' fill='white' stroke='#1a7a38' stroke-width='1.5' rx='4'/>
+  <text x='1010' y='484' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>Stage 2  —  Compute DegreeOfTruth</text>
+  <text x='1010' y='500' text-anchor='middle' font-size='10' fill='#2c3e50'>DoT = 2 · mean(agreement_i) − 1   ∈ [−1, +1]   (truth.py)</text>
+
+  <line x1='1010' y1='512' x2='1010' y2='526' stroke='#1a7a38' stroke-width='1.5' marker-end='url(#arrg)'/>
+
+  <rect x='800' y='528' width='420' height='60' fill='white' stroke='#1a7a38' stroke-width='1.5' rx='4'/>
+  <text x='1010' y='546' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>Stage 3  —  Merge into server TruthSet</text>
+  <text x='1010' y='562' text-anchor='middle' font-size='10' fill='#2c3e50'>filter_knowledge_only  •  detect_identifiability (PII)</text>
+  <text x='1010' y='578' text-anchor='middle' font-size='10' fill='#2c3e50'>slow-moving EMA: server_trust += merge_rate · (client_trust − server_trust)</text>
+
+  <line x1='1010' y1='590' x2='1010' y2='604' stroke='#1a7a38' stroke-width='1.5' marker-end='url(#arrg)'/>
+
+  <rect x='800' y='606' width='420' height='60' fill='white' stroke='#1a7a38' stroke-width='1.5' rx='4'/>
+  <text x='1010' y='624' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>Stage 4  —  Tag and Train</text>
+  <text x='1010' y='640' text-anchor='middle' font-size='10' fill='#2c3e50'>sensation.preprocess  →  strip_feelings  →  POST /train</text>
+  <text x='1010' y='656' text-anchor='middle' font-size='10' fill='#2c3e50'>lr_eff = lr_base · (tw·|DoT| + (1−tw)) · sigmoid_warmup(step)</text>
+
+  <text x='1010' y='684' text-anchor='middle' font-size='11' fill='#1a7a38' font-style='italic'>Anti-capture: EMA anchor pull, fresh AdamW per step, grad-clip ≤ grad_clip.</text>
+
+  <!-- Privacy / Entanglement panel -->
+  <rect x='780' y='714' width='460' height='216' fill='#fadbd8' stroke='#922b21' stroke-width='2' rx='8'/>
+  <rect x='780' y='714' width='460' height='28' fill='#922b21' rx='8'/>
+  <rect x='780' y='728' width='460' height='14' fill='#922b21'/>
+  <text x='1010' y='733' text-anchor='middle' font-size='14' fill='white' font-weight='bold'>Entanglement Policy  —  three-channel persistence  (doc/Freedom.md)</text>
+
+  <rect x='800' y='752' width='420' height='28' fill='white' stroke='#aab7b8' stroke-width='1' rx='4'/>
+  <text x='815' y='770' text-anchor='start' font-size='11' fill='#2c3e50' font-weight='bold'>Data type</text>
+  <text x='995' y='770' text-anchor='middle' font-size='11' fill='#2c3e50' font-weight='bold'>TruthSet</text>
+  <text x='1095' y='770' text-anchor='middle' font-size='11' fill='#2c3e50' font-weight='bold'>Train weights</text>
+  <text x='1190' y='770' text-anchor='middle' font-size='11' fill='#2c3e50' font-weight='bold'>Session</text>
+
+  <rect x='800' y='782' width='420' height='26' fill='#fafafa' stroke='#aab7b8' stroke-width='0.5' rx='0'/>
+  <text x='815' y='799' text-anchor='start' font-size='11' fill='#2c3e50'>universal facts</text>
+  <text x='995' y='799' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>✓</text>
+  <text x='1095' y='799' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>✓</text>
+  <text x='1190' y='799' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>✓</text>
+
+  <rect x='800' y='810' width='420' height='26' fill='white' stroke='#aab7b8' stroke-width='0.5' rx='0'/>
+  <text x='815' y='827' text-anchor='start' font-size='11' fill='#2c3e50'>particular facts (place/time)</text>
+  <text x='995' y='827' text-anchor='middle' font-size='11' fill='#ca6f1e' font-style='italic'>optional</text>
+  <text x='1095' y='827' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>✓</text>
+  <text x='1190' y='827' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>✓</text>
+
+  <rect x='800' y='838' width='420' height='26' fill='#fafafa' stroke='#aab7b8' stroke-width='0.5' rx='0'/>
+  <text x='815' y='855' text-anchor='start' font-size='11' fill='#2c3e50'>feelings</text>
+  <text x='995' y='855' text-anchor='middle' font-size='12' fill='#922b21' font-weight='bold'>×</text>
+  <text x='1095' y='855' text-anchor='middle' font-size='12' fill='#922b21' font-weight='bold'>×</text>
+  <text x='1190' y='855' text-anchor='middle' font-size='12' fill='#1a7a38' font-weight='bold'>✓</text>
+
+  <text x='1010' y='886' text-anchor='middle' font-size='10' fill='#626567' font-style='italic'>store_concrete = false (default): no worldline capture.  detect_identifiability() filters PII regardless.</text>
+  <text x='1010' y='903' text-anchor='middle' font-size='10' fill='#626567' font-style='italic'>Feelings are session-only by design — never train weights, never enter the TruthSet.</text>
+  <text x='1010' y='920' text-anchor='middle' font-size='10' fill='#626567' font-style='italic'>Local Freedom under Global Constraint (LFGC):  global truth + local interpretive freedom.</text>
+
+</svg>

@@ -1,5 +1,9 @@
 #
 *.pem
+.env
+.env.*
+.lambda-api-key
+.lambda-api-key.*
 *.xml
 *~
 .venv/

@@ -9,6 +9,8 @@
 * `uv` for NanoChat environment setup (`make install` will bootstrap it if missing).
 * AWS CLI configured for build-host launch workflows (`make train HOST=build` and related targets).
 * SSH keys:
+  * Lambda Labs API key (`./.lambda-api-key` by default, configurable via `LAMBDA_API_KEY_FILE`, or export `LAMBDA_API_KEY`).
+  * Lambda Labs SSH key (`~/bin/lambda.pem` by default, configurable via `LAMBDA_KEY_FILE`).
   * EC2 training key (`~/.ssh/nanochat-key.pem`, auto-created by remote tooling as needed).
   * Lightsail key (`./wikiOracle.pem` by default, configurable via `WO_KEY_FILE`).
 

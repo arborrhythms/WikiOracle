@@ -96,7 +96,7 @@ TRAIN_TARGET       ?=
 LAMBDA_INSTANCE_TYPE ?= gpu_1x_h100_sxm5   # ~$4.29/hr
 LAMBDA_REGION        ?=                      # auto-select from available
 LAMBDA_KEY_FILE      ?= ~/bin/lambda.pem
-LAMBDA_API_KEY       ?= secret_lambda_dffa9f4d9f744221a25804854bdbf108.PSVLGPiqGgjT31W3XjSHNdNPgqLvDYNw
+LAMBDA_API_KEY_FILE  ?= ./.lambda-api-key
 
 # EC2 configuration (fallback: REMOTE_PROVIDER=ec2)
 EC2_INSTANCE_TYPE ?= p5.4xlarge     # 1× H100-80GB ~$6.88/hr (alt: p4d.24xlarge 8× A100 ~$32.77/hr)
@@ -334,7 +334,9 @@ ifeq ($(REMOTE_PROVIDER),ec2)
 else
   REMOTE_ARGS := --provider=lambda \
                  $(if $(LAMBDA_REGION),--region=$(LAMBDA_REGION)) \
-                 --key-file=$(LAMBDA_KEY_FILE) --user=ubuntu
+                 --key-file=$(LAMBDA_KEY_FILE) \
+                 --api-key-file=$(LAMBDA_API_KEY_FILE) \
+                 --user=ubuntu
   LAUNCH_ARGS := --instance-type=$(LAMBDA_INSTANCE_TYPE)
 endif
 

@@ -55,6 +55,7 @@ from config import (
     PROVIDERS,
     TheConfig,
     _PROJECT_ROOT,
+    _atomic_write_config_xml,
     _build_providers,
     _client_safe_config,
     _find_xml,
@@ -182,9 +183,7 @@ def create_app(cfg: Config, url_prefix: str = "", use_ssl: bool = True) -> Flask
                 _disk_cfg.setdefault("server", {})["server_id"] = new_sid
                 TheConfig.set("server.server_id", new_sid)
                 try:
-                    _config_xml_path.write_text(
-                        config_to_xml(_disk_cfg), encoding="utf-8",
-                    )
+                    _atomic_write_config_xml(_config_xml_path, config_to_xml(_disk_cfg))
                     log.info("Persisted auto-generated server_id to config.xml")
                 except OSError as exc:
                     log.warning("Could not persist server_id: %s", exc)
@@ -593,7 +592,7 @@ def create_app(cfg: Config, url_prefix: str = "", use_ssl: bool = True) -> Flask
             # Stateful servers persist; stateless servers keep changes in memory.
             if not config_mod.STATELESS_MODE:
                 cfg_xml = _find_xml(_PROJECT_ROOT, "config.xml") or _PROJECT_ROOT / "config.xml"
-                cfg_xml.write_text(config_to_xml(TheConfig.data), encoding="utf-8")
+                _atomic_write_config_xml(cfg_xml, config_to_xml(TheConfig.data))
 
             return jsonify({"ok": True, "config": _client_safe_config(TheConfig.data)})
         except Exception as exc:

@@ -13,9 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 
 import config as config_mod
 from config import (
+    _atomic_write_config_xml,
     _build_providers,
     _client_safe_config,
     _load_config_xml,
+    _load_config_xml_string,
     config_to_xml,
 )
 
@@ -200,6 +202,16 @@ class TestLoadConfigXml(unittest.TestCase):
         self.assertEqual(len(urls), 2)
         self.assertIn("https://api.openai.com/", urls)
 
+    def test_load_config_xml_string_parses_in_memory(self):
+        with patch.object(
+            Path, "write_text", side_effect=AssertionError("no disk writes")
+        ):
+            data = _load_config_xml_string(SAMPLE_XML)
+        self.assertEqual(data["server"]["server_id"], "test-server-id-1234")
+        self.assertEqual(
+            data["client"]["providers"]["chatGPT"]["api_key"], "sk-test-1234"
+        )
+
 
 # =====================================================================
 #  XML config serialization
@@ -342,6 +354,33 @@ class TestConfigToXml(unittest.TestCase):
             )
         finally:
             Path(tmp.name).unlink(missing_ok=True)
+
+    def test_atomic_write_config_xml_forces_owner_only_permissions(self):
+        data = self._make_minimal_config()
+        xml_str = config_to_xml(data)
+
+        with tempfile.TemporaryDirectory() as td:
+            existing = Path(td) / "config.xml"
+            existing.write_text("old", encoding="utf-8")
+            os.chmod(existing, 0o644)
+
+            _atomic_write_config_xml(existing, xml_str)
+
+            self.assertEqual(existing.stat().st_mode & 0o777, 0o600)
+            reloaded = _load_config_xml(existing)
+            self.assertEqual(
+                reloaded["client"]["providers"]["WikiOracle"]["api_key"],
+                "sk-test-key",
+            )
+
+    def test_atomic_write_config_xml_creates_owner_only_file(self):
+        data = self._make_minimal_config()
+        xml_str = config_to_xml(data)
+
+        with tempfile.TemporaryDirectory() as td:
+            created = Path(td) / "new-config.xml"
+            _atomic_write_config_xml(created, xml_str)
+            self.assertEqual(created.stat().st_mode & 0o777, 0o600)
 
 
 # =====================================================================

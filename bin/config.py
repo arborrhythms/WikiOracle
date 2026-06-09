@@ -23,6 +23,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import uuid as _uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -490,15 +491,35 @@ def _parse_config_root(root: ET.Element) -> Dict[str, Any]:
     return data
 
 
-def _load_config_xml_string(xml_text: str) -> Dict[str, Any]:
+def _load_config_xml_string(xml_text: str | bytes) -> Dict[str, Any]:
     """Parse a config XML string (same logic as ``_load_config_xml``)."""
-    import tempfile
-    tmp = Path(tempfile.mktemp(suffix=".xml"))
+    xml_bytes = xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text
+    root = ET.fromstring(xml_bytes)
+    return _parse_config_root(root)
+
+
+def _atomic_write_config_xml(path: Path, xml_text: str) -> None:
+    """Atomically write config XML with owner-only permissions.
+
+    ``config.xml`` can contain provider API keys, so writes must not inherit
+    a permissive process umask or preserve an existing world-readable mode.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=str(path.parent)
+    )
     try:
-        tmp.write_text(xml_text, encoding="utf-8")
-        return _load_config_xml(tmp)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+            tmp.write(xml_text)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, str(path))
+        os.chmod(path, 0o600)
     finally:
-        tmp.unlink(missing_ok=True)
+        if os.path.exists(tmp_name):
+            os.remove(tmp_name)
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

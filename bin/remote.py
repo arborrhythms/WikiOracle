@@ -90,15 +90,31 @@ LAMBDA_PRICING_FALLBACK = {
 }
 
 LAMBDA_API_BASE = "https://cloud.lambdalabs.com/api/v1"
+LAMBDA_API_KEY_FILE_DEFAULT = ".lambda-api-key"
 
 
 # --- Lambda Labs API client ---------------------------------------------------
 
 def lambda_api_key():
-    """Return the Lambda API key from environment, or exit with a message."""
-    key = os.environ.get("LAMBDA_API_KEY")
+    """Return the Lambda API key from environment or a local key file."""
+    key = os.environ.get("LAMBDA_API_KEY", "").strip()
+    if key:
+        return key
+
+    key_file = os.environ.get("LAMBDA_API_KEY_FILE") or LAMBDA_API_KEY_FILE_DEFAULT
+    key_path = Path(key_file).expanduser()
+    if not key_path.exists():
+        sys.exit(
+            "Error: LAMBDA_API_KEY not set and Lambda API key file not found: "
+            f"{key_path}. Export LAMBDA_API_KEY or create that file with your "
+            "Lambda Labs API key."
+        )
+    try:
+        key = key_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        sys.exit(f"Error: Could not read Lambda API key file {key_path}: {exc}")
     if not key:
-        sys.exit("Error: LAMBDA_API_KEY not set. Export your Lambda Labs API key.")
+        sys.exit(f"Error: Lambda API key file is empty: {key_path}")
     return key
 
 
@@ -1296,6 +1312,9 @@ def main():
     parser.add_argument("--region", default="")
     parser.add_argument("--key-name", default="nanochat-key")
     parser.add_argument("--key-file", default="~/bin/lambda.pem")
+    parser.add_argument("--api-key-file",
+                        default=os.environ.get("LAMBDA_API_KEY_FILE", LAMBDA_API_KEY_FILE_DEFAULT),
+                        help="Lambda Labs API key file (default: %(default)s)")
     parser.add_argument("--user", default="ubuntu")
 
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1328,6 +1347,8 @@ def main():
     sub.add_parser("status", help="Check instance state")
 
     args = parser.parse_args()
+    if args.provider == "lambda":
+        os.environ["LAMBDA_API_KEY_FILE"] = args.api_key_file
 
     commands = {
         "launch": cmd_launch,

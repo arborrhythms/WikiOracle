@@ -12,6 +12,7 @@
 .claude/
 .vscode/
 .worktrees/
+/Makefile.local
 output/
 librechat/
 __pycache__/

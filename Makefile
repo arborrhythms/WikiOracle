@@ -3,7 +3,7 @@
 # Top-level workflow:
 #   make install          — create .venv (shim + NanoChat), install all deps
 #   make build            — train model (alias for 'make train')
-#   make sync HOST=local|mb|remote|build — sync app to ArborMini, MetalBaby, production, or active build host
+#   make sync HOST=local|remote|build — sync via optional local overlay, production, or active build host
 #   make run HOST=local   — start WikiOracle Flask shim locally
 #
 # Contributors: install → build → run gets you a working local instance.
@@ -11,7 +11,7 @@
 #
 # Key variables:
 #   ARCH=cpu|gpu   — target architecture (default: cpu)
-#   HOST=local|mb|remote|build — host mode (sync: local|mb|remote|build; services: local|remote; train: local|build)
+#   HOST=local|remote|build — host mode (sync: local|remote|build; services: local|remote; train: local|build)
 
 ifeq ($(OS),Windows_NT)
 SHELL := C:/msys64/usr/bin/bash.exe
@@ -112,14 +112,20 @@ WO_USER           ?= bitnami
 WO_HOST           ?= wikiOracle.org
 WO_DEST           ?= /opt/bitnami/wordpress/files/WikiOracle.org/client
 
-# Local development
-LOCAL_KEY_FILE       ?= ~/.ssh/id_ed25519_arbormini
-LOCAL_USER           ?= arogers
-LOCAL_HOST           ?= arbormini.local
-LOCAL_DEST           ?= ~/WikiOracle/
-
 ALERT_EMAIL ?=
 WIKIORACLE_APP ?= bin/wikioracle.py
+LOCAL_MAKEFILE ?= Makefile.local
+.DEFAULT_GOAL := help
+UPDATE_TARGET ?= update_remote_only
+LOCAL_UP_TARGET ?= local_up_missing
+LOCAL_DOWN_TARGET ?= local_down_missing
+LOCAL_SYNC_TARGET ?= local_sync_missing
+TUNNEL_START_TARGET ?= tunnel_start_missing
+TUNNEL_STOP_TARGET ?= tunnel_stop_missing
+TUNNEL_STATUS_TARGET ?= tunnel_status_missing
+BASIC_REMOTE_TRAIN_TARGET ?= basic_remoteTrain_missing
+
+-include $(LOCAL_MAKEFILE)
 
 # --- Local/Remote switching ---------------------------------------------------
 HOST              ?= local
@@ -155,7 +161,7 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         train_remote train_retrieve train_ssh train_status train_logs train_deploy \
         test test_all test_eval test_unit test_basicmodel basic_test_all \
         run_init run_server run_debug run_cli run_web parse \
-        sync_local sync_mb sync_build sync_remote sync_checkpoint_pull sync_checkpoint_push \
+        sync_build sync_remote sync_checkpoint_pull sync_checkpoint_push \
         tunnel_start tunnel_stop tunnel_status \
         nano_deploy nano_start nano_stop nano_restart nano_status nano_logs \
         wo_deploy wo_start wo_stop wo_restart wo_status wo_logs wo_migrate \
@@ -165,6 +171,8 @@ DEPLOY_ARGS := --wo-key-file=$(WO_KEY_FILE) --wo-user=$(WO_USER) \
         doc clean clean_all \
         remote remote_retrieve remote_ssh remote_status remote_logs \
         remote_deploy_launch guard_service_host \
+        update_remote_only local_up_missing local_down_missing local_sync_missing \
+        tunnel_start_missing tunnel_stop_missing tunnel_status_missing basic_remoteTrain_missing \
         checkpoint_pull checkpoint_push
 
 # Ordered list of doc chapters for PDF generation
@@ -197,20 +205,18 @@ help:
 	@echo "Top-level targets:"
 	@echo "  make install            Create .venv and install all dependencies (ARCH=cpu|gpu)"
 	@echo "  make build              Train model (alias for 'make train', ARCH=cpu|gpu)"
-	@echo "  make sync HOST=local    Sync app to ArborMini"
-	@echo "  make sync HOST=mb       Sync app to MetalBaby over SSH rsync"
+	@echo "  make sync HOST=local    Optional private sync hook (requires Makefile.local)"
 	@echo "  make sync HOST=remote   Sync app + checkpoints to/from production"
 	@echo "  make sync HOST=build    Deploy active remote training artifacts to WikiOracle"
 	@echo "  make run HOST=local     Start WikiOracle local shim (foreground)"
-	@echo "  make up HOST=local      NanoChat locally, tunnel to remote WikiOracle"
+	@echo "  make up HOST=local      Optional private local orchestration hook"
 	@echo "  make up HOST=remote     Restart both services on production"
-	@echo "  make down HOST=local    Stop local NanoChat + tunnel"
+	@echo "  make down HOST=local    Optional private local teardown hook"
 	@echo "  make down HOST=remote   Stop both services"
 	@echo "  make all                Full pipeline: install + train + eval + report"
 	@echo ""
 	@echo "Training (train_*):"
 	@echo "  make train HOST=local   Train BasicModel (embeddings + model)"
-	@echo "  make train HOST=mb      Sync to MetalBaby and train there (MODEL=data/MM_5M.xml default)"
 	@echo "  make train HOST=build   Launch remote GPU (Lambda/EC2), start training"
 	@echo "  make nano_train         Full NanoChat pipeline: data + tok + pretrain + finetune"
 	@echo "  make train_pretrain     Pretrain NanoChat base model (ARCH=cpu|gpu)"
@@ -234,8 +240,7 @@ help:
 	@echo "  make run_web HOST=local     Chat with the model (Web UI + /train)"
 	@echo ""
 	@echo "Sync (sync_*):"
-	@echo "  make sync HOST=local             Sync app to ArborMini"
-	@echo "  make sync HOST=mb                Sync app to MetalBaby over SSH rsync"
+	@echo "  make sync HOST=local             Optional private sync hook (requires Makefile.local)"
 	@echo "  make sync HOST=remote            Sync app + checkpoints to/from production"
 	@echo "  make sync HOST=build             Deploy active remote training artifacts to WikiOracle"
 	@echo "  make sync_checkpoint_pull/push   Backup/restore fine-tuning weights"
@@ -245,7 +250,6 @@ help:
 	@echo "  make basic_data             Download FineWeb-EDU shards"
 	@echo "  make basic_train            Train BasicModel (delegates to basicmodel/Makefile)"
 	@echo "  make basic_smallTrain       Micro train (500 docs, random shard)"
-	@echo "  make basic_remoteTrain      Train on ArborMini.local via SSH"
 	@echo "  make basic_test             Run BasicModel tests"
 	@echo "  make basic_run              Run BasicModel (BASIC_XML=data/simple.xml)"
 	@echo ""
@@ -261,7 +265,7 @@ help:
 	@echo ""
 	@echo "Key variables:"
 	@echo "  ARCH=cpu|gpu            Target architecture (default: cpu)"
-	@echo "  HOST=local|mb|remote|build Host mode; sync uses local|mb|remote|build, train uses local|build, run/test use local, services use local|remote (default: local)"
+	@echo "  HOST=local|remote|build Host mode; sync uses local|remote|build, train uses local|build, run/test use local, services use local|remote (default: local)"
 	@echo "  NANO_PORT=8000          NanoChat server port (local mode)"
 	@echo "  NPROC=8                 GPUs per node for torchrun"
 
@@ -270,24 +274,21 @@ help:
 all: install train test_eval
 
 update:
+	@$(MAKE) $(UPDATE_TARGET)
+
+update_remote_only:
 	$(MAKE) sync HOST=remote
-	$(MAKE) sync down up HOST=local
 
 up:
 ifeq ($(HOST),local)
-	$(MAKE) nano_restart
-	$(MAKE) basic_restart
-	$(MAKE) tunnel_start
-	$(MAKE) wo_restart HOST=remote
+	@$(MAKE) $(LOCAL_UP_TARGET)
 else
 	$(MAKE) nano_restart wo_restart basic_restart
 endif
 
 down:
 ifeq ($(HOST),local)
-	$(MAKE) tunnel_stop
-	$(MAKE) nano_stop
-	$(MAKE) basic_stop
+	@$(MAKE) $(LOCAL_DOWN_TARGET)
 else
 	$(MAKE) nano_stop wo_stop basic_stop
 endif
@@ -324,6 +325,34 @@ ifeq ($(ARCH),gpu)
 else
 	$(MAKE) all ARCH=cpu CPU_ITERS=10
 endif
+
+local_up_missing:
+	@echo "make up HOST=local requires $(LOCAL_MAKEFILE). Create that ignored local overlay for private machine-specific workflows." >&2
+	@exit 2
+
+local_down_missing:
+	@echo "make down HOST=local requires $(LOCAL_MAKEFILE). Create that ignored local overlay for private machine-specific workflows." >&2
+	@exit 2
+
+local_sync_missing:
+	@echo "make sync HOST=local requires $(LOCAL_MAKEFILE). Create that ignored local overlay for private machine-specific workflows." >&2
+	@exit 2
+
+tunnel_start_missing:
+	@echo "make tunnel_start requires $(LOCAL_MAKEFILE). Create that ignored local overlay for private machine-specific workflows." >&2
+	@exit 2
+
+tunnel_stop_missing:
+	@echo "make tunnel_stop requires $(LOCAL_MAKEFILE). Create that ignored local overlay for private machine-specific workflows." >&2
+	@exit 2
+
+tunnel_status_missing:
+	@echo "make tunnel_status requires $(LOCAL_MAKEFILE). Create that ignored local overlay for private machine-specific workflows." >&2
+	@exit 2
+
+basic_remoteTrain_missing:
+	@echo "make basic_remoteTrain requires $(LOCAL_MAKEFILE). Create that ignored local overlay for private machine-specific workflows." >&2
+	@exit 2
 
 # --- Build-host training (HOST=build; train_retrieve/ssh/status/logs/deploy) -
 
@@ -410,22 +439,6 @@ INCLUDE_WEIGHTS = \
 		--include '*.kv' \
 		--exclude '*' \
 
-# Local development
-LOCAL_KEY_FILE       ?= ~/.ssh/id_ed25519_arbormini
-LOCAL_USER           ?= arogers
-LOCAL_HOST           ?= arbormini.local
-LOCAL_DEST           ?= ~/WikiOracle/
-LOCAL_SYNC_OPTS      ?= -av --progress $(EXCLUDE_OPTS) $(EXCLUDE_WEIGHTS)
-LOCAL_WEIGHT_SYNC_OPTS ?= -av --progress --update --prune-empty-dirs $(INCLUDE_WEIGHTS)
-
-MB_KEY_FILE       ?= $(HOME)/.ssh/id_ed25519
-MB_USER           ?= admin
-MB_HOST           ?= metalbaby.local
-MB_DEST           ?= /home/admin/WikiOracle
-#MB_RSYNC_PATH     ?= C:/msys64/usr/bin/rsync.exe
-MB_SYNC_OPTS      ?= -rltv --delete --progress $(EXCLUDE_OPTS) $(EXCLUDE_WEIGHTS)
-MB_WEIGHT_SYNC_OPTS ?= -rltv --progress --update --prune-empty-dirs $(INCLUDE_WEIGHTS)
-
 # Legacy aliases for remote_* targets
 remote: train_build
 remote_retrieve: train_retrieve
@@ -444,27 +457,7 @@ WO_RSYNC := rsync -avz -e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10"
 
 sync:
 ifeq ($(HOST),local)
-	@echo "=== Syncing weights ↔ $(LOCAL_HOST):$(LOCAL_DEST) ==="
-	rsync $(LOCAL_WEIGHT_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
-	rsync $(LOCAL_WEIGHT_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)' './'
-	@echo ""
-	@echo "=== Syncing app → $(LOCAL_HOST):$(LOCAL_DEST) ==="
-	rsync $(LOCAL_SYNC_OPTS) -e 'ssh -i $(LOCAL_KEY_FILE)' './' '$(LOCAL_USER)@$(LOCAL_HOST):$(LOCAL_DEST)'
-else ifeq ($(HOST),mb)
-	@echo "=== Syncing weights ↔ $(MB_USER)@$(MB_HOST):$(MB_DEST) ==="
-	@test -n "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE is required for HOST=mb" >&2; exit 2; }
-	@test -f "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE not found: $(MB_KEY_FILE)" >&2; exit 2; }
-	rsync $(MB_WEIGHT_SYNC_OPTS) \
-		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
-		'./' '$(MB_USER)@$(MB_HOST):$(MB_DEST)/'
-	rsync $(MB_WEIGHT_SYNC_OPTS) \
-		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
-		'$(MB_USER)@$(MB_HOST):$(MB_DEST)/' './'
-	@echo ""
-	@echo "=== Syncing app → $(MB_USER)@$(MB_HOST):$(MB_DEST) ==="
-	rsync $(MB_SYNC_OPTS) \
-		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
-		'./' '$(MB_USER)@$(MB_HOST):$(MB_DEST)/'
+	@$(MAKE) $(LOCAL_SYNC_TARGET)
 else ifeq ($(HOST),remote)
 	@echo "=== Syncing app → $(WO_HOST):$(WO_DEST) ==="
 	$(WO_RSYNC) --delete $(EXCLUDE_OPTS) \
@@ -486,7 +479,7 @@ else ifeq ($(HOST),remote)
 else ifeq ($(HOST),build)
 	python3 bin/remote.py $(REMOTE_ARGS) deploy $(DEPLOY_ARGS)
 else
-	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=mb, HOST=remote, or HOST=build)
+	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=remote, or HOST=build)
 endif
 
 nano_deploy: sync
@@ -584,53 +577,16 @@ else
 	$(WO_SSH) "sudo journalctl -u nanochat -f --no-pager"
 endif
 
-# --- SSH Tunnel (HOST=local → remote) -----------------------------------------
-# Reverse-forwards local NanoChat to the remote WikiOracle host so the shim
-# at 127.0.0.1:8000 on the remote reaches the local Mac Mini.
+# --- Optional local overlay hooks ---------------------------------------------
 
 tunnel_start:
-	@# Kill any existing local tunnel process
-	@if [ -f $(TUNNEL_PID) ]; then \
-		kill $$(cat $(TUNNEL_PID)) 2>/dev/null; \
-		rm -f $(TUNNEL_PID); \
-	fi
-	@# Stop remote services and kill anything holding ports 8000/8001
-	-$(WO_SSH) "sudo systemctl stop nanochat 2>/dev/null; \
-		sudo systemctl stop basicmodel 2>/dev/null; \
-		sudo fuser -k 8000/tcp 2>/dev/null; \
-		sudo fuser -k 8001/tcp 2>/dev/null; \
-		sleep 1; true"
-	@nohup ssh -v -i $(WO_KEY_FILE) -o ConnectTimeout=10 \
-		-o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-		-o ExitOnForwardFailure=yes \
-		-N -R 8000:localhost:$(NANO_PORT) \
-		   -R 8001:localhost:$(BASIC_PORT) \
-		$(WO_USER)@$(WO_HOST) > .tunnel.log 2>&1 & \
-	echo $$! > $(TUNNEL_PID); \
-	sleep 3; \
-	if kill -0 $$(cat $(TUNNEL_PID)) 2>/dev/null; then \
-		echo "SSH tunnel started (PID $$(cat $(TUNNEL_PID)), :$(NANO_PORT)→remote:8000, :$(BASIC_PORT)→remote:8001)"; \
-	else \
-		echo "SSH tunnel failed to start. Log:"; \
-		tail -20 .tunnel.log 2>/dev/null; \
-		rm -f $(TUNNEL_PID); \
-		exit 1; \
-	fi
+	@$(MAKE) $(TUNNEL_START_TARGET)
 
 tunnel_stop:
-	@if [ -f $(TUNNEL_PID) ]; then \
-		kill $$(cat $(TUNNEL_PID)) 2>/dev/null && echo "SSH tunnel stopped" || echo "SSH tunnel not running"; \
-		rm -f $(TUNNEL_PID); \
-	else \
-		echo "No tunnel PID file found"; \
-	fi
+	@$(MAKE) $(TUNNEL_STOP_TARGET)
 
 tunnel_status:
-	@if [ -f $(TUNNEL_PID) ] && kill -0 $$(cat $(TUNNEL_PID)) 2>/dev/null; then \
-		echo "SSH tunnel running (PID $$(cat $(TUNNEL_PID)))"; \
-	else \
-		echo "SSH tunnel not running"; \
-	fi
+	@$(MAKE) $(TUNNEL_STATUS_TARGET)
 
 # --- WikiOracle Server (HOST=local|remote) ------------------------------------
 # When HOST=local  → background Flask shim with PID file
@@ -818,34 +774,14 @@ endif
 train:
 ifeq ($(HOST),local)
 	@$(MAKE) train_local
-else ifeq ($(HOST),mb)
-	@$(MAKE) train_mb
 else ifeq ($(HOST),build)
 	@$(MAKE) train_build HOST=build
 else
-	$(error Invalid HOST '$(HOST)'; use HOST=local, HOST=mb, or HOST=build)
+	$(error Invalid HOST '$(HOST)'; use HOST=local or HOST=build)
 endif
 
 train_local: basic_train
 	@echo "BasicModel training pipeline complete."
-
-# train HOST=mb: sync app + weights to MetalBaby, then SSH-run the
-# BasicModel training target there. Caller passes MODEL=data/<config>.xml
-# to pick the model; defaults to data/MM_5M.xml.
-MB_TRAIN_MODEL ?= $(if $(MODEL),$(MODEL),data/MM_5M.xml)
-train_mb:
-	@test -n "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE is required for HOST=mb" >&2; exit 2; }
-	@test -f "$(MB_KEY_FILE)" || { echo "MB_KEY_FILE not found: $(MB_KEY_FILE)" >&2; exit 2; }
-	@$(MAKE) sync HOST=mb
-	@echo ""
-	@echo "=== Running BasicModel train on $(MB_USER)@$(MB_HOST) ($(MB_TRAIN_MODEL)) ==="
-	ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE) $(MB_USER)@$(MB_HOST) \
-		"cd $(MB_DEST) && $(MAKE) -C basicmodel train MODEL=$(MB_TRAIN_MODEL)"
-	@echo ""
-	@echo "=== Syncing weights back from $(MB_USER)@$(MB_HOST) ==="
-	rsync $(MB_WEIGHT_SYNC_OPTS) \
-		-e "ssh -o ConnectTimeout=10 -i $(MB_KEY_FILE)" \
-		'$(MB_USER)@$(MB_HOST):$(MB_DEST)/' './'
 
 nano_train: build_data build_tokenizer train_pretrain train_finetune
 	@echo "$(ARCH) NanoChat training pipeline complete."
@@ -996,7 +932,7 @@ basic_smallTrain:
 	$(MAKE) -C $(BASIC_DIR) train_micro
 
 basic_remoteTrain:
-	$(MAKE) -C $(BASIC_DIR) train_remote
+	@$(MAKE) $(BASIC_REMOTE_TRAIN_TARGET)
 
 basic_test:
 	BASICMODEL_DEVICE=cpu $(MAKE) -C $(BASIC_DIR) test

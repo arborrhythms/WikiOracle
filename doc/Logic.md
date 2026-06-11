@@ -225,4 +225,4 @@ This is a genuine structural enrichment of Strong Kleene logic.
 
 ## See also
 
-* [BuddhistParallels](../basicmodel/doc/BuddhistParallels.md) -- pramana theory, tetralemma, and the Buddhist motivation for non-affirming negation.
+* [Philosophy](../basicmodel/doc/Philosophy.md) -- pramana theory, tetralemma, and the Buddhist motivation for non-affirming negation.

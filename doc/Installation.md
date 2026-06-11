@@ -13,6 +13,7 @@
   * Lambda Labs SSH key (`~/bin/lambda.pem` by default, configurable via `LAMBDA_KEY_FILE`).
   * EC2 training key (`~/.ssh/nanochat-key.pem`, auto-created by remote tooling as needed).
   * Lightsail key (`./wikiOracle.pem` by default, configurable via `WO_KEY_FILE`).
+  * Machine-specific LAN keys and tunnels belong in an ignored `Makefile.local`.
 
 ### Python dependencies
 
@@ -60,7 +61,7 @@ These are the primary entry points. For a local WikiOracle + NanoChat stack, use
 | `make install`         | Create `.venv` (shim + NanoChat), install all deps             |
 | `make build`           | Alias for `make train` (currently the BasicModel pipeline)     |
 | `make nano_train`      | Full NanoChat training pipeline                                |
-| `make sync HOST=local` | Sync app to ArborMini                                          |
+| `make sync HOST=local` | Optional private sync hook from `Makefile.local`               |
 | `make sync HOST=remote`| Sync app + checkpoints to/from production server               |
 | `make sync HOST=build` | Deploy active remote training artifacts to WikiOracle          |
 | `make run HOST=local`  | Start WikiOracle Flask shim locally (foreground)               |
@@ -107,7 +108,7 @@ These are the primary entry points. For a local WikiOracle + NanoChat stack, use
 
 | Target                       | Purpose                                          |
 | ---------------------------- | ------------------------------------------------ |
-| `make sync HOST=local`       | Sync app to ArborMini                            |
+| `make sync HOST=local`       | Optional private sync hook from `Makefile.local` |
 | `make sync HOST=remote`      | Sync app + checkpoints to/from production server |
 | `make sync HOST=build`       | Deploy active remote training artifacts to WikiOracle |
 | `make sync_checkpoint_pull`  | Pull fine-tuning weights from production         |
@@ -116,6 +117,8 @@ These are the primary entry points. For a local WikiOracle + NanoChat stack, use
 ### Service control (`nano_*`, `wo_*`, `basicmodel_*`)
 
 NanoChat and WikiOracle support local (PID file + background process) and remote (`systemctl`) operation, controlled by `HOST=local|remote`. The `sync` target additionally accepts `HOST=build` to deploy artifacts from the active remote training instance. Training uses `HOST=local|build`, while run/test targets are local-only and reject non-local hosts. BasicModel is registered but does not yet have an inference server.
+
+Private LAN orchestration, developer-machine sync, and local service tunnel setup are intentionally excluded from the tracked Makefile. Put those workflows in an ignored `Makefile.local`; the public Makefile includes it automatically when present and otherwise emits clear stub messages for private hooks.
 
 | Target                                           | Purpose                          |
 | ------------------------------------------------ | -------------------------------- |

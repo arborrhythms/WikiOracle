@@ -44,7 +44,7 @@ Facts are classified by kind:
 The server persists only knowledge facts.  News facts are session-only
 to avoid worldline capture (identity collapse through spatiotemporal
 observation).  See doc/Freedom.md (Entanglement Policy) and
-basicmodel/doc/BuddhistParallels.md for the philosophical basis.
+basicmodel/doc/Philosophy.md for the philosophical basis.
 
 This is deliberately conservative: hedged claims ("might be"),
 questions, and subjective markers ("I think") override IS detection

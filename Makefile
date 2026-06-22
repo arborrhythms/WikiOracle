@@ -678,7 +678,7 @@ $(VENV_DIR):
 install: $(VENV_DIR)
 	deactivate 2>/dev/null || true
 	rm -rf $(SHIM_VENV)
-	python3 -m venv $(SHIM_VENV)
+	python3.12 -m venv $(SHIM_VENV)
 	$(SHIM_ACTIVATE) && python -m pip install --upgrade pip setuptools wheel && \
 		python -m pip install -r requirements.txt
 ifeq ($(ARCH),gpu)
@@ -885,6 +885,15 @@ sync_checkpoint_push:
 # Legacy aliases
 checkpoint_pull: sync_checkpoint_pull
 checkpoint_push: sync_checkpoint_push
+
+# Submodules
+
+sync-submodules:
+	git submodule update --remote --merge --recursive
+	git add basicmodel nanochat openclaw
+	git commit -m "Update submodule pins"
+	git push
+
 
 # --- BasicModel (basic_*) -----------------------------------------------------
 # Mirrors nano_* structure for the BasicModel subsystem.

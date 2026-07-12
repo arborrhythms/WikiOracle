@@ -1,19 +1,26 @@
 # TODO
 
-## MentalModel
-* ensure Truth
-* ShamathaSpeech mode
+================================== Europe ==================================
 
-================================== April 24 ==================================
+## Ask Solid community for a simple file-getting interface
+* if the user provides the server with an API key, we can query an LLM
+* if the user provides the server with a SOLID key, we can retrieve a file
+* if the user provides the server with a DSA key, we can decrypt a file
+* is there a POD service that does simple free hosting?
 
-## WikiOracle
-* share address
-* share with EFF, Solid, EthAI, etc
+## Ask EFF for a security review
+* propose "Owning our Data"
+* this entails taht marketers and AI are not allowed to lock us down karmically
+with specifically-characterized information (concrete details)
+* maybe it can learn from that data by removing or randomizing that information
 
-================================== May ? ==================================
+## Send email proposal to Apertus / SwissAI
+* First develop boilerplate on WikiOracle that references wikipedia, eff, and solid
 
-## Europe
-* Prepare for #AI4Good
+## Re-apply for poster session
+
+## Get WikiOracle running
+* Start with training a model
 
 ================================== Deferred ==================================
 
@@ -23,8 +30,6 @@
 * Parser: add handler in parse.py VP block to emit `<rev-lift>` XML tag
 * LiftingLayer: add `lift_inverse()` to Model.py -- since forward_reflexive computes C' = (I + VP_eff) @ C, inverse is C = (I + VP_eff)^{-1} @ C' via torch.linalg.solve
 * Engine: handle `<rev-lift>` tag in ConceptualSpace forward pass
-
-================================== ? ==================================
 
 ## Point-Free Spacetime
 * The `<place>` and `<time>` attributes of facts and feelings define a larger or smaller spatiotemporal subspace, not an infinite universal or infinitesimal particular extent.  The universal/particular distinction is a gradient of spatiotemporal extent (see doc/Freedom.md), and every proposition occupies a subspace that is larger or smaller, never infinite or infinitesimal.

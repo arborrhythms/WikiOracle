@@ -66,10 +66,10 @@ The four operators:
 
 * **and(a, b, ...)** = min(certainty_a, certainty_b, ...) -- conjunction is only as strong as the weakest operand.
 * **or(a, b, ...)** = max(certainty_a, certainty_b, ...) -- disjunction takes the strongest operand.
-* **not(a)** = $-$certainty_a -- negation flips the sign (affirming negation).
-* **non(a)** = 1 $-$ 2|a| -- non-affirming negation. Measures epistemic openness: how much certainty room remains. Full certainty in either direction ($\pm$1) yields $-$1 (fully closed); ignorance (0) yields +1 (fully open). See the [Non](#non-non-affirming-negation) section below for the Buddhist philosophical motivation.
+* **not(a)** = −certainty_a -- negation flips the sign (affirming negation).
+* **non(a)** = 1 − 2|a| -- non-affirming negation. Measures epistemic openness: how much certainty room remains. Full certainty in either direction (±1) yields −1 (fully closed); ignorance (0) yields +1 (fully open). See the [Non](#non-non-affirming-negation) section below for the Buddhist philosophical motivation.
 
-These operators compose freely -- for instance, material implication (A $\rightarrow$ B) falls out as `or(not(A), B)`.
+These operators compose freely -- for instance, material implication (A → B) falls out as `or(not(A), B)`.
 
 The key insight behind `non`: Kleene logic cannot detect uncertainty; it can only transmit it. `non` introduces uncertainty as a first-class observable. If WikiOracle needs to reason about openness rather than merely propagate it, then `non` is not ornamental -- it is structurally necessary. See [Expressive necessity](#expressive-necessity-why-and-or-not-is-incomplete-without-non) below for the proof and the [Non](#non-non-affirming-negation) section for the Buddhist philosophical motivation.
 
@@ -79,32 +79,32 @@ WikiOracle has two negation operators with distinct epistemic roles:
 
 | Operator | Formula    | Effect                                                           |
 | -------- | ---------- | ---------------------------------------------------------------- |
-| `not(a)` | $-$a         | Flips belief to disbelief (and vice versa). Affirming negation.  |
-| `non(a)` | 1 $-$ 2\|a\| | Measures epistemic openness on [-1, +1]. Non-affirming negation. |
+| `not(a)` | −a | Flips belief to disbelief (and vice versa). Affirming negation. |
+| `non(a)` | 1 − 2\|a\| | Measures epistemic openness on [-1, +1]. Non-affirming negation. |
 
-`not` is straightforward: if you believe a claim at +0.9, `not` yields $-$0.9 -- you now disbelieve it with equal strength. This is *affirming* negation: it asserts the contrary.
+`not` is straightforward: if you believe a claim at +0.9, `not` yields −0.9 -- you now disbelieve it with equal strength. This is *affirming* negation: it asserts the contrary.
 
 `non` does something fundamentally different. It erases the sign -- the direction of commitment -- and returns a value on the same [-1, +1] scale that measures how open or closed the epistemic state is:
 
-| Input a | \|a\| | non(a) = 1 $-$ 2\|a\| | Reading                                      |
+| Input a | \|a\| | non(a) = 1 − 2\|a\| | Reading |
 | ------- | ----- | ------------------- | -------------------------------------------- |
-| $\pm$1.0    | 1.0   | $-$1.0                | Full certainty $\rightarrow$ fully closed                |
-| $\pm$0.9    | 0.9   | $-$0.8                | Strong certainty $\rightarrow$ strongly closed           |
-| $\pm$0.7    | 0.7   | $-$0.4                |
-| $\pm$0.5    | 0.5   | 0.0                 | Moderate certainty $\rightarrow$ neither open nor closed |
-| $\pm$0.3    | 0.3   | 0.4                 |
-| $\pm$0.1    | 0.1   | 0.8                 | Weak certainty $\rightarrow$ strongly open               |
-| 0.0     | 0.0   | 1.0                 | Ignorance $\rightarrow$ fully open                       |
+| ±1.0 | 1.0 | −1.0 | Full certainty → fully closed |
+| ±0.9 | 0.9 | −0.8 | Strong certainty → strongly closed |
+| ±0.7 | 0.7 | −0.4 | |
+| ±0.5 | 0.5 | 0.0 | Moderate certainty → neither open nor closed |
+| ±0.3 | 0.3 | 0.4 | |
+| ±0.1 | 0.1 | 0.8 | Weak certainty → strongly open |
+| 0.0 | 0.0 | 1.0 | Ignorance → fully open |
 
 Three properties stand out:
 
-1. **Symmetry**: non(+a) = non($-$a). Belief and disbelief of equal strength produce the same openness.
+1. **Symmetry**: non(+a) = non(−a). Belief and disbelief of equal strength produce the same openness.
 2. **non(0) = +1**: Ignorance is maximum openness.
-3. **non($\pm$1) = $-$1**: Full certainty is fully closed.
+3. **non(±1) = −1**: Full certainty is fully closed.
 
-The $\pm$0.5 boundary is where `non` crosses zero: certainty below half-strength reads as open, above half-strength reads as closed.
+The ±0.5 boundary is where `non` crosses zero: certainty below half-strength reads as open, above half-strength reads as closed.
 
-The formula is the standard affine rescaling of the fuzzy complement: `1 $-$ |a|` maps certainty strength to openness on [0, 1]; the rescaling `2x $-$ 1` maps that onto [-1, +1], making `non` composable with the other operators.
+The formula is the standard affine rescaling of the fuzzy complement: `1 − |a|` maps certainty strength to openness on [0, 1]; the rescaling `2x − 1` maps that onto [-1, +1], making `non` composable with the other operators.
 
 ---
 
@@ -122,17 +122,17 @@ Chandrakirti and later commentators insisted that this kind of negation resists 
 
 ---
 
-## Why 1 $-$ 2|a| is the right formula
+## Why 1 − 2|a| is the right formula
 
-**1. Symmetry of extremes.** non(+0.9) = non($-$0.9) = $-$0.8. Strong belief and strong disbelief are treated identically. This maps precisely to the Madhyamaka rejection of both eternalism (strong positive assertion) and nihilism (strong negative assertion) as extreme views. Both are certainties; prasajya treats them the same.
+**1. Symmetry of extremes.** non(+0.9) = non(−0.9) = −0.8. Strong belief and strong disbelief are treated identically. This maps precisely to the Madhyamaka rejection of both eternalism (strong positive assertion) and nihilism (strong negative assertion) as extreme views. Both are certainties; prasajya treats them the same.
 
-**2. Ignorance yields maximum openness.** non(0) = +1. The non-affirming negation of "I don't know" is maximum openness. This resonates with the Madhyamaka teaching that not-knowing, when held correctly, is not a deficit but a clearing. The old formula mapped 0 $\rightarrow$ 0, treating ignorance as inert.
+**2. Ignorance yields maximum openness.** non(0) = +1. The non-affirming negation of "I don't know" is maximum openness. This resonates with the Madhyamaka teaching that not-knowing, when held correctly, is not a deficit but a clearing. The old formula mapped 0 → 0, treating ignorance as inert.
 
 ---
 
 ## Fuzzy logic interpretation
 
-In standard fuzzy logic on [0, 1], the complement of a membership value a is 1 $-$ a. WikiOracle's certainty scale [-1, +1] encodes both direction (sign) and strength (magnitude). The operation `1 $-$ 2|a|` applies the standard fuzzy complement to the *strength* of certainty (via `1 $-$ |a|`), then rescales back to [-1, +1] (via `2x $-$ 1`). This is the natural fuzzy-logical reading of "negate the commitment without asserting the opposite":
+In standard fuzzy logic on [0, 1], the complement of a membership value a is 1 − a. WikiOracle's certainty scale [-1, +1] encodes both direction (sign) and strength (magnitude). The operation `1 − 2|a|` applies the standard fuzzy complement to the *strength* of certainty (via `1 − |a|`), then rescales back to [-1, +1] (via `2x − 1`). This is the natural fuzzy-logical reading of "negate the commitment without asserting the opposite":
 
 * Fuzzy affirming negation (`not`): negate the *value* -- flip the sign, preserve the magnitude. You get the complementary claim.
 * Fuzzy non-affirming negation (`non`): negate the *strength* -- take the fuzzy complement of |a|, rescaled to the certainty range. You get a measure of openness, not a complementary claim.
@@ -143,7 +143,7 @@ In standard fuzzy logic on [0, 1], the complement of a membership value a is 1 $
 
 WikiOracle's `non` does not solve Chandrakirti's problem. It translates it.
 
-Prasajya-pratisedha is supposed to be a negation that posits nothing -- not even a measurement, not even a degree. `non(a) = 1 $-$ 2|a|` models *degree of epistemic openness*. That is a formal quantity, not a metaphysical void. The formula avoids the recursion that plagued Buddhist logicians because it is extensional -- defined by what it computes, not by what it means to negate without affirming. But this is a change of domain, not a resolution. The philosophical question of whether a truly positionless negation can be formalized remains open. What WikiOracle provides is a metric translation that preserves the key structural features (sign erasure, symmetry of extremes, openness of ignorance) while operating in a domain where those features can be computed and composed.
+Prasajya-pratisedha is supposed to be a negation that posits nothing -- not even a measurement, not even a degree. `non(a) = 1 − 2|a|` models *degree of epistemic openness*. That is a formal quantity, not a metaphysical void. The formula avoids the recursion that plagued Buddhist logicians because it is extensional -- defined by what it computes, not by what it means to negate without affirming. But this is a change of domain, not a resolution. The philosophical question of whether a truly positionless negation can be formalized remains open. What WikiOracle provides is a metric translation that preserves the key structural features (sign erasure, symmetry of extremes, openness of ignorance) while operating in a domain where those features can be computed and composed.
 
 ---
 
@@ -172,11 +172,11 @@ This is the formal analogue of a structural distinction that Buddhist logicians 
 
 ### What non adds: the detection functions
 
-In discrete ternary logic ({T, U, F} = {+1, 0, $-$1}), `non` acts as a **detector for uncertainty**:
+In discrete ternary logic ({T, U, F} = {+1, 0, −1}), `non` acts as a **detector for uncertainty**:
 
-* non(T) = non(+1) = $-$1 = F
+* non(T) = non(+1) = −1 = F
 * non(U) = non(0) = +1 = T
-* non(F) = non($-$1) = $-$1 = F
+* non(F) = non(−1) = −1 = F
 
 That is: non(x) = T if and only if x = U. This is the detection function **J_U**.
 
@@ -198,7 +198,7 @@ With J_T, J_U, and J_F available, we can build **case expressions**: "if x = T t
 
 ### The completeness result
 
-**Theorem.** {and, or, not, non} can express every function f: {T, U, F}^n $\rightarrow$ {T, F}.
+**Theorem.** {and, or, not, non} can express every function f: {T, U, F}^n → {T, F}.
 
 *Proof sketch.* Given any f whose output is always definite (T or F), express it as a disjunction over all input tuples where f returns T. Each such tuple can be detected using J_T, J_U, J_F on individual variables, combined with `and`. The disjunction of these detections yields f. QED.
 
@@ -218,7 +218,7 @@ The four operators constitute a two-axis epistemic algebra:
 The formal results above establish three things:
 
 1. `non` is not derivable from the classical ternary operators {and, or, not}. It breaks the regularity barrier.
-2. Adding `non` yields bivalent functional completeness: {and, or, not, non} can express every function f: {T, U, F}^n $\rightarrow$ {T, F}.
+2. Adding `non` yields bivalent functional completeness: {and, or, not, non} can express every function f: {T, U, F}^n → {T, F}.
 3. `non` enables *detection* of uncertainty rather than mere propagation. Without it, Kleene logic can pass uncertainty through but can never see it.
 
 This is a genuine structural enrichment of Strong Kleene logic.

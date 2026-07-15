@@ -1,341 +1,299 @@
 # Config
 
-WikiOracle configuration lives in `config.xml` at the project root. The file is validated by `data/config.xsd` and loaded at server startup by `bin/config.py`. A template with sensible defaults ships as `data/config.xml` -- copy it to the project root and fill in your values. `config.xml` is gitignored.
+WikiOracle configuration is XML loaded by `bin/config.py` and described by `data/config.xsd`. `data/config.xml` is the shipped baseline; an optional project-root `config.xml` is deep-merged over it. Scalars and lists in the override replace baseline values, while nested dictionaries merge recursively.
 
-The configuration has two top-level sections: [Server](#server) and [Providers](#providers). Each section is described below with its fields, defaults, and design rationale.
+## Canonical Structure
 
-> **Migration note (v0.x):** The former `user`, `chat`, and `ui` top-level sections have been removed. User identity (`client_name`, `client_id`) is now in [State](./State.md). Chat evaluation fields moved to `server.evaluation`; truth policy fields moved to `server.truthset`; UI preferences moved to `state.client.ui`. See each section below for the full mapping.
-
-## Server
-
-Runtime parameters. These values serve as defaults and are typically overridden via CLI flags at startup.
-
-| Field          | Type    | Default        | Description                                                                                                                          |
-| -------------- | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `server_name`  | string  | `"WikiOracle"` | Human-readable display name for this server instance.                                                                                |
-| `server_id`    | string  | `"wikioracle"` | Stable identifier for this server instance. Used as the `source` field in server truth entries returned to the client in debug mode. |
-| `stateless`    | boolean | `false`        | Stateless mode -- no disk writes. Equivalent to `--stateless` CLI flag. See [Freedom.md](./Freedom.md) Section Entanglement Policy.   |
-| `url_prefix`   | string  | `""`           | URL path prefix prepended to all routes (e.g. `/chat`) for reverse-proxy deployments. Equivalent to `--url-prefix`.                  |
-| `truthset`     | section | --              | TruthSet policy settings. See [Truthset](#truthset) below.                                                                           |
-| `evaluation`   | section | --              | LLM inference defaults. See [Evaluation](#evaluation) below.                                                                         |
-| `training`     | section | --              | Online learning subsystem. See [Training](#training) below.                                                                          |
-| `allowed_urls` | section | --              | URL whitelist for authority/provider fetches. See [Allowed URLs](#allowed-urls) below.                                               |
-
-```xml
-<server>
-  <server_name>WikiOracle</server_name>
-  <server_id>wikioracle</server_id>
-  <stateless>true</stateless>
-  <url_prefix></url_prefix>
-
-  <truthset>...</truthset>
-  <evaluation>...</evaluation>
-  <training>...</training>
-  <allowed_urls>...</allowed_urls>
-</server>
-```
-
-### Truthset
-
-TruthSet policy settings controlling how facts are stored and validated.
-
-| Field            | Type            | Default | Description                                                                                                                                                                                                                                                                                                                                                   |
-| ---------------- | --------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `truth_symmetry` | boolean         | `true`  | Enforce Truth Symmetry. Claims involving value judgements are checked for asymmetric harm under identity exchange before admission to the TruthSet. See [Ethics.md](./Ethics.md) Section 5-8.                                                                                                                                                                        |
-| `store_concrete` | boolean         | `false` | Store concrete (spatiotemporally-bound) facts in the server TruthSet. When false, only universal facts persist -- consistent with Zero-Knowledge / Selective Disclosure principles. Particular facts always train weights regardless of this setting; the fact/feeling distinction is the privacy boundary. See [Ethics.md](./Ethics.md) Section Entanglement Policy. |
-| `truth_weight`   | decimal 0.0-1.0 | `0.7`   | Controls how much DegreeOfTruth (DoT) gates the online training learning rate, and whether truth entries are sent to the provider as RAG context. See [Truth weight and RAG](#truth-weight-and-rag) below.                                                                                                                                                    |
-
-```xml
-<truthset>
-  <truth_symmetry>true</truth_symmetry>
-  <store_concrete>false</store_concrete>
-</truthset>
-```
-
-#### Truth weight and RAG
-
-The `truth_weight` field (0.0-1.0) replaces the former boolean `rag` flag.  It serves a dual purpose:
-
-1. **RAG delivery gate**: When `truth_weight > 0`, the full TruthSet -- facts, feelings, references, operators, authorities, and providers -- is assembled into the provider bundle and sent to the UI-selected provider.  When `truth_weight = 0`, no truth is sent (equivalent to the former `rag: false`).
-
-2. **Training LR modulation**: During online training, `truth_weight` controls how much DoT gates the learning rate.  See [Training.md](./Training.md) Section Training Algorithm for the formula.
-
-**Legacy migration**: The former `rag` boolean is automatically migrated: `rag: true` $\rightarrow$ `truth_weight: 0.7`, `rag: false` $\rightarrow$ `truth_weight: 0.0`.  This migration runs in both the client (`client/config.js`) and server (`bin/response.py`).
-
-### Evaluation
-
-Defaults for LLM inference. These were formerly in the top-level `chat` section.
-
-| Field         | Type            | Default | Description                                                                                    |
-| ------------- | --------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `temperature` | decimal 0.0-2.0 | `0.7`   | Sampling temperature. 0.0 is deterministic; 2.0 is maximum randomness.                        |
-| `max_tokens`  | positive int    | `128`   | Maximum tokens requested from the provider for a single response.                              |
-| `timeout`     | positive int    | `120`   | Request timeout in seconds for provider evaluation.                                            |
-| `url_fetch`   | boolean         | `false` | Allow the assistant to fetch and incorporate content from URLs referenced in the conversation. |
-| `thought_free` | boolean        | `false` | Enable thought-free (shamatha speech) mode. Restricts BasicModel grammar to the S$\rightarrow$C transition only and prepends a 10-rule constraint prompt to LLM providers. See [UserInterface.md](./UserInterface.md) Section Settings Controls. |
-
-```xml
-<evaluation>
-  <temperature>0.7</temperature>
-  <max_tokens>128</max_tokens>
-  <timeout>120</timeout>
-  <url_fetch>false</url_fetch>
-</evaluation>
-```
-
-### Training
-
-Controls the continuous learning pipeline (Stages 2-4). Renamed from the former `online_training` section. See [Training.md](./Training.md) for the full design.
-
-| Field                       | Type                      | Default            | Description                                                                                                                                                                                                                                                                                  |
-| --------------------------- | ------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                   | boolean                   | `false`            | **Master switch.** When false, the entire post-response pipeline -- DegreeOfTruth computation, TruthSet merge, PII filtering, symmetry checking, and NanoChat training -- is skipped. See [Behavior when disabled](#behavior-when-training-is-disabled) below.                                 |
-| `truth_corpus_path`         | string                    | `"data/truth.xml"` | Filesystem path to the server TruthSet (XML). Relative paths resolve from the project root.                                                                                                                                                                                                  |
-| `truth_max_entries`         | positive int              | `1000`             | Maximum server TruthSet entries before trimming. Entries with `\|trust\|` closest to 0.0 are removed first during the merge stage. Range: 100-10000.                                                                                                                                         |
-| `alpha_base`                | decimal                   | `0.01`             | Base learning rate for online training weight updates.                                                                                                                                                                                                                                       |
-| `alpha_min`                 | decimal                   | `0.001`            | Minimum learning rate floor. The adaptive scheduler never reduces below this.                                                                                                                                                                                                                |
-| `alpha_max`                 | decimal                   | `0.1`              | Maximum learning rate ceiling. The adaptive scheduler never exceeds this.                                                                                                                                                                                                                    |
-| `merge_rate`                | decimal                   | `0.1`              | Slow-moving exponential average rate for merging newly learned entries into the canonical truth corpus.                                                                                                                                                                                      |
-| `device`                    | `auto` \| `cpu` \| `cuda` | `"cpu"`            | Compute device for training operations. `auto` selects the best available.                                                                                                                                                                                                                   |
-| `dissonance_enabled`        | boolean                   | `true`             | Enable cognitive dissonance detection. The trainer identifies and penalises contradictions between new inputs and established truth entries.                                                                                                                                                 |
-| `operators_dynamic_enabled` | boolean                   | `true`             | Load custom operators. Custom operators extend the training pipeline with user-defined transformations.                                                                                                                                                                                      |
-| `warmup_steps`              | positive int              | `50`               | Sigmoid warmup midpoint for the annealing schedule. The first ~2$\times$`warmup_steps` interactions ramp from near-zero to full training strength, preventing early corruption. See [Training.md](./Training.md) Section Sigmoid Warmup.                                                                   |
-| `grad_clip`                 | decimal > 0               | `1.0`              | Maximum gradient norm for `clip_grad_norm_()`. Prevents catastrophic single-step weight changes. Lower values are more conservative. See [Training.md](./Training.md) Section Gradient Clipping.                                                                                                    |
-| `anchor_decay`              | decimal 0.0-1.0           | `0.001`            | EMA blend-back rate toward checkpoint weights after each training step. Higher values pull the model back more aggressively toward its initial state. Modulated by `truth_weight`: `anchor_effective = anchor_decay $\times$ truth_weight`. See [Training.md](./Training.md) Section EMA Weight Anchoring. |
-
-```xml
-<training>
-  <enabled>false</enabled>
-  <truth_corpus_path>data/truth.xml</truth_corpus_path>
-  <truth_max_entries>1000</truth_max_entries>
-  <alpha_base>0.01</alpha_base>
-  <alpha_min>0.001</alpha_min>
-  <alpha_max>0.1</alpha_max>
-  <merge_rate>0.1</merge_rate>
-  <device>cpu</device>
-  <dissonance_enabled>true</dissonance_enabled>
-  <operators_dynamic_enabled>true</operators_dynamic_enabled>
-  <warmup_steps>50</warmup_steps>
-  <grad_clip>1.0</grad_clip>
-  <anchor_decay>0.001</anchor_decay>
-</training>
-```
-
-#### Behavior when training is disabled
-
-When `enabled` is `false` (the default), the engine effectively treats all incoming facts as feelings. The Sensation preprocessor (`bin/sensation.py`) still classifies sentences into `<fact>` and `<feeling>` tags at the message level, but the entire post-response pipeline is skipped:
-
-* **No DegreeOfTruth** is computed.
-* **No truth merge** occurs -- facts from conversation are never promoted into the TruthSet.
-* **No PII filtering** or **symmetry checking** runs (there is nothing to filter).
-* **No NanoChat training step** is dispatched.
-
-In this mode, facts carry no more lasting weight than feelings. They are tagged in the XML for display purposes, but they are ephemeral -- they do not accumulate, persist, or influence future responses via RAG. This is the safe default: the system functions as a stateless chat proxy until the operator explicitly enables truth acquisition.
-
-### Allowed URLs
-
-URL prefixes permitted for outbound HTTP(S) requests made by the server during authority lookups and dynamic provider fetches. Only URLs whose prefix matches one of these entries are allowed. `file://` URLs are always blocked unless explicitly whitelisted.
-
-```xml
-<allowed_urls>
-  <url>https://api.openai.com/</url>
-  <url>https://api.anthropic.com/</url>
-  <url>https://generativelanguage.googleapis.com/</url>
-  <url>https://api.x.ai/</url>
-  <url>https://en.wikipedia.org/</url>
-  <url>https://wikiOracle.org/</url>
-  <url>https://127.0.0.1:</url>
-  <url>https://localhost:</url>
-  <url>http://127.0.0.1:</url>
-</allowed_urls>
-```
-
-See [PrivacyAndSecurity.md](./PrivacyAndSecurity.md) for the security rationale.
-
-## Providers
-
-LLM provider definitions. Each `<provider name="key">` block configures an upstream API endpoint. The `name` attribute is the internal lookup key; `display_name` is the label shown in the chat UI on assistant messages.
-
-| Field                  | Type   | Default        | Description                                                                                                                                    |
-| ---------------------- | ------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`              | string | `"wikioracle"` | Provider key selected on startup. Must match a `name` in a `<provider>` block. Formerly `ui.default_provider`.                                 |
-| `context`              | XHTML  | (empty)        | Persistent context block prepended to every query. Moved from state; allows config-level context that applies regardless of session. Optional. |
-| `output`               | string | (empty)        | Output-format instruction block appended to the system prompt. Moved from state. Optional.                                                     |
-| `truth_context`        | string | (empty)        | Default truth context applied to all providers. Optional.                                                                                      |
-| `conversation_context` | string | (empty)        | Default conversation context applied to all providers. Optional.                                                                               |
-
-Each `<provider name="key">` block supports:
-
-| Field           | Type         | Default    | Description                                                                                                                                           |
-| --------------- | ------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `display_name`  | string       | --          | Human-readable label tagging assistant messages (e.g. `chatGPT`, `claude`, `gemini`).                                                                 |
-| `username`      | string       | --          | API login / email associated with the provider account.                                                                                               |
-| `url`           | URI          | (built-in) | API endpoint URL. Built-in defaults exist for known providers.                                                                                        |
-| `api_key`       | string       | --          | API key. Prefer environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`) -- see [PrivacyAndSecurity.md](./PrivacyAndSecurity.md). |
-| `default_model` | string       | --          | Model identifier used when no model is explicitly selected (e.g. `gpt-4o`, `claude-sonnet-4-6`).                                                      |
-| `timeout`       | positive int | `120`      | Request timeout in seconds.                                                                                                                           |
-| `streaming`     | boolean      | `false`    | Use Server-Sent Events (SSE) for streamed responses.                                                                                                  |
-
-### Built-in providers
-
-| Key          | Built-in name | Built-in default model                    | API key env var         | Model env var         |
-| ------------ | ------------- | ----------------------------------------- | ----------------------- | --------------------- |
-| `wikioracle` | `WikiOracle`  | (none; template commonly sets `nanochat`) | --                       | --                     |
-| `openai`     | `OpenAI`      | `gpt-4o`                                  | `OPENAI_API_KEY`        | `OPENAI_MODEL`        |
-| `anthropic`  | `Anthropic`   | `claude-sonnet-4-6`                       | `ANTHROPIC_API_KEY`     | `ANTHROPIC_MODEL`     |
-| `gemini`     | `Gemini`      | `gemini-2.5-flash`                        | `GEMINI_API_KEY`        | `GEMINI_MODEL`        |
-| `grok`       | `Grok`        | `grok-3-mini`                             | `XAI_API_KEY`           | `XAI_MODEL`           |
-| `openrouter` | `OpenRouter`  | `google/gemma-3-4b-it:free`               | `OPENROUTER_API_KEY`    | `OPENROUTER_MODEL`    |
-
-Custom providers can be added by appending `<provider name="my_key">` blocks. Any `name` not in the built-in list creates a new provider entry.
-
-```xml
-<providers>
-  <default>wikioracle</default>
-
-  <provider name="wikioracle">
-    <display_name>oracle</display_name>
-    <username>you@example.com</username>
-    <url>http://127.0.0.1:8000/chat/completions</url>
-    <api_key></api_key>
-    <default_model>nanochat</default_model>
-    <timeout>120</timeout>
-    <streaming>true</streaming>
-  </provider>
-
-  <!-- additional provider blocks ... -->
-</providers>
-```
-
-### API key precedence
-
-1. **Environment variable** (recommended for anything beyond localhost).
-2. **`config.xml`** `api_key` field -- convenient for local dev, but the config is served to the client via `/bootstrap` and `/config`.
-3. **Truth entry** `<provider><api_key>$ENV_VAR</api_key></provider>` -- the `$` prefix triggers server-side env-var resolution; the literal key is never stored in state.
-
-The `/config` and `/bootstrap` endpoints expose only `has_key` (boolean) -- never the key itself. See [PrivacyAndSecurity.md](./PrivacyAndSecurity.md) for details.
-
-### Runtime precedence
-
-The effective runtime value for a provider setting may come from the request, `config.xml`, or environment variables.
-
-| Setting | Resolution order | Notes |
-| ------- | ---------------- | ----- |
-| Main provider | `POST /chat` `config.provider` $\rightarrow$ `providers.default` $\rightarrow$ built-in `wikioracle` | The server now honors `providers.default` when the request omits `config.provider`. |
-| Model | `POST /chat` `config.model` $\rightarrow$ provider-specific `*_MODEL` env var $\rightarrow$ `providers.<name>.default_model` $\rightarrow$ built-in default (when defined) | The browser usually sources `config.model` from `state.ui.model`. |
-| API key | provider-specific `*_API_KEY` env var $\rightarrow$ `providers.<name>.api_key` $\rightarrow$ missing | Dynamic truth-entry providers can additionally use `$ENV_VAR` indirection. |
-| Local WikiOracle upstream URL | `providers.wikioracle.url` $\rightarrow$ `WIKIORACLE_BASE_URL` + `WIKIORACLE_API_PATH` | `/nanochat_status` probes this resolved WikiOracle upstream. |
-
-## Environment variables
-
-Runtime configuration can also be set via environment variables. These override `config.xml` values where applicable.
-
-| Variable                          | Default                      | Purpose                                                   |
-| --------------------------------- | ---------------------------- | --------------------------------------------------------- |
-| `WIKIORACLE_STATE_FILE`           | `state.xml`                  | Path to local state file (WikiOracle State XML).          |
-| `WIKIORACLE_BASE_URL`             | `http://127.0.0.1:8000`      | Upstream NanoChat-compatible base URL.                    |
-| `WIKIORACLE_API_PATH`             | `/chat/completions`          | Upstream chat endpoint path appended to base URL.         |
-| `WIKIORACLE_BIND_HOST`            | `127.0.0.1`                  | Host to bind the Flask server to.                         |
-| `WIKIORACLE_BIND_PORT`            | `8888`                       | Port for the Flask server.                                |
-| `WIKIORACLE_SSL_CERT`             | `~/.ssl/<hostname>.pem`      | TLS certificate path.                                     |
-| `WIKIORACLE_SSL_KEY`              | `~/.ssl/<hostname>-key.pem`  | TLS private key path.                                     |
-| `WIKIORACLE_TIMEOUT_S`            | `120`                        | Network timeout (seconds) for provider requests.          |
-| `WIKIORACLE_MAX_STATE_BYTES`      | `20000000`                   | Hard upper bound for serialized state size.               |
-| `WIKIORACLE_MAX_CONTEXT_CHARS`    | `40000`                      | Context rewrite cap for merge appendix generation.        |
-| `WIKIORACLE_REJECT_SYMLINKS`      | `true`                       | Refuse symlinked state files.                             |
-| `WIKIORACLE_AUTO_MERGE_ON_START`  | `true`                       | Auto-import `llm_*` files at startup.                     |
-| `WIKIORACLE_AUTO_CONTEXT_REWRITE` | `false`                      | Enable delta-based context append during merges.          |
-| `WIKIORACLE_MERGED_SUFFIX`        | `.merged`                    | Suffix applied to files after successful import.          |
-| `WIKIORACLE_ALLOWED_ORIGINS`      | `https://127.0.0.1:8888,...` | Comma-separated CORS allowed origins.                     |
-| `WIKIORACLE_API_TOKEN`            | (empty)                      | Bearer token for endpoint auth (empty = no auth).         |
-| `WIKIORACLE_STATELESS`            | (unset)                      | Set truthy to disable all writes and use in-memory state. |
-| `WIKIORACLE_URL_PREFIX`           | (unset)                      | Optional reverse-proxy path prefix.                       |
-| `OPENAI_API_KEY`                  | --                            | OpenAI API key.                                           |
-| `ANTHROPIC_API_KEY`               | --                            | Anthropic API key.                                        |
-| `GEMINI_API_KEY`                  | --                            | Google Gemini API key.                                    |
-| `XAI_API_KEY`                     | --                            | xAI (Grok) API key.                                       |
-| `OPENROUTER_API_KEY`             | --                            | OpenRouter API key.                                       |
-
-### Provider-specific environment overrides
-
-These environment variables override provider-level defaults without editing `config.xml`.
-
-| Variable              | Provider      | Purpose                                 | Built-in fallback                |
-| --------------------- | ------------- | --------------------------------------- | -------------------------------- |
-| `OPENAI_MODEL`        | `openai`      | Override `providers.openai.default_model` | `gpt-4o`                         |
-| `ANTHROPIC_MODEL`     | `anthropic`   | Override `providers.anthropic.default_model` | `claude-sonnet-4-6`          |
-| `GEMINI_MODEL`        | `gemini`      | Override `providers.gemini.default_model` | `gemini-2.5-flash`             |
-| `XAI_MODEL`           | `grok`        | Override `providers.grok.default_model` | `grok-3-mini`                   |
-| `OPENROUTER_MODEL`    | `openrouter`  | Override `providers.openrouter.default_model` | `google/gemma-3-4b-it:free` |
-
-
-## OpenClaw Plugin Config
-
-When using WikiOracle as an OpenClaw provider, the TypeScript extension
-at `openclaw/extensions/wikioracle/` is configured via OpenClaw's
-plugin config system.  Add the following to your OpenClaw config file
-(`~/.openclaw/config.json5` or project-level):
-
-```json5
-{
-  plugins: {
-    entries: ["wikioracle"],
-    wikioracle: {
-      woPath: "/absolute/path/to/WikiOracle/bin/wo",
-      serverUrl: "https://127.0.0.1:8888",
-      insecure: true,
-      stateful: true,
-      stateFile: "state.xml",
-      token: "optional-bearer-token",
-    },
-  },
-}
-```
-
-| Field       | Type    | Default                    | Description                                                                                                                  |
-| ----------- | ------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `woPath`    | string  | `"../bin/wo"`              | Absolute or relative path to WikiOracle's `bin/wo` CLI. Relative paths resolve from the OpenClaw working directory.          |
-| `serverUrl` | string  | `"https://127.0.0.1:8888"` | WikiOracle server URL.                                                                                                       |
-| `insecure`  | boolean | `true`                     | Skip TLS certificate verification (`bin/wo -k`). Set to `false` for production deployments with valid certificates.          |
-| `stateful`  | boolean | `true`                     | Use stateful mode (server owns session state). When `false`, state is serialized to the local file specified by `stateFile`. |
-| `stateFile` | string  | `"state.xml"`              | Local state file path for stateless mode (`bin/wo -f`). Ignored in stateful mode.                                            |
-| `token`     | string  | (none)                     | Optional bearer token for WikiOracle API authentication (`bin/wo -t`).                                                       |
-
-The full JSON Schema for the plugin config is defined in
-`openclaw/extensions/wikioracle/openclaw.plugin.json`.
-
-The extension registers three capabilities:
-
-1. **Provider** (`wikioracle`) -- selectable in OpenClaw's provider list
-2. **Command** (`/wo <message>`) -- direct CLI access from any channel
-3. **Tool** (`wikioracle_query`) -- available to OpenClaw agents
-
-See [Training.md](./Training.md) Section OpenClaw Integration for the
-message flow and training pipeline details.
-
-## CLI flags
-
-```
-python bin/wikioracle.py [--config PATH] [--debug] [--stateless] [--no-ssl] [--url-prefix PREFIX] [serve | merge FILE...]
-```
-
-| Flag                  | Description                                                   |
-| --------------------- | ------------------------------------------------------------- |
-| `--config PATH`       | Path to `config.xml` (default: project root).                 |
-| `--debug`             | Enable verbose debug logging.                                 |
-| `--stateless`         | Run in stateless mode (no disk writes).                       |
-| `--no-ssl`            | Serve over plain HTTP (skip TLS).                             |
-| `--url-prefix PREFIX` | URL path prefix (e.g. `/chat`) for reverse-proxy deployments. |
-| `serve`               | Run the Flask shim server (default).                          |
-| `merge FILE...`       | Merge incoming state files into the current state.            |
-
-## Schema
-
-The XML schema is defined in `data/config.xsd`. Use it for IDE validation and autocompletion:
+| Section | Authority | Contents |
+|---|---|---|
+| `<server>` | Operator/server | Runtime mode, truth policy, evaluation/training defaults, URL allowlist, Dropbox app credentials, provider definitions, and shared prompts |
+| `<client>` | Browser/client | UI preferences, per-session evaluation choices, provider/model selection, storage preference, and per-provider API keys |
 
 ```xml
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="config.xsd">
-  ...
+  <server>...</server>
+  <client>...</client>
 </config>
 ```
+
+The browser receives a client-safe projection. Server-only Dropbox attributes and any provider key found in `server.providers` are removed; configured provider definitions are augmented with the model choices used by the UI. Values under `client.providers`, including client-owned API keys, remain browser-visible.
+
+## Server
+
+### Identity and Runtime
+
+| Field | Type | Shipped value | Description |
+|---|---|---|---|
+| `server_name` | String | `WikiOracle` | Human-readable server label; optional in the XSD |
+| `server_id` | String | `wikioracle` | Persistent server identity; a missing ID is generated in writable mode |
+| `stateless` | Boolean | `true` | Disable state/config writes and require authoritative state/config on `/chat` |
+| `url_prefix` | String | Empty | Prefix applied to every route for reverse-proxy deployments |
+| `truthset` | Section | See below | Truth admission and grounding policy |
+| `evaluation` | Section | See below | Provider evaluation defaults |
+| `training` | Section | See below | Optional continuous-learning defaults |
+| `allowed_urls` | Section | See below | Outbound provider/authority allowlist |
+| `dropbox` | Element | Empty credentials | Server-only Dropbox OAuth app attributes |
+| `providers` | Section | Six definitions | Shared prompt fields and upstream provider definitions |
+
+Runtime precedence for the stateless flag is CLI `--stateless`, then `server.stateless`, then `WIKIORACLE_STATELESS`. The route prefix uses CLI `--url-prefix`, then `WIKIORACLE_URL_PREFIX`.
+
+### TruthSet Policy
+
+| Field | Type | Default | Description |
+|---|---|---:|---|
+| `truth_symmetry` | Boolean | `true` | Check value claims for asymmetric harm under identity exchange |
+| `store_concrete` | Boolean | `false` | Permit spatiotemporally bound facts in the server TruthSet |
+| `truth_weight` | Decimal 0-1 | `0.7` | Controls whether/how strongly TruthSet sources enter the prompt and how strongly DoT gates online learning |
+
+| `truth_weight` | RAG behavior | Online-learning behavior |
+|---:|---|---|
+| `0.0` | Truth sources are omitted | DoT does not gate the learning rate; EMA anchor effect is zero |
+| `0.7` | Default weighted grounding | DoT substantially modulates learning and anchoring |
+| `1.0` | Full grounding | Learning is fully DoT-gated and uses the configured anchor strength |
+
+### Evaluation Defaults
+
+| Field | Type | Default | Description |
+|---|---|---:|---|
+| `temperature` | Decimal 0-2 | `0.7` | Sampling temperature |
+| `max_tokens` | Positive integer | `128` | Maximum response tokens requested from the main provider |
+| `timeout` | Positive integer | `120` | Provider request timeout in seconds |
+| `url_fetch` | Boolean | `false` | Allow URL content to be incorporated during evaluation |
+| `thought_free` | Boolean | `false` | Optional server default for non-discursive output; the client has its own preference field |
+
+The request can override provider, model, temperature, URL fetching, thought-free mode, and selected truth/training controls. Values are clamped or normalized in `process_chat()`.
+
+### Training
+
+Training is disabled by default and is also unavailable in stateless mode.
+
+| Field | Type | Default | Description |
+|---|---|---:|---|
+| `enabled` | Boolean | `false` | Master switch for post-response truth merge and online training |
+| `truth_corpus_path` | String | `data/truth.xml` | Server truth corpus path |
+| `truth_max_entries` | Integer 100-10000 | `1000` | Maximum corpus entries before low-information trimming |
+| `alpha_base` | Decimal | `0.01` | Base learning rate |
+| `alpha_min` | Decimal | `0.001` | Minimum learning-rate floor |
+| `alpha_max` | Decimal | `0.1` | Maximum learning-rate ceiling |
+| `merge_rate` | Decimal | `0.1` | Moving-average rate when client truth updates an existing server entry |
+| `device` | `auto`, `cpu`, `cuda` | `cpu` | Online-training device |
+| `dissonance_enabled` | Boolean | `true` | Enable contradiction/dissonance handling |
+| `operators_dynamic_enabled` | Boolean | `true` | Enable dynamic operator processing |
+| `warmup_steps` | Positive integer | `50` | Midpoint of the sigmoid training warmup |
+| `grad_clip` | Decimal > 0 | `1.0` | Maximum gradient norm |
+| `anchor_decay` | Decimal 0-1 | `0.001` | EMA pull toward checkpoint parameters |
+
+When `enabled=false`, the post-response DegreeOfTruth, server-truth merge, and online-training stages are skipped. Message-level fact/feeling parsing and response rendering still operate.
+
+### Allowed URLs
+
+`allowed_urls` is a repeated prefix allowlist used for authority lookups and dynamic provider endpoints.
+
+| URL class | Rule |
+|---|---|
+| HTTPS | Allowed only when the full URL begins with a configured prefix |
+| Loopback HTTP | Allowed only for `127.0.0.1` or `localhost`, and only when prefix-matched |
+| `file://` | Denied unless an explicit `file://` prefix is allowlisted; API-key file resolution is additionally confined to its data allowlist and rejects symlinks/traversal |
+| Other schemes | Denied |
+
+### Dropbox
+
+```xml
+<dropbox app_key="..." app_secret="..."/>
+```
+
+| Attribute | Required by XSD | Exposure |
+|---|---:|---|
+| `app_key` | Yes | Server only; removed from `/config` and `/bootstrap` |
+| `app_secret` | Yes | Server only; removed from `/config` and `/bootstrap` |
+
+Dropbox OAuth tokens are stored in the Flask session cookie context; the encryption password supplied for a save/load operation is not stored in configuration or session state.
+
+## Provider Definitions
+
+Provider definitions live under `server.providers`. The element uses an explicit `<name>` child, not a `name` attribute.
+
+### Shared Prompt Fields
+
+| Field | Type | Purpose |
+|---|---|---|
+| `context` | XHTML | Shared system context |
+| `output` | String | Output-format instructions |
+| `truth_context` | XHTML | Role context for truth-only beta providers |
+| `conversation_context` | XHTML | Role context for conversational beta providers |
+
+### Provider Fields
+
+| Field | Required | Description |
+|---|---:|---|
+| `name` | Yes | User-facing registry key used by client selection |
+| `type` | Yes | Adapter type: `wikioracle`, `openai`, `anthropic`, `gemini`, `grok`, or `openrouter` |
+| `username` | No | Account/display metadata |
+| `url` | Yes | Upstream endpoint |
+| `model` | Yes | Server default model |
+| `timeout` | Yes | Per-provider timeout |
+| `streaming` | Yes | Streaming capability flag |
+| `api_key` | No in schema | Legacy server-side position; canonical client keys belong under `client.providers` and the server parser omits this field from definitions |
+
+```xml
+<providers>
+  <context>Return strictly valid XHTML.</context>
+  <output>Use conversation, fact, and feeling elements.</output>
+  <provider>
+    <name>OpenAI</name>
+    <type>openai</type>
+    <username>you@example.com</username>
+    <url>https://api.openai.com/v1/chat/completions</url>
+    <model>gpt-4o</model>
+    <timeout>120</timeout>
+    <streaming>false</streaming>
+  </provider>
+</providers>
+```
+
+### Shipped Providers
+
+| Name | Type | Shipped model | Endpoint family |
+|---|---|---|---|
+| WikiOracle | `wikioracle` | `nanochat` | Local OpenAI-compatible endpoint |
+| OpenAI | `openai` | `gpt-4o` | OpenAI chat completions |
+| Anthropic | `anthropic` | `claude-sonnet-4-6` | Anthropic messages |
+| Gemini | `gemini` | `gemini-2.5-flash` | Google Generative Language |
+| Grok | `grok` | `grok-3-mini` | xAI OpenAI-compatible endpoint |
+| OpenRouter | `openrouter` | `google/gemma-3-4b-it:free` | OpenRouter chat completions |
+
+The model selector also receives a code-maintained list of supported choices from `_PROVIDER_MODELS`; the configured `model` remains the fallback for each provider.
+
+## Client
+
+### Client Fields
+
+| Field | Type | Default | Description |
+|---|---|---:|---|
+| `storage` | Element | Empty | Optional `state_key` attribute reserved for client storage selection |
+| `temperature` | Decimal 0-2 | `0.7` | Client evaluation preference |
+| `url_fetch` | Boolean | `false` | Client URL-fetch preference |
+| `thought_free` | Boolean | `false` | Client thought-free preference |
+| `ui` | Section | See below | Browser layout and interaction preferences |
+| `providers` | Section | See below | Provider/model selection and API keys |
+
+### UI Preferences
+
+| Field | Type | Default | Description |
+|---|---|---:|---|
+| `layout` | `horizontal`, `vertical` | `horizontal` | Main panel arrangement |
+| `theme` | `system`, `light`, `dark` | `light` | Color theme |
+| `divider_pos` | Integer 0-100 | `0` | Saved tree/chat divider position |
+| `swipe_nav_horizontal` | Boolean | `true` | Horizontal swipe navigation |
+| `swipe_nav_vertical` | Boolean | `false` | Vertical swipe navigation |
+| `confirm_actions` | Boolean | `false` | Confirm destructive operations |
+
+### Client Provider Settings
+
+| Field | Type | Purpose |
+|---|---|---|
+| `default_provider` | String | Selected provider name; must match a server provider definition |
+| `default_model` | String | Selected model override |
+| `provider/name` | String | Provider name associated with a key |
+| `provider/api_key` | String | Client-owned key for that provider |
+
+```xml
+<client>
+  <temperature>0.7</temperature>
+  <url_fetch>false</url_fetch>
+  <thought_free>false</thought_free>
+  <ui>
+    <layout>horizontal</layout>
+    <theme>light</theme>
+    <divider_pos>0</divider_pos>
+    <swipe_nav_horizontal>true</swipe_nav_horizontal>
+    <swipe_nav_vertical>false</swipe_nav_vertical>
+    <confirm_actions>false</confirm_actions>
+  </ui>
+  <providers>
+    <default_provider>WikiOracle</default_provider>
+    <default_model>nanochat</default_model>
+    <provider>
+      <name>WikiOracle</name>
+      <api_key>...</api_key>
+    </provider>
+  </providers>
+</client>
+```
+
+### Runtime Selection Precedence
+
+| Setting | Resolution order |
+|---|---|
+| Provider | Request `config.provider` -> `client.providers.default_provider` |
+| Model | Request `config.model` -> `client.providers.default_model` -> selected server provider `model` |
+| Main-provider API key | Request/runtime client provider key -> loaded `client.providers.<name>.api_key` |
+| Dynamic truth-provider key | Embedded provider-entry key (literal or allowlisted `file://`) -> matching configured provider key -> selected provider-family environment fallback where implemented |
+| Temperature | Request `config.temp` -> `server.evaluation.temperature`, clamped to 0-2 |
+
+The browser stores the normalized config in both `sessionStorage` and `localStorage` for tab-close durability. In stateful mode, `POST /config` accepts only the incoming `client` section; the server section remains authoritative on disk. Stateless servers reject config writes.
+
+## Runtime Environment Variables
+
+These variables configure the Flask process and its transport. XML still supplies provider definitions and model defaults.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WIKIORACLE_STATE_FILE` | `state.xml` | Canonical state path |
+| `WIKIORACLE_BASE_URL` | `http://127.0.0.1:8000` | Local WikiOracle/NanoChat base URL fallback |
+| `WIKIORACLE_API_PATH` | `/chat/completions` | Local upstream path |
+| `WIKIORACLE_BIND_HOST` | `127.0.0.1` | Flask bind interface |
+| `WIKIORACLE_BIND_PORT` | `8888` | Flask bind port |
+| `WIKIORACLE_SSL_CERT` | Host-derived path under `~/.ssl` | TLS certificate |
+| `WIKIORACLE_SSL_KEY` | Host-derived path under `~/.ssl` | TLS private key |
+| `WIKIORACLE_TIMEOUT_S` | `120` | General provider timeout |
+| `WIKIORACLE_MAX_STATE_BYTES` | `20000000` | Flask request/state size cap |
+| `WIKIORACLE_MAX_CONTEXT_CHARS` | `40000` | Merge-context rewrite cap |
+| `WIKIORACLE_MAX_INPUT_LEN` | `50000` | Chat-message character cap |
+| `WIKIORACLE_REJECT_SYMLINKS` | `true` | Reject symlinked state files |
+| `WIKIORACLE_AUTO_MERGE_ON_START` | `true` | Import adjacent `llm_*.xml/.json` files at startup |
+| `WIKIORACLE_AUTO_CONTEXT_REWRITE` | `false` | Append merge deltas to context |
+| `WIKIORACLE_MERGED_SUFFIX` | `.merged` | Suffix for imported files |
+| `WIKIORACLE_ALLOWED_ORIGINS` | Local HTTPS origins | CORS allowlist |
+| `WIKIORACLE_API_TOKEN` | Empty | Optional bearer token |
+| `WIKIORACLE_SESSION_SECRET` | Derived from state path | Flask session signing secret |
+| `WIKIORACLE_RATE_LIMIT_CHAT` | `30` | Chat requests per minute per IP; `0` disables the chat-specific limit |
+| `WIKIORACLE_RATE_LIMIT_DEFAULT` | `120` | Default requests per minute per IP |
+| `WIKIORACLE_STATELESS` | `false` fallback | Stateless fallback when CLI/XML do not decide |
+| `WIKIORACLE_URL_PREFIX` | Empty | Route-prefix fallback |
+
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY` are last-resort fallbacks for matching dynamic truth-provider URLs. Main provider calls use the canonical `client.providers` key flow.
+
+## OpenClaw Extension
+
+The `openclaw` submodule includes `extensions/wikioracle`, which invokes `bin/wo` and registers a provider, `/wo` command, and `wikioracle_query` tool.
+
+| Field | Default | Purpose |
+|---|---|---|
+| `woPath` | `../bin/wo` | WikiOracle CLI path |
+| `serverUrl` | `https://127.0.0.1:8888` | Flask server URL |
+| `insecure` | `true` | Skip verification for the local self-signed certificate |
+| `stateful` | `true` | Use the server-owned state contract |
+| `stateFile` | `state.xml` | Local file used for stateless state or stateful logging |
+| `token` | None | Optional bearer token |
+
+## CLI Flags
+
+```text
+python bin/wikioracle.py [--config PATH] [--debug] [--stateless]
+                         [--no-ssl] [--url-prefix PREFIX]
+                         [serve | merge FILE...]
+```
+
+| Flag/command | Purpose |
+|---|---|
+| `--config PATH` | Load a specified configuration file |
+| `--debug` | Enable verbose diagnostic output |
+| `--stateless` | Disable writes and require client-owned request state/config |
+| `--no-ssl` | Serve plain HTTP instead of local TLS |
+| `--url-prefix PREFIX` | Prefix all application routes |
+| `serve` | Start the Flask shim (default) |
+| `merge FILE...` | Merge portable state files into the canonical state |
+
+The authoritative schema is [`data/config.xsd`](../data/config.xsd).

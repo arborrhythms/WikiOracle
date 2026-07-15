@@ -39,6 +39,7 @@ PDFOPTS := --pdf-engine=xelatex \
 
 MAKE_PDF = pandoc $(PDFOPTS) \
           --from=gfm+smart \
+          --lua-filter=doc/table-widths.lua \
           --metadata title="$(TITLE)" \
           --toc --toc-depth=3 \
           --resource-path=doc
@@ -193,6 +194,16 @@ PDF_CHAPTERS := README.md \
   doc/UserInterface.md \
   doc/ProposedLicense.md
 
+PDF_ASSETS := doc/diagrams/wikioracle_architecture.svg \
+  doc/diagrams/request_lifecycle.svg \
+  doc/table-widths.lua
+
+MOC_POSTER_SOURCE ?= doc/WikiOracle_MoC7_Poster.pptx
+MOC_POSTER_PDF    ?= doc/WikiOracle_MoC7_Poster.pdf
+SOFFICE ?= $(shell if [ -x /Applications/LibreOffice.app/Contents/MacOS/soffice ]; then \
+	printf '%s' /Applications/LibreOffice.app/Contents/MacOS/soffice; \
+	else command -v soffice 2>/dev/null || printf '%s' soffice; fi)
+
 
 # --- Help ---------------------------------------------------------------------
 
@@ -260,7 +271,7 @@ help:
 	@echo ""
 	@echo "Other:"
 	@echo "  make openclaw_setup/run/test"
-	@echo "  make doc"
+	@echo "  make doc                 Rebuild docs and the MOC poster PDF when stale"
 	@echo "  make clean / clean_all"
 	@echo ""
 	@echo "Key variables:"
@@ -1101,18 +1112,32 @@ build_sft:
 # --- Documentation and PDFs ------------------------------------------------------------
 # Generate a single PDF from all doc/*.md files with README as index.
 
-doc : WikiOracle.pdf
+doc : WikiOracle.pdf $(MOC_POSTER_PDF)
 	cd basicmodel && $(MAKE) $@
 	cd $(NANOCHAT_DIR) && $(ACTIVATE) && \
 		export NANOCHAT_BASE_DIR="$(NANOCHAT_BASE)" && \
 		python -m nanochat.report generate
 
 TITLE := WikiOracle Documentation
-WikiOracle.pdf : $(PDF_CHAPTERS)
-	@echo "Generating PDF from doc/*.md → output/WikiOracle.pdf ..."
+WikiOracle.pdf : $(PDF_CHAPTERS) $(PDF_ASSETS)
+	@echo "Generating assembled documentation → WikiOracle.pdf ..."
 	mkdir -p output
-	$(MAKE_PDF) -o $@ $^
-	@echo "Done: output/WikiOracle.pdf"
+	$(MAKE_PDF) -o $@ $(PDF_CHAPTERS)
+	@echo "Done: WikiOracle.pdf"
+
+$(MOC_POSTER_PDF) : $(MOC_POSTER_SOURCE)
+	@command -v "$(SOFFICE)" >/dev/null 2>&1 || { \
+		echo "LibreOffice is required to export the MOC poster PDF." >&2; \
+		echo "Install LibreOffice or run make with SOFFICE=/path/to/soffice." >&2; \
+		exit 1; \
+	}
+	@echo "Generating MOC poster PDF → $@ ..."
+	@tmp_dir=$$(mktemp -d); \
+		trap 'rm -rf "$$tmp_dir"' EXIT; \
+		"$(SOFFICE)" --headless --convert-to pdf --outdir "$$tmp_dir" "$<" >/dev/null; \
+		test -s "$$tmp_dir/$(@F)" || { echo "LibreOffice did not create $(@F)." >&2; exit 1; }; \
+		mv "$$tmp_dir/$(@F)" "$@"
+	@echo "Done: $@"
 
 # --- Cleanup ------------------------------------------------------------------
 

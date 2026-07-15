@@ -1,116 +1,95 @@
 # WikiOracle
-Revision: 2026.02.27
+Revision: 2026.07.15
 
-![WikiOracle Architecture: wikioracle.org production deployment](diagrams/wikioracle_architecture.svg)
+WikiOracle is a local-first orchestration layer for conversations, explicit truth, provider voting, and optional online learning. A browser client owns the interaction model; a Flask shim validates and executes each request; and one or more language-model providers supply responses or evidence.
+
+![WikiOracle architecture](diagrams/wikioracle_architecture.svg)
 
 ## Architectural Overview
 
-The system is governed by two file types:
+The durable interchange format is deliberately small: two schema-validated XML documents separate user/session data from runtime policy.
 
-* **State files** (`.xml`): contain client identity, UI preferences, conversations, and truth entries (validated by `data/state.xsd`).
-* **Config files** (`.xml`): contain provider defaults and credentials, server policy, and runtime defaults (validated by `data/config.xsd`).
+| Document | Canonical sections | Owner | Purpose |
+|---|---|---|---|
+| `state.xml` | `<header>`, recursive `<conversation>` elements, optional `<truth>` | Client/session | Identity metadata, conversation history, selection state, attachments, and the user's TruthSet |
+| `config.xml` | `<server>` and optional `<client>` | Server policy plus client preferences | Runtime mode, truth policy, evaluation and training defaults, provider definitions, UI preferences, provider selection, and client API keys |
 
-## Client
+The same application supports two runtime contracts:
 
-The state of WikiOracle is maintained by the client.
-It has the following information:
+| Mode | State authority | Request/response contract | Writes |
+|---|---|---|---|
+| **Stateful** | Flask shim loads the canonical state file | The client may send truth overrides; `/chat` returns the selected conversation delta | State and client config may be written locally |
+| **Stateless** | Browser supplies authoritative state and runtime config on every `/chat` call | `/chat` returns the full updated state | No state or config writes; client data remains in browser storage |
 
-* **Client**: has information about the user and the file itself
-  * **Client Name**: display name shown for user-role messages
-  * **Client ID**: stable client identifier
-  * **UI**: browser-side default interface settings
-    * **Layout**: horizontal or vertical layout, with legacy `flat` still supported
-    * **Theme**: system, light, or dark
-    * **Model**: currently selected model override
-    * **Confirm Actions**: whether deletes and merges require confirmation
-    * **Splitter**: saved tree/chat panel split position
-* **Conversation**: consists of queries, responses, and sub-conversations arranged as a tree
-  * **Query**: text from the user
-  * **Response**: text from the selected main provider
-  * **Selection**: the currently selected conversation path
-  * **Branching**: child conversations can diverge from any earlier point
-* **TruthSet**: a set of beliefs, each of which has a Degree of Truth
-  * **Direct Truth**: things that we know directly
-    * **Feeling**: statements which are beyond true or not true, like poetry or opinion
-    * **Fact**: concrete and abstract propositions about the world and language itself
-    * **Operator**: logical operators such as And, Or, Not, and Non
-  * **Indirect Truth**: things that we know only indirectly
-    * **Reference**: a URL or citation that grounds a claim
-    * **Provider**: another oracle that can provide truth and optionally participate in the conversation
-    * **Authority**: a reference to another set of conversations and truths
+The public `wikioracle.org` deployment uses stateless mode. Local development can use either contract.
 
-## Server
+## State and Conversation Model
 
-The server executes the client state, based on a configuration file and a corpus of truth that it maintains which is identical to the TruthSet of a state file.
+The state grammar is `Header + Conversation* + Truth?`. Conversations form a recursive tree in XML and may form a DAG in memory when a voting result has multiple parents.
 
-The configuration file on the server has information such as the following:
+| State unit | Required content | Important metadata | Role |
+|---|---|---|---|
+| Header | Version, schema URL, creation time, title | Last-modified time, client name, client ID | Identifies the portable state document |
+| Conversation | Title plus ordered message/conversation children | `id`, optional `parentId`, optional `selected` | Represents a root session, branch, or merge node |
+| Message | XHTML content and optional attachments | `id`, `role`, `username`, `time`, optional `selected` | Represents a user, assistant, or system turn |
+| TruthSet | Zero or more typed truth entries | Entry IDs, titles, timestamps, place, and DoT where applicable | Supplies explicit evidence, rules, experts, and authorities |
 
-* **Server**: runtime and training parameters
-  * **Server Name**: human-readable server name
-  * **Server ID**: stable server identifier
-  * **Stateless**: whether the server is allowed to write to disk
-  * **URL Prefix**: optional route prefix for reverse-proxy deployments
-  * **TruthSet**: parameters governing the server's TruthSet
-    * **Truth Symmetry**: asymmetric-harm checking under identity exchange
-    * **Store Concrete**: whether spatiotemporally-bound facts persist
-    * **Truth Weight**: how much the TruthSet affects RAG and training
-  * **Evaluation**:
-    * **Temperature**: sampling temperature
-    * **Max Tokens**: maximum response length
-    * **Timeout**: request timeout for provider calls
-    * **URL Fetch**: whether URL fetching is allowed during evaluation
-  * **Training**: continuous learning subsystem
-    * **Enabled**: master switch for post-response learning
-    * **Truth Corpus Path**: path to the server TruthSet
-    * **Truth Max Entries**: max server truth entries before trimming
-    * **Learning Rates**: `alpha_base`, `alpha_min`, `alpha_max`
-    * **Merge Rate**: moving-average merge speed for truth updates
-    * **Device**: `cpu`, `cuda`, or `auto`
-    * **Dissonance**: contradiction detection and penalty
-    * **Warmup / Clipping / Anchoring**: `warmup_steps`, `grad_clip`, `anchor_decay`
-  * **Allowed URLs**: whitelist for authority and provider fetches
-* **Providers**: one or more upstream LLM provider definitions
-  * **Default Provider**: provider selected on startup when the request does not override it
-  * **Shared Prompt Fields**: `context`, `output`, `truth_context`, and `conversation_context`
-  * **Provider**: a single provider entry keyed by name
-    * **Display Name**: label shown in assistant messages
-    * **Username**: account login or email
-    * **URL**: API endpoint
-    * **API Key**: authentication credential
-    * **Default Model**: model used when none is selected explicitly
-    * **Timeout / Streaming**: per-provider request behavior
-  * **Built-in Providers**: WikiOracle, OpenAI, Anthropic, Gemini, Grok, and OpenRouter
-
-## Conversation 
-
-A conversation happens first by processing the Indirect Truth entries of the TruthSet: single references are fetched, the truth of authorities are collected, and providers (which are other minds) are asked for their input to the current Query.
-The result of that is a TruthSet that consists only of Direct Truths.
-
-All truths (except Feelings) have a Degree of Trust in the range [-1, 1], where -1 is fully untrusted, 0 is unknown, and 1 is fully trusted. 
-Feelings are always trusted, but do not count as evidence when deliberating.
-So computation over these truths looks like a network of trust that involves various sources and our own intuitions (which count, even though they can't provide evidence).
-
-Each of those facts is then compared to the TruthSet stored by the server.
+Selection is persisted on conversation and message elements. Selected conversations form one root-to-node path; a selected message is unique across the state.
 
 ## TruthSet
 
-* **Trust entries** carry certainty values in [-1, +1] using Kleene ternary/fuzzy logic -- from certainly true (+1) through ignorance (0) to certainly false (-1).
-* **Logical operators** (and/or/not/non under Strong Kleene semantics) compute derived certainty over the TruthSet.
-* **Authorities** reference external knowledge bases, enabling transitive trust with certainty scaling.
-* **Providers** are external LLMs used as expert consultants whose responses become sources with associated certainty.
-* **Feelings** are subjective statements (opinions, poetry, hedged claims) occupying the "neither" position in the tetralemma. They influence evaluation but are excluded from training and TruthSets.
-* **References** are external source citations (Wikipedia, Snopes, etc.) that ground claims in verifiable sources, participating in the TruthSet alongside facts.
+Truth entries are typed XML elements rather than an unstructured prompt appendix.
 
-The UI-selected provider acts as the "mastermind," synthesizing all evidence -- facts, references, operator-derived certainty, authority imports, and provider consultations -- into a final response.
+| Element | DoT | Meaning | Evaluation behavior |
+|---|---:|---|---|
+| `<fact>` | Required | Verifiable claim or observation | Included as direct truth and eligible for derivation/training policy |
+| `<feeling>` | None | Subjective, poetic, or otherwise non-truth-evaluable expression | May shape evaluation but is excluded from evidence scoring and training |
+| `<reference>` | Required | External citation represented by one `<a href="...">` anchor | Grounds a claim in an inspectable source |
+| `<logic>` | Required | `and`, `or`, `not`, or `non` over references or inline operands | Computes derived certainty using Strong Kleene/fuzzy semantics |
+| `<provider>` | Required | Dynamic expert definition, optionally conversational | Produces evidence or a visible voting branch |
+| `<authority>` | Required | Pointer to another state or TruthSet | Imports remote truth with certainty scaling and bounded fetching |
 
-## Example
+DoT values occupy [-1, +1]: -1 is certainly false, 0 is unknown, and +1 is certainly true. Feelings intentionally sit outside that truth lattice.
 
-As a somewhat fun example, we consider how WikiOracle can be used to create a voting system that operates in real-time as a Hierarchical Mixture of Experts composed of multiple LLMS (or even a single LLM with mutliple truth sets).
+## Configuration Model
 
-The "alpha" conducts the vote. So there is a conversation in which the user asks a question. The state file of the alpha contains, in addition to various facts, feelings, and other sources of truth, two providers which we will call the "betas". When the user directs a query to the alpha, the alpha first turns its indirect truth into direct truth: that means evlauating the providers. So, the Query from the user is passed to the Betas.
+The configuration separates fields the operator controls from preferences a client can update.
 
-Each of the Betas sees the query and is asked to respond with a Response to the Query, and optionally to provide its Facts and Feelings that are relevant to that Query. In a sense, they are voting on that query, and providing their own reasons for having done so.
+| Scope | Major sections | Examples |
+|---|---|---|
+| `server` | Identity and mode | `server_id`, `stateless`, `url_prefix` |
+| `server.truthset` | Truth policy | Symmetry checks, concrete-fact storage, truth weight |
+| `server.evaluation` | Provider defaults | Temperature, maximum tokens, timeout, URL fetching, thought-free mode |
+| `server.training` | Online learning | Enable switch, corpus path, DoT learning rates, clipping, anchoring, device |
+| `server.providers` | Provider registry and shared prompts | Provider type, URL, model, timeout, streaming, context/output instructions |
+| `client.ui` | Browser preferences | Layout, theme, divider position, swipe navigation, confirmation prompts |
+| `client.providers` | Client selection and credentials | Default provider, default model, per-provider API key |
+| `client.storage` | Cloud-storage preference | Optional state key; Dropbox app credentials remain server-only |
 
-Finally, the Alpha see the query and the Responses (or votes) cast by the betas. It also sees the facts and feelings that they have returned, which are incorporated into the TruthSet. So it has this mixture of its own truth and truth provided by each of the Betas, and based on their advice and its trust of each Beta, it concludes with a Respons of its own. This construct is a bit non-traditional in terms of a linear conversation, and it fact it creates a diamond pattern in the tree view of the conversation.
+The server exposes a client-safe projection of config: Dropbox credentials and any legacy server-side provider key are removed. Client-owned API keys remain in `client.providers` because the browser settings flow owns and supplies them; they must therefore be treated as sensitive browser-accessible data.
 
-For more information, see [Voting](./Voting.md).
+## Conversation and Truth Pipeline
+
+![WikiOracle request and truth lifecycle](diagrams/request_lifecycle.svg)
+
+| Stage | Inputs | Result |
+|---|---|---|
+| 1. Normalize | User message, selected path, runtime config, client TruthSet | Valid XHTML, effective provider/model, direct and derived truth |
+| 2. Consult | Dynamic provider entries, direct truth, prompt context | Conversation contributions and/or truth-only contributions from beta providers |
+| 3. Synthesize | Selected main provider, history, TruthSet, authorities, derived logic, beta output | Final response plus extracted facts and feelings |
+| 4. Persist | Updated conversation graph and truth policy | Full state in stateless mode or local state plus conversation delta in stateful mode |
+| 5. Learn (optional) | Extracted truths, DoT, privacy/symmetry filters, training settings | Server truth merge and a bounded online-training step |
+
+When no dynamic `<provider>` entries exist, the consultation stage collapses to a single call to the UI-selected provider. When conversational beta providers participate, WikiOracle records their branches and the final synthesis as a diamond in the conversation DAG.
+
+## Provider Voting Example
+
+The HME voting pattern distinguishes the provider that synthesizes the answer from providers that contribute evidence.
+
+| Actor | Input | Output | Conversation visibility |
+|---|---|---|---|
+| User | Question | Query message | Root or selected branch |
+| Beta provider | Query, direct truth, and role-specific context | Facts/feelings; optionally a conversational response | Hidden when `conversation=false`; visible as a branch when `true` |
+| Alpha provider | Query, conversation history, TruthSet, derived truth, and beta contributions | Final answer plus extractable facts/feelings | Final merge node |
+
+Cycle prevention carries a provider call chain through nested consultations. A provider already present in the ancestry remains silent, preventing recursive voting loops. See [Voting](./Voting.md) for the topology and [Implementation](./Implementation.md) for the endpoint and module reference.

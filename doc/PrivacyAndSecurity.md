@@ -1,139 +1,116 @@
 # Privacy and Security
 
+## Data Ownership and Flow
 
-## Privacy
+WikiOracle is local-first, but "local-first" does not mean that no content is ever transmitted. The selected provider receives the prompt material required for a response, and a stateless Flask deployment receives the state/config supplied with each request.
 
-Facts in WikiOracle are classified into two kinds based on their relationship
-to spacetime:
+| Data | Stateful mode | Stateless mode | Upstream exposure |
+|---|---|---|---|
+| Conversations | Persisted in local `state.xml`; `/chat` returns a selected delta | Browser/CLI sends authoritative state and receives full updated state | Selected path/history is included in provider prompts |
+| Client TruthSet | Persisted with state; client may override truth on a chat turn | Sent with authoritative state | Enabled truth sources enter the provider bundle according to truth weight |
+| Server truth corpus | Optional `data/truth.xml` on the writable server | Disabled | Used for DoT/learning policy, not sent as a raw file |
+| Server policy/provider definitions | Loaded from `config.xml` | Returned as a client-safe runtime config | Effective prompts, endpoint, and selected model govern provider calls |
+| Client API keys | Project config and browser storage | Browser storage/runtime config | Used by the Flask shim to authenticate provider calls |
+| Dropbox OAuth tokens | Flask session | Flask session | Sent to Dropbox only |
+| Encryption password | One save/load request | One save/load request | Used in memory for AES ZIP operations; not persisted by WikiOracle |
 
-| Kind                   | Description                                        | Persistence                        |
-| ---------------------- | -------------------------------------------------- | ---------------------------------- |
-| **Abstract Knowledge** | Universal claims with no spatiotemporal anchor     | Server TruthSet                    |
-| **Concrete News**      | Observations bound to a specific place and/or time | Client state and optionally Server |
+Users should assume that any conversation text, truth source, or attachment selected for a provider request can leave the local machine and be governed by that provider's own retention policy.
 
-### Why news facts are session-only
+## Spatiotemporal Privacy
 
-Persisting spatiotemporally bound observations creates a **worldline** -- a
-traceable path through spacetime that could identify a user. If a server
-accumulates entries like "User was in Paris at 9am" and "User was in London
-at 3pm", an adversary could reconstruct the user's physical movements.
+Facts are classified by their relationship to spacetime.
 
-WikiOracle prevents this by:
+| Kind | Description | Default persistence policy |
+|---|---|---|
+| Abstract knowledge | Broad claim without a concrete place/time anchor | Eligible for server TruthSet persistence |
+| Concrete news | Observation tied to a place and/or time | Remains in client state; excluded from server truth unless `store_concrete=true` |
+| Feeling | Subjective/non-truth-evaluable expression | May remain in client state; excluded from server truth and training |
 
-1. **Classifying** facts as knowledge or news via `is_knowledge_fact()` and
-   `is_news_fact()` in `bin/truth.py`.  News facts are identified by the
-   presence of `<place>` or `<time>` child elements with real values inside
-   the XHTML content.
-2. **Filtering** server persistence through `filter_knowledge_only()` -- only
-   knowledge facts reach the server TruthSet.
-3. **Detecting** identifiability via `detect_identifiability()` --
-   scanning content for PII patterns (emails, phone numbers, GPS coordinates,
-   street addresses, named persons with temporal prepositions).
-4. **Stripping** spacetime child elements via `strip_spacetime_elements()` when
-   content needs to be anonymised (removes `<place>` and `<time>` elements).
+Persisting concrete observations can create a **worldline**: a sequence of places and times from which a person's movement or identity can be reconstructed.
 
-### Personal Identity
+| Control | Implementation | Purpose |
+|---|---|---|
+| Knowledge/news classification | `is_knowledge_fact()`, `is_news_fact()` | Detect real `<place>`/`<time>` content |
+| Knowledge-only filter | `filter_knowledge_only()` | Exclude concrete facts when `store_concrete=false` |
+| Identifiability detection | `detect_identifiability()` | Find emails, phones, handles, IPs, coordinates, addresses, specific times, and person/place-time patterns |
+| Spacetime removal | `strip_spacetime_elements()` | Remove place/time child elements when anonymization is required |
+| Truth symmetry | `detect_asymmetric_claim()` | Reject selected asymmetric value claims before server-truth merge |
 
-Identifying information is removed before training or storing in the server's TruthSets.
-The identity detector covers: email addresses, phone numbers,
-@handles, usernames, IP addresses, GPS/DMS coordinates, street addresses,
-specific clock times and ISO timestamps, and named individuals combined
-with temporal or spatial prepositions.
+See [Freedom](./Freedom.md) for the Entanglement Policy and its universal/particular/feeling channels.
 
+## Credentials
 
-### Entanglement Policy
+### Provider API Keys
 
-The privacy architecture is grounded in WikiOracle's Entanglement
-Policy -- three channels (universal facts, particular facts, feelings)
-with distinct persistence rules. See [Freedom.md](./Freedom.md) for
-the full policy: the LFGC framing, the three-channel table, the
-Spatiotemporal Extent criterion, and the Zero-Knowledge / Selective
-Disclosure principles. The `detect_identifiability()` and
-`filter_knowledge_only()` functions in `bin/truth.py` enforce the
-policy at the content level.
+| Credential source | Runtime and exposure policy |
+|---|---|
+| **Client provider key** | `config.client.providers.<name>.api_key` is the canonical main-provider key in both runtime contracts. It is visible to same-origin client code and stored in browser config storage, so use it only when that browser exposure is acceptable. |
+| **Dynamic provider key** | `<provider><api_key>...` is used only for that dynamic expert. It may be a literal or an allowlisted `file://` reference; avoid raw keys in portable or shared state. |
+| **Server environment** | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY` are last-resort fallbacks for matching dynamic-provider URLs. They are not served directly and are preferable for server-controlled dynamic experts. |
+| **Legacy server provider key** | `server.providers.api_key` is ignored by the canonical provider parser/writer and removed from the client-safe server projection. Do not rely on it. |
 
-## Security
+`/config` and `/bootstrap` remove Dropbox credentials and server-side provider keys, but they intentionally preserve `client.providers` because the browser owns those settings. A same-origin compromise can therefore read client API keys.
 
-WikiOracle is a local-first application. The Flask server binds to `127.0.0.1:8888` by default (loopback only). In production, Apache ProxyPass routes external traffic to the local Flask process; the server itself is never directly exposed. This document covers the security considerations relevant to its architecture.
+### Dropbox Credentials
 
-### Private Data
+Dropbox app credentials live on `<server><dropbox app_key="..." app_secret="..."/>` and are removed from the client-safe config. OAuth access/refresh tokens live in the signed Flask session. Session cookies use `HttpOnly`, `Secure` when TLS is active, and `SameSite=Lax`.
 
-**Conversation state** (`state.xml`) contains the user's full dialogue history, system context, and trust entries. It lives on disk next to the server process.
+Encrypted uploads use AES-256 ZIP archives through `pyzipper`. State and config are separate archives; state-only sharing can generate a Dropbox link plus decryption material encoded as an authority QR. Sharing that QR is equivalent to sharing the encrypted state and its decryption key.
 
-* In **stateful mode**, state is read from and written to disk by the server. No state leaves the machine unless the user explicitly exports it.
-* In **stateless mode**, state is held in `sessionStorage` and sent to the server with each request. The server does not persist it. A same-origin script context can read `sessionStorage`, so the CSP policy (see below) is the primary defence against exfiltration.
+## Authentication and Request Controls
 
-**Trust entries** may contain user-authored facts, external source references, and provider configuration. Entries with high certainty influence every LLM response via RAG retrieval.
+| Control | Default | Behavior |
+|---|---|---|
+| Bind interface | `127.0.0.1:8888` | Flask is loopback-only unless explicitly reconfigured |
+| TLS | Enabled | Creates/uses a local certificate unless `--no-ssl` is passed |
+| Bearer authentication | Disabled when token is empty | `WIKIORACLE_API_TOKEN` protects non-public endpoints |
+| CSRF header | Required | Every POST must include `X-Requested-With: WikiOracle` |
+| CORS | Local HTTPS origins | Headers are emitted only for an allowlisted origin |
+| Rate limiting | 30 RPM for chat; 120 RPM default | In-process sliding window keyed by IP and path |
+| Input length | 50,000 characters | Oversized chat messages are rejected |
+| Request/state size | 20,000,000 bytes | Flask request cap and state-file guard |
+| Prompt-injection guard | Enabled | `guard_input()` rejects detected injection patterns before provider calls |
 
-**Exports** (`llm_*.xml` files) are full snapshots of state. They should be treated as sensitive if conversations contain private information.
+Public or multi-user deployments should place WikiOracle behind an authenticated reverse proxy, isolate state/config per user, set a bearer token and explicit session secret, use a valid TLS certificate, and narrow both CORS and outbound URL allowlists.
 
-### API Keys
+## Reverse Proxy and Provider Isolation
 
-Provider API keys (OpenAI, Anthropic, etc.) can be configured in three places, listed in precedence order:
+The production pattern terminates TLS at a reverse proxy and forwards the configured WikiOracle route prefix to Flask on loopback. Local NanoChat (port 8000 by default) and BasicModel (port 8001 by default) remain direct Flask-to-provider dependencies and should not be exposed merely because the browser UI is public.
 
-1. **Environment variables** (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) -- recommended for any deployment beyond localhost. Keys never appear in served content.
-2. **`config.xml`** `providers.<name>.api_key` -- convenient for local development but the config is served to the client via `/bootstrap` and `/config` GET endpoints. Any same-origin script context can read these keys.
-3. **Trust entries** (`<provider><api_key>$ENV_VAR</api_key></provider>`) -- the `$` prefix triggers env-var resolution on the server; the literal key is never stored in state.
+The same route prefix must be configured consistently in the proxy, Flask (`--url-prefix`/`WIKIORACLE_URL_PREFIX`), browser base URL, and CLI/OpenClaw clients.
 
-**Recommendation:** In any deployment where the server is reachable beyond `127.0.0.1`, use environment variables exclusively. Do not place raw API keys in `config.xml`.
+## Browser Content Security
 
-The `config.server.providers` metadata (served via `/config` and `/bootstrap`) exposes only `has_key` (boolean) and `needs_key` (boolean) -- never the key itself.
+WikiOracle renders a constrained XHTML/HTML surface. The browser applies multiple defenses.
 
-### Identity
+| Layer | Current control |
+|---|---|
+| Content Security Policy | Self-only scripts/styles/connections; data images; no objects, framing, external base, or form targets |
+| Sanitization | DOMPurify-based `sanitizeHtml()` plus XHTML validation/repair |
+| User input | Escaped before optimistic rendering |
+| Plain-text labels | Tag stripping/escaping for titles, tooltips, and status text |
+| Static assets | Only allowlisted extensions under the resolved `client/` directory |
 
-WikiOracle does not implement authentication. The server trusts any request from an allowed origin (configured via `WIKIORACLE_ALLOWED_ORIGINS`, defaulting to `https://127.0.0.1:8888` and `https://localhost:8888`).
+Residual risk remains because model and TruthSet content is rendered and also reused in prompts. Malicious but non-script markup can imitate interface elements, and hostile truth content can attempt prompt injection. CSP limits code execution; it does not determine whether rendered claims are honest.
 
-* **Username** is a display label set in Settings, not an authenticated identity. It is stored in `config.xml` and included in message metadata.
-* **No sessions or tokens.** There is no login, no cookies used for auth, and no per-user isolation. If multiple users share a server instance, they share the same state.
+## File-System Safety
 
-For multi-user or public deployments, WikiOracle should sit behind a reverse proxy that handles authentication and maps users to separate state files.
+| Control | Behavior |
+|---|---|
+| State symlinks | Rejected by default (`WIKIORACLE_REJECT_SYMLINKS=true`) |
+| State writes | Temporary file, flush, `fsync`, atomic replacement |
+| Config writes | Atomic replacement with owner-only `0600` permissions |
+| Imports | Filenames/path components are constrained; processed files receive the configured suffix |
+| Dynamic API-key files | Restricted to the allowlisted data directory; symlinks and traversal are rejected |
+| Authority fetching | Scheme/prefix allowlist, response-size cap, entry cap, refresh cache, and no recursive authority chain |
 
-### Reverse Proxy
+## Operational Checklist
 
-In production, Apache ProxyPass routes `/chat` to the local Flask process on `127.0.0.1:8787`. Only the `/chat` prefix is proxied. The NanoChat inference endpoint (`/chat/completions` on port 8000) is **not** exposed via the reverse proxy -- the Flask shim calls it directly on `127.0.0.1:8000` via `WIKIORACLE_BASE_URL`.
+| Deployment | Minimum posture |
+|---|---|
+| Local single-user | Keep loopback bind, use TLS, protect local state/config/browser profile, and do not share raw credentials |
+| LAN | Valid TLS, bearer token, explicit allowed origins, strong session secret, per-user state separation |
+| Public stateless | Reverse-proxy authentication, no config writes, strict outbound allowlist, no client keys unless browser exposure is accepted, provider-retention review |
+| Dropbox sharing | Strong unique archive password; share authority QR only with intended recipients; revoke Dropbox links when no longer needed |
 
-### Cross-Site Scripting (XSS)
-
-WikiOracle renders user and LLM content as HTML (XHTML subset). Several layers mitigate XSS:
-
-**Content-Security-Policy (CSP):** The server applies an enforcing CSP header to all responses:
-
-```
-default-src 'self';
-script-src 'self';
-style-src 'self';
-img-src 'self' data:;
-connect-src 'self';
-object-src 'none';
-base-uri 'self';
-frame-ancestors 'none';
-form-action 'self'
-```
-
-This blocks inline scripts, inline styles, and external resource loading. Even if malicious content is injected into a message, the browser will refuse to execute it.
-
-**XHTML enforcement:** The system context instructs the LLM to return strictly valid XHTML. The client validates responses and repairs malformed markup via `validateXhtml()` and `repairXhtml()` before rendering.
-
-**Input escaping:** User input is escaped via `escapeHtml()` before being inserted into optimistic UI entries. The `stripTags()` helper is used for tooltip and title text where HTML should not render.
-
-**Residual risks:**
-
-* LLM responses are rendered as HTML (not plain text). A sufficiently adversarial prompt could produce markup that, while blocked by CSP from executing scripts, might still create misleading UI (e.g., fake form elements via `<input>` tags). The XHTML validator does not currently strip all non-semantic HTML.
-* Trust entry content is XHTML and is rendered in the trust editor and included in RAG context. Malicious trust entries could inject misleading content into prompts.
-* The `/bootstrap` and `/config` endpoints serve raw `config.xml` to the client. If `config.xml` contains secrets and a same-origin XSS vector exists, those secrets could be read.
-
-### CORS
-
-The server applies CORS headers only for requests whose `Origin` header matches the configured allowed origins. Preflight `OPTIONS` requests return `204` with appropriate headers. Cross-origin requests from other origins receive no CORS headers and are blocked by the browser.
-
-### File System
-
-* **Symlink rejection:** By default (`WIKIORACLE_REJECT_SYMLINKS=true`), the server refuses to read or write state files that are symlinks, preventing path-traversal attacks via symlinked state files.
-* **Static file serving** is restricted to a whitelist of safe extensions (`.html`, `.css`, `.js`, `.svg`, `.png`, `.ico`, `.json`, `.xml`) and path-traversal is checked (`str(fp).startswith(str(ui_dir.resolve()))`).
-* **State size limit:** `max_state_bytes` (default 5 MB) prevents unbounded growth from malicious imports.
-
-### Third-party Scraping
-
-Scraping of publicly-accessible data is inevitable. However, a network of truth prevents capture. In one sense, it cannot be captured because it is a dynamic network of trust, overlaid on people and resources that trust one another, and we chose not to trust any authoritarian sources of knowledge. On a practical level,  anyone who tries to appropriate the truth of the network entails doing so in a distributed way (which preserves the multicultural component), since monolithic capture of that truth will cause consensus to collapse it.
-
-
+Distribution reduces the risk of one epistemic authority capturing the whole network, but it does not replace ordinary application security, credential hygiene, or provider privacy review.

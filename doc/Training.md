@@ -9,26 +9,26 @@ it all together.
 
 ## DegreeOfTruth (DoT)
 
-DegreeOfTruth is a bipolar scalar on $-$1 .. +1 that measures how well
+DegreeOfTruth is a bipolar scalar on −1 .. +1 that measures how well
 a user's TruthSet agrees with the server's collected truth.
 
-    DegreeOfTruth = 2 $\times$ mean(agreement_i) $-$ 1    for shared entries
+    DegreeOfTruth = 2 × mean(agreement_i) − 1    for shared entries
 
 where:
 
-    agreement_i = 1 $-$ |server_trust_i $-$ client_trust_i| / 2
+    agreement_i = 1 − |server_trust_i − client_trust_i| / 2
 
 The bipolar range encodes both true and false statements:
 
 * **DoT = +1**: the user's claims fully agree with the server -- the
   exchange is true.  Train at full learning rate.
-* **DoT = $-$1**: the user's claims fully contradict the server -- the
+* **DoT = −1**: the user's claims fully contradict the server -- the
   exchange is false.  Train at full learning rate (learning what is
   *not* true is as valuable as learning what *is* true).
 * **DoT $\approx$ 0**: no shared entries, or perfect cancellation -- nothing
   to learn.  Skip training.
 
-Both poles (+1 and $-$1) train at full strength via |DoT|; only the zero
+Both poles (+1 and −1) train at full strength via |DoT|; only the zero
 crossing results in a skip.  The sign encodes direction (agree/disagree),
 not magnitude.
 
@@ -37,8 +37,8 @@ This is a placeholder.  A future version should incorporate
 
 ## Dynamic Systems Perspective
 
-With a bipolar DegreeOfTruth ($-$1 .. +1), the training loop forms a
-**dynamic equation with both poles and zeros**: DoT = +1 and DoT = $-$1
+With a bipolar DegreeOfTruth (−1 .. +1), the training loop forms a
+**dynamic equation with both poles and zeros**: DoT = +1 and DoT = −1
 are attracting poles where the system learns at full strength (truths
 and refuted falsehoods respectively), while DoT = 0 is a zero -- an
 equilibrium point where no learning occurs.
@@ -69,7 +69,7 @@ The DoT-annealed training algorithm has a **zero-mean balance**
 property: over many interactions with diverse DoT values, the expected
 net gradient contribution tends to zero.  This arises because:
 
-* DoT = +1 and DoT = $-$1 both train at full strength but push in
+* DoT = +1 and DoT = −1 both train at full strength but push in
   opposite directions (learning truth vs. learning falsehood).
 * DoT near 0 contributes nearly nothing (the sigmoid zero-crossing).
 * Over a diverse population of users, the average DoT tends toward
@@ -102,7 +102,7 @@ annealing process.  When online training is first enabled:
    and training proceeds at full configured strength.
 
 This mirrors the annealing schedule in physical systems: high
-temperature (high exploration, low commitment) $\rightarrow$ low temperature (low
+temperature (high exploration, low commitment) → low temperature (low
 exploration, high commitment to learned patterns).
 
 ## Sensation -- Preprocessing Pipeline
@@ -110,7 +110,7 @@ exploration, high commitment to learned patterns).
 `bin/sensation.py` transforms plain-text conversations into XML-tagged
 training data so that NanoChat learns WikiOracle's structured protocol.
 The name follows the epistemological pipeline:
-**Sensation $\rightarrow$ Perception $\rightarrow$ Cognition** -- raw input data (sensation)
+**Sensation → Perception → Cognition** -- raw input data (sensation)
 is structured and tagged before it reaches the model (cognition).
 
 Sensation works for both batch retagging of the NanoChat SFT corpus
@@ -178,8 +178,8 @@ Batch-convert a corpus:
 Classify a single sentence:
 
     python bin/sensation.py tag "Paris is the capital of France."
-    # $\rightarrow$ Classification: fact (identity)
-    # $\rightarrow$ Tagged: <Q><fact trust="0.5">Paris is the capital of France.</fact></Q>
+    # → Classification: fact (identity)
+    # → Tagged: <Q><fact trust="0.5">Paris is the capital of France.</fact></Q>
 
 In the online training pipeline, `response.py` calls
 `preprocess_training_example()` automatically before each `/train` POST,
@@ -198,7 +198,7 @@ WikiOracle accomplishes this by:
 
 1. Maintaining a **server-owned TruthSet** (`truth.xml`) that
    accumulates facts from all users.
-2. Computing a **DegreeOfTruth** ($-$1 .. +1) per interaction.
+2. Computing a **DegreeOfTruth** (−1 .. +1) per interaction.
 3. Using |DegreeOfTruth| to modulate the **learning rate** of a
    one-step online training pass in NanoChat.
 
@@ -217,8 +217,9 @@ function in `bin/truth.py` enforces this boundary.
 
 Each user is identified by a pseudonymous GUID derived deterministically
 from `client_name` in the state file (UUID-5 in the WikiOracle namespace).
-This GUID is stored at the root level of the user's state and used
-internally when merging truth entries into the server table.
+The stable value is stored as `header/client_id` in XML (the runtime
+dictionary exposes it as `client_id`) and is used when merging truth
+entries into the server corpus.
 
 ### Pipeline
 
@@ -251,7 +252,7 @@ and training happen after the response is delivered.
    (`truth.xml`):
    * **Match found**: nudge the server entry's trust toward the incoming
      value using a slow-moving average:
-     `server_trust += merge_rate $\times$ (client_trust $-$ server_trust)`
+     `server_trust += merge_rate × (client_trust − server_trust)`
    * **No match**: insert the entry with the stated trust value.
    * Entries are restricted to facts, operators, authorities, and
      references.  Feelings and provider entries are not stored.
@@ -264,9 +265,9 @@ to 0.0 (no information value), keeping entries with highest `|trust|`
 (strongest signal, positive or negative).  This is checked during the
 merge step, not as a separate operation.  The trim count is logged.
 
-The `truth_max_entries` parameter is configurable per-user via the
-Settings dialog (see [UserInterface.md](./UserInterface.md)) and
-defaults to 1000 in the chat config.
+The `truth_max_entries` parameter is configured under `server.training`
+and defaults to 1000. It remains available through the XML config/editor;
+the current Settings dialog does not expose it as a separate control.
 
 **Stage 4 -- Tag and Train**
 
@@ -287,7 +288,7 @@ Online training runs on the device specified by
 * `cpu` (default) -- safe for the WikiOracle production server
 * `cuda` -- use NVIDIA GPU if available
 * `mps` -- Apple Metal Performance Shaders (macOS)
-* `auto` -- probe CUDA $\rightarrow$ MPS $\rightarrow$ CPU and use the best available
+* `auto` -- probe CUDA → MPS → CPU and use the best available
 
 The model is moved to the training device for the gradient step, then
 moved back to the inference device afterward.
@@ -336,43 +337,38 @@ All groups use the same AdamW optimizer -- no Muon.
 
 The effective learning rate for each parameter group is computed as:
 
-    lr_effective = lr_base $\times$ lr_scale
+    lr_effective = lr_base × lr_scale
 
 where:
 
-    lr_scale = (truth_weight $\times$ |DoT| + (1 - truth_weight)) $\times$ sigmoid_warmup(step)
+    lr_scale = (truth_weight × |DoT| + (1 − truth_weight)) × sigmoid_warmup(step)
 
 The **truth_weight** parameter (0.0-1.0) controls how much DoT gates
 the learning rate:
 
 | `truth_weight` | `lr_effective`                           | Behavior                                                 |
 | -------------- | ---------------------------------------- | -------------------------------------------------------- |
-| 0.0            | `lr_base $\times$ warmup`                       | Vanilla SFT -- full LR regardless of DoT.  No truth bias. |
-| 0.5            | `lr_base $\times$ (0.5 $\times$ |DoT| + 0.5) $\times$ warmup` | Half-gated -- DoT attenuates but never fully suppresses.  |
-| 1.0            | `lr_base $\times$ |DoT| $\times$ warmup`               | Fully DoT-gated -- zero DoT means zero learning.          |
+| 0.0 | `lr_base × warmup` | Vanilla SFT -- full LR regardless of DoT. No truth bias. |
+| 0.5 | `lr_base × (0.5 × abs(DoT) + 0.5) × warmup` | Half-gated -- DoT attenuates but never fully suppresses. |
+| 1.0 | `lr_base × abs(DoT) × warmup` | Fully DoT-gated -- zero DoT means zero learning. |
 
-The `truth_weight` replaces the former boolean `rag` checkbox in the
-Settings dialog.  At `truth_weight=0`, the system trains on everything
-like vanilla SFT (feelings-only, no truth bias).  At `truth_weight=1`,
-DoT governs learning completely.
-
-The RAG flag (`rag`) remains separate conceptually: `truth_weight > 0`
-controls whether truth entries *influence training*, while truth
-entries are *sent to the provider for context* whenever
-`truth_weight > 0`.
+`truth_weight` is configured in `server.truthset` and is not a separate
+control in the current Settings dialog. At `truth_weight=0`, truth sources
+are omitted from provider grounding and DoT does not gate training. At
+`truth_weight=1`, grounding is fully enabled and DoT governs learning.
 
 #### Sigmoid Warmup
 
 The sigmoid warmup schedule prevents early random updates from
 corrupting the model when online training is first enabled:
 
-    sigmoid_warmup(step) = 1 / (1 + exp(-k $\times$ (step - midpoint)))
+    sigmoid_warmup(step) = 1 / (1 + exp(−k × (step − midpoint)))
 
 | Step         | Warmup value | Effect                                           |
 | ------------ | ------------ | ------------------------------------------------ |
 | 0            | ~0.007       | Nearly zero -- first interactions barely train    |
 | midpoint     | 0.5          | Half strength                                    |
-| 2 $\times$ midpoint | ~0.993       | Nearly full strength -- training ramp is complete |
+| 2 × midpoint | ~0.993 | Nearly full strength -- training ramp is complete |
 
 The `warmup_steps` parameter (default 50) is the sigmoid midpoint.
 The steepness parameter `k` is fixed at 0.1.
@@ -407,7 +403,7 @@ After each optimizer step, model weights are blended back toward the
 
 where:
 
-    anchor_effective = anchor_decay $\times$ truth_weight
+    anchor_effective = anchor_decay × truth_weight
 
 The anchor weights are the original checkpoint weights, initialized on
 the first `/train` call.  The `anchor_decay` parameter (default 0.001)
@@ -526,10 +522,10 @@ truth element:
 **Resolution:** Before entries reach the server TruthSet, they are
 resolved by `resolve_entries()` in `bin/truth.py`:
 
-* `<reference>` $\rightarrow$ `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
-* `<authority>` $\rightarrow$ list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
-* `<provider>` $\rightarrow$ `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
-* `<fact>`, `<feeling>`, `<logic>` $\rightarrow$ pass through unchanged
+* `<reference>` → `<fact src="domain">text</fact>` (domain preserved for deeper lookup)
+* `<authority>` → list of `<fact src="domain">content</fact>` (fetched from remote, trust scaled)
+* `<provider>` → `<feeling>` (provider responses are treated as feelings until providers can report truth claims with DoT)
+* `<fact>`, `<feeling>`, `<logic>` → pass through unchanged
 
 Entry types stored after resolution: `<fact>` (knowledge -- no `<place>`/`<time>` children)
 and `<logic>` entries (operators wrapped in `<logic><and|or|not|non>...</logic>`).
@@ -561,7 +557,7 @@ weight collapse and capture by any single user:
 * Entries are merged with a **slow-moving average** (`merge_rate`,
   default 0.1), so no single user can instantly override collective
   truth.
-* Disproven entries naturally drift toward $-$1 as contradicting evidence
+* Disproven entries naturally drift toward −1 as contradicting evidence
   accumulates from other users.
 * **TruthSet trimming** (`truth_max_entries`, default 1000) removes
   low-signal entries (|trust| near 0), keeping the TruthSet focused on

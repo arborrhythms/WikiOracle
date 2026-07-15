@@ -25,11 +25,11 @@ This gives the LLM the full path of dialogue that led to the current point, with
 
 ```
 conversationsToHierarchy(state.conversations, selectedId)
-    $\downarrow$
+    ↓
 D3 hierarchy data  { id, title, messageCount, questionCount, selected, children }
-    $\downarrow$
+    ↓
 renderTree(hierarchyData, callbacks)
-    $\downarrow$
+    ↓
 SVG with nodes (rects/pills/circles) + curved links
 ```
 
@@ -37,7 +37,7 @@ The root node is a circle labelled `/`. Selected conversations render as larger 
 
 ### Chat view
 
-`wikioracle.js $\rightarrow$ renderMessages()` displays the messages of the currently selected conversation:
+`wikioracle.js → renderMessages()` displays the messages of the currently selected conversation:
 
 1. Look up `selectedConvId` in the tree via `findConversation()`
 2. Iterate `conv.messages`, rendering each as a `.message` div with role-based styling
@@ -50,15 +50,15 @@ When no conversation is selected (root view), a placeholder prompts the user to 
 
 ```
 state.xml on disk
-    $\downarrow$  [xml_to_state]
+    ↓  [xml_to_state]
 In-memory state with nested conversation tree
-    $\downarrow$  [GET /state]
+    ↓  [GET /state]
 Client receives state payload
-    $\downarrow$  [renderMessages]
+    ↓  [renderMessages]
 Chat panel shows selected conversation's messages
-    $\downarrow$  [conversationsToHierarchy]
+    ↓  [conversationsToHierarchy]
 D3 hierarchy data
-    $\downarrow$  [renderTree]
+    ↓  [renderTree]
 SVG tree visualisation
 ```
 
@@ -71,7 +71,7 @@ SVG tree visualisation
 | Click                    | Navigate -- select that conversation, show its messages      |
 | Double-click             | Open context menu (Branch, Delete)                          |
 | Right-click              | Open context menu (same)                                    |
-| Drag node $\rightarrow$ drop on node | Merge -- append source's messages into target, remove source |
+| Drag node → drop on node | Merge -- append source's messages into target, remove source |
 
 A 200ms timer disambiguates click from double-click. Context menus are appended to `document.body` with fixed positioning to avoid clipping by the tree container's `overflow: hidden`.
 
@@ -98,7 +98,7 @@ branches):
        /    \
      beta1  beta2
        \    /
-        final      $\leftarrow$ parentId: [beta1, beta2]
+        final      ← parentId: [beta1, beta2]
 ```
 
 Arrow Right / Arrow Left perform standard tree preorder traversal.
@@ -107,7 +107,8 @@ In a DAG the same node appears under multiple parents; it is visited
 reading path:
 
 ```
-$\rightarrow$  root  $\rightarrow$  beta1  $\rightarrow$  final  $\rightarrow$  beta2  $\rightarrow$  final  $\rightarrow$  END
+→ root → beta1 → final
+→ beta2 → final → END
 ```
 
 ### Chat panel
@@ -127,102 +128,54 @@ Dragging conversation A onto B:
 
 ### Branching
 
-Double-click or right-click a tree node $\rightarrow$ "Branch" creates a new empty child conversation. The next message typed seeds it. The LLM receives the full ancestor context.
+Double-click or right-click a tree node → "Branch" creates a new empty child conversation. The next message typed seeds it. The LLM receives the full ancestor context.
 
 ## Settings Dialog
 
-The Settings panel (gear icon in the sidebar) lets users configure
-evaluation, truthset, and training parameters at runtime.  Settings
-are persisted in `sessionStorage` (with a `localStorage` fallback for
-tab-close durability) under the `wikioracle_config` key; UI
-preferences (layout, theme, confirm actions) are also saved in state.
+The Settings panel (gear icon in the sidebar) configures client identity,
+provider/model selection, provider trust, layout, theme, and evaluation
+preferences. The normalized config is persisted under the
+`wikioracle_config` key in both `sessionStorage` and `localStorage`.
+Conversation state uses the separate `wikioracle_state` key.
 
 ### Settings Controls
 
-| Control                  | DOM id                 | Type          | Stored at                                   | Default / fallback                      | Description                                                       |
-| ------------------------ | ---------------------- | ------------- | ------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------- |
-| Username                 | `setUsername`          | text          | `state.client_name`                         | `"User"`                                | Display name shown in chat messages.                              |
-| Provider                 | `setProvider`          | select        | `config.providers.default`                  | `"wikioracle"`                          | Active LLM provider.                                              |
-| Model                    | `setModel`             | select        | `state.ui.model`                            | provider metadata model or empty        | Explicit model override sent in `POST /chat` as `config.model`.   |
-| Provider trust           | `setProviderTrust`     | range (0-1)   | `config.server.providers.<selected>.trust`  | `1.0` for `wikioracle`, `0.6` otherwise | Per-provider trust weight; updates when the provider dropdown changes. |
-| Layout                   | `setLayout`            | select        | `state.ui.layout`                           | saved value; legacy fallback `flat`     | Panel layout mode. The current selector exposes `horizontal` and `vertical`. |
-| Theme                    | `setTheme`             | select        | `state.ui.theme`                            | `"system"`                              | Colour theme (`system`, `light`, `dark`).                         |
-| Temperature              | `setTemp`              | range (0-2)   | `config.server.evaluation.temperature`      | `0.7`                                   | Sampling temperature for the LLM.                                 |
-| Allow URL fetching       | `setUrlFetch`          | checkbox      | `config.server.evaluation.url_fetch`        | `false`                                 | Allow the assistant to fetch URL content.                         |
-| Thought-free mode        | `setThoughtFree`       | checkbox      | `config.server.evaluation.thought_free`     | `false`                                 | Enable shamatha speech: restricts grammar to S$\rightarrow$C only, prepends 10-rule non-discursive constraint to LLM providers. |
-| Confirm deletes / merges | `setConfirm`           | checkbox      | `state.ui.confirm_actions`                  | `false`                                 | Require confirmation before destructive operations.               |
+| Control (DOM id) | Value / default | Storage and behavior |
+|---|---|---|
+| Username (`setUsername`) | Text; `User` | `state.client_name`; display name attached to user messages |
+| Provider (`setProvider`) | Select; shipped `WikiOracle` | `config.client.providers.default_provider`; active main provider |
+| Model (`setModel`) | Select; selected provider's configured model | `config.client.providers.default_model`; explicit model override |
+| Provider trust (`setProviderTrust`) | Range 0-1; `0` when absent | Browser copy of `config.server.providers.<name>.trust`; runtime trust metadata for provider-produced truth |
+| Layout (`setLayout`) | Select; `horizontal` | `config.client.ui.layout`; horizontal or vertical panels |
+| Theme (`setTheme`) | Select; `system` UI fallback | `config.client.ui.theme`; system, light, or dark palette |
+| Temperature (`setTemp`) | Range 0-2; server evaluation default | `config.client.temperature`; sampling temperature |
+| Allow URL fetching (`setUrlFetch`) | Checkbox; `false` | `config.client.url_fetch`; client evaluation preference |
+| Thought-free mode (`setThoughtFree`) | Checkbox; `false` | `config.client.thought_free`; request non-discursive output and the BasicModel thought-free path |
+| Confirm deletes / merges (`setConfirm`) | Checkbox; `false` | `config.client.ui.confirm_actions`; confirm destructive operations |
 
 ### Settings Persistence
 
-| Setting family | Authority | Stateful mode | Stateless mode |
-| -------------- | --------- | ------------- | -------------- |
-| `config.server.truthset`, `config.server.evaluation`, `config.server.training`, `config.providers.*` | server/config | Saved through `POST /config` into `config.xml` | Saved in browser storage via `wikioracle_config` |
-| `config.server.providers` | runtime metadata | Refreshed from `/config`; not written back to `config.xml` | Saved in browser storage as part of the normalized config bundle |
-| `state.client_name`, `state.ui.*` | client/state | Persisted in the state payload / exported XML | Saved in browser storage via `wikioracle_state` |
+| Setting family | Stateful mode | Stateless mode |
+|---|---|---|
+| `state.client_name` and conversations/truth | State is updated through `/state` or `/chat`; browser keeps a local copy | Browser state is authoritative and accompanies every `/chat` call |
+| `config.client.*` | Saved locally, then `POST /config` replaces the client section in the writable config override | Saved only in browser storage; `POST /config` is rejected |
+| `config.server.*` | Refreshed from `/config`; client POSTs cannot replace it | Included in the authoritative `runtime_config` returned by bootstrap/local storage |
+| Provider metadata/model lists | Refreshed from `/config` or `/bootstrap` | Stored with the normalized config bundle |
 
-### Truth Weight Slider
-
-The **truth weight** slider (0.0-1.0, step 0.05) replaces the former
-"Use TruthSet" checkbox.  It controls two things simultaneously:
-
-1. **RAG delivery**: When `truth_weight > 0`, the TruthSet is sent
-   to the provider as grounding evidence (the former `rag: true`
-   behavior).  When `truth_weight = 0`, no truth is sent.
-
-2. **Training modulation**: During online training, `truth_weight`
-   controls how much DegreeOfTruth gates the learning rate:
-
-   * `truth_weight = 0.0`: Vanilla SFT -- trains on everything at full
-     learning rate regardless of DoT.  No EMA anchor pull.
-   * `truth_weight = 0.7`: Default -- DoT significantly gates learning,
-     with moderate anchor pull toward checkpoint.
-   * `truth_weight = 1.0`: Fully DoT-gated -- zero DoT means zero
-     learning.  Full anchor pull toward checkpoint.
-
-The slider displays its current numeric value next to the control via
-the `#setTruthWeightVal` span, updated live on input events.
-
-### Max Truth Entries
-
-Controls the maximum size of the server TruthSet.  When the table
-exceeds this limit, entries with `|trust|` closest to 0.0 (lowest
-information value) are trimmed during the merge stage.  Range:
-100-10000, step 100.
-
-### Store Concrete Facts
-
-When enabled, spatiotemporally-bound facts (those with `<place>` or
-`<time>` child elements carrying real values) are stored in the server
-TruthSet alongside universal facts.  When disabled (default), only
-universal facts persist -- consistent with Zero-Knowledge / Selective
-Disclosure principles.
-
-This setting is a client-side override for the server's
-`store_concrete` config.  The client value takes precedence when
-sent in the query payload.
-
-### Legacy Migration
-
-The config system automatically migrates the former boolean `rag` flag
-to the new `truth_weight`:
-
-* `rag: true` $\rightarrow$ `truth_weight: 0.7`
-* `rag: false` $\rightarrow$ `truth_weight: 0.0`
-
-This migration runs in both `client/config.js` (client-side) and
-`bin/response.py` (server-side) to handle configs from before the
-migration.  The new config path for truth weight is
-`server.truthset.truth_weight`.
+Truth weight, concrete-fact storage, maximum truth entries, and training
+parameters remain available in the XML config/editor but are not separate
+controls in the current Settings panel.
 
 ## Server TruthSet Display
 
 In debug mode, when online training is enabled, the client displays
-server TruthSet entries alongside local truth entries.  Server
-entries are visually distinguished with:
+server TruthSet entries alongside local truth entries.
 
-* A blue left border (3px, accent colour)
-* A "SERVER" badge in small uppercase text
-* Reduced opacity (0.65)
+| Treatment | Value |
+|---|---|
+| Left border | 3px accent blue |
+| Badge | `SERVER` in small uppercase text |
+| Opacity | 0.65 |
 
 Server truth entries are injected from the `/chat` response's
 `server_truth` field (debug mode only) and deduplicated by `id`

@@ -10,19 +10,21 @@ commons, and enable responsible AI development.
 
 WikiOracle separates artifacts into distinct licensing domains.
 
-  Layer      Artifact Type             Recommended License
-  ---------- ------------------------- ---------------------
-  Layer 1    Software / engine code    GPL-3.0
-  Layer 2    Human knowledge content   CC BY-SA 4.0
-  Layer 3    Structured data           CC0
-  Layer 3B   Model weights             Apache-2.0
+| Layer | Artifact type | Recommended license |
+|---|---|---|
+| Layer 1 | Software / engine code | GPL-3.0 |
+| Layer 2 | Human knowledge content | CC BY-SA 4.0 |
+| Layer 3 | Structured data | CC0 |
+| Layer 3B | Model weights | Apache-2.0 |
 
 Conceptual summary:
 
-    code $\rightarrow$ algorithms
-    data $\rightarrow$ facts
-    weights $\rightarrow$ learned structure
-    content $\rightarrow$ explanations
+| Artifact | Encodes |
+|---|---|
+| Code | Algorithms |
+| Data | Facts |
+| Weights | Learned structure |
+| Content | Explanations |
 
 This layered separation mirrors successful open knowledge systems while
 extending them for AI systems.
@@ -126,11 +128,11 @@ AI-generated text occupies a hybrid authorship category.
 
 WikiOracle should treat generated content in three stages:
 
-  Stage                      License
-  -------------------------- ----------
-  Raw AI output              CC0
-  AI draft edited by human   CC BY-SA
-  Human-authored content     CC BY-SA
+| Stage | License |
+|---|---|
+| Raw AI output | CC0 |
+| AI draft edited by a human | CC BY-SA |
+| Human-authored content | CC BY-SA |
 
 Rationale:
 
@@ -151,17 +153,12 @@ This ensures transparency regarding machine involvement.
 
 WikiOracle licensing stack:
 
-    Layer 1 -- Software
-    GPL-3.0
-
-    Layer 2 -- Knowledge Content
-    CC BY-SA 4.0
-
-    Layer 3 -- Structured Data
-    CC0
-
-    Layer 3B -- Model Weights
-    Apache-2.0
+| Layer | Domain | License |
+|---|---|---|
+| 1 | Software | GPL-3.0 |
+| 2 | Knowledge content | CC BY-SA 4.0 |
+| 3 | Structured data | CC0 |
+| 3B | Model weights | Apache-2.0 |
 
 The architecture protects the software commons, maintains a global
 knowledge commons, and supports open AI development.

@@ -27,7 +27,7 @@ See [Config.md](./Config.md) Section 5a and the implementation in
 
 Most AI systems attempt to enforce ethics **after generation**:
 
-    model $\rightarrow$ output $\rightarrow$ moderation filter
+    model → output → moderation filter
 
 This approach fails because:
 
@@ -273,4 +273,3 @@ Modern cryptographic systems attempt a similar separation between
 **verification** and **exposure**: prove age > 21 without revealing
 birthdate. This mirrors the WikiOracle design goal: verify truth claims
 without storing identity trajectories.
-

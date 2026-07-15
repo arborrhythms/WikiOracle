@@ -5,15 +5,17 @@
 
 ### Requirements
 
-* Python 3 and `make`.
-* `uv` for NanoChat environment setup (`make install` will bootstrap it if missing).
-* AWS CLI configured for build-host launch workflows (`make train HOST=build` and related targets).
-* SSH keys:
-  * Lambda Labs API key (`./.lambda-api-key` by default, configurable via `LAMBDA_API_KEY_FILE`, or export `LAMBDA_API_KEY`).
-  * Lambda Labs SSH key (`~/bin/lambda.pem` by default, configurable via `LAMBDA_KEY_FILE`).
-  * EC2 training key (`~/.ssh/nanochat-key.pem`, auto-created by remote tooling as needed).
-  * Lightsail key (`./wikiOracle.pem` by default, configurable via `WO_KEY_FILE`).
-  * Machine-specific LAN keys and tunnels belong in an ignored `Makefile.local`.
+| Requirement | Needed for | Notes |
+|---|---|---|
+| Git with submodule support | All workflows | Run `git submodule update --init --recursive` after cloning |
+| Python 3.12 and `make` | WikiOracle install/run | The tracked Makefile creates the shim venv with `python3.12` |
+| `uv` | NanoChat environment | `make install` bootstraps it when absent |
+| Pandoc + XeLaTeX | PDF documentation | Required for `make WikiOracle.pdf` / `make doc` |
+| LibreOffice | MOC poster PDF export | Required by `make doc` only when the PPTX is newer than the checked-in PDF or the PDF is missing |
+| AWS CLI | EC2 build host | Required only for `REMOTE_PROVIDER=ec2` workflows |
+| Lambda Labs API key | Lambda build host | `./.lambda-api-key`, `LAMBDA_API_KEY_FILE`, or `LAMBDA_API_KEY` |
+| SSH keys | Remote build/deploy | Lambda (`LAMBDA_KEY_FILE`), EC2 (`EC2_KEY_FILE`), and WikiOracle/Lightsail (`WO_KEY_FILE`) |
+| Ignored `Makefile.local` | Private LAN/tunnel hooks | Holds machine-specific `up/down/sync/tunnel` targets |
 
 ### Python dependencies
 
@@ -24,9 +26,10 @@ make install              # CPU/MPS (default)
 make install ARCH=gpu     # GPU/CUDA
 ```
 
-This sets up:
-* `.venv` -- the WikiOracle shim server (`flask`, `requests`, etc. from `requirements.txt`)
-* `nanochat/.venv` -- the NanoChat local LLM (managed by `uv`)
+| Environment | Contents |
+|---|---|
+| `.venv` | WikiOracle Flask shim and dependencies from `requirements.txt` |
+| `nanochat/.venv` | NanoChat runtime managed by `uv` |
 
 ### Data and tokenizer bootstrap
 
@@ -116,7 +119,7 @@ These are the primary entry points. For a local WikiOracle + NanoChat stack, use
 
 ### Service control (`nano_*`, `wo_*`, `basicmodel_*`)
 
-NanoChat and WikiOracle support local (PID file + background process) and remote (`systemctl`) operation, controlled by `HOST=local|remote`. The `sync` target additionally accepts `HOST=build` to deploy artifacts from the active remote training instance. Training uses `HOST=local|build`, while run/test targets are local-only and reject non-local hosts. BasicModel is registered but does not yet have an inference server.
+NanoChat, WikiOracle, and BasicModel support local (PID file + background process) and remote (`systemctl`) service control through `HOST=local|remote`. The `sync` target additionally accepts `HOST=build` to deploy artifacts from an active training host. Training uses `HOST=local|build`, while run/test entry points are local-only. BasicModel's OpenAI-compatible inference service runs on port 8001 by default.
 
 Private LAN orchestration, developer-machine sync, and local service tunnel setup are intentionally excluded from the tracked Makefile. Put those workflows in an ignored `Makefile.local`; the public Makefile includes it automatically when present and otherwise emits clear stub messages for private hooks.
 
@@ -126,7 +129,8 @@ Private LAN orchestration, developer-machine sync, and local service tunnel setu
 | `make nano_status` / `nano_logs`                 | Check NanoChat PID/service state |
 | `make wo_start` / `wo_stop` / `wo_restart`       | Manage local or remote WikiOracle |
 | `make wo_status` / `wo_logs`                     | Check WikiOracle PID/service state |
-| `make basicmodel_status`                         | Check BasicModel status (stub)   |
+| `make basic_start` / `basic_stop` / `basic_restart` | Manage local or remote BasicModel |
+| `make basic_status` / `basic_logs`               | Check BasicModel service/embeddings and logs |
 
 For local debugging, the typical workflow is:
 
@@ -143,8 +147,8 @@ This starts an unchanged local NanoChat backend on port `8000` and the WikiOracl
 | Target                          | Purpose                              |
 | ------------------------------- | ------------------------------------ |
 | `make openclaw_setup`/`run`/`test` | OpenClaw extension management     |
-| `make doc_pdf`                  | Generate PDF from all `doc/*.md`     |
-| `make doc_report`               | Generate training report             |
+| `make WikiOracle.pdf`           | Rebuild the assembled WikiOracle manual only |
+| `make doc`                      | Rebuild WikiOracle/BasicModel docs, the NanoChat report, and the MOC poster PDF when stale |
 | `make clean` / `clean_all`      | Remove caches (and optionally venvs) |
 
 ### Key overridable variables
@@ -167,7 +171,7 @@ This starts an unchanged local NanoChat backend on port `8000` and the WikiOracl
 
 ### Architecture
 
-WikiOracle runs as a local Flask server (`bin/wikioracle.py`) that proxies chat requests to any LLM provider (NanoChat, OpenAI, Anthropic, Gemini, Grok, OpenRouter) while keeping all conversation state on the local filesystem. The remote server at `wikiOracle.org` operates in stateless mode.
+WikiOracle runs as a Flask server (`bin/wikioracle.py`) that proxies chat requests to NanoChat, BasicModel, OpenAI, Anthropic, Gemini, Grok, or OpenRouter. In stateful mode it owns a local state file; in stateless mode the browser/CLI supplies the complete state and runtime config on each request. The public `wikiOracle.org` deployment uses stateless mode.
 
 ### Key files
 
@@ -177,8 +181,8 @@ WikiOracle runs as a local Flask server (`bin/wikioracle.py`) that proxies chat 
 | `bin/config.py`     | Config loading, XML I/O, provider registry, schema-driven normalization. Auto-generates `server_id` (UUID4) on first run.                                                                |
 | `bin/state.py`      | State validation, XML I/O, collision-safe merge, context-delta extraction                                                                                                                |
 | `bin/response.py`   | Chat pipeline, provider coordination, voting fan-out, online training pipeline                                                                                                           |
-| `bin/truth.py`      | Trust processing, authority resolution, operator engine (and/or/not), DegreeOfTruth, PII detection                                                                                       |
-| `config.xml`        | Server configuration: provider credentials, chat settings, UI defaults, server identity. Validated by `data/config.xsd`.                                                                 |
+| `bin/truth.py`      | Truth processing, authority resolution, `and/or/not/non`, DegreeOfTruth, and privacy classification                                                                                       |
+| `config.xml`        | Server policy/provider definitions plus client UI, provider selection, and client API keys. Validated by `data/config.xsd`.                                                              |
 | `state.xml`         | Client-owned state: header (user identity, timestamps), conversations, truth entries. Validated by `data/state.xsd`.                                                                     |
 | `client/index.html` | Single-page web UI shell with chat, settings, and merge tools                                                                                                                            |
 | `test/test_*.py`    | Automated tests for state, stateless contract, prompt bundles, authority, derived truth, voting, online training                                                                         |
@@ -186,6 +190,7 @@ WikiOracle runs as a local Flask server (`bin/wikioracle.py`) that proxies chat 
 ### Quickstart
 
 ```bash
+git submodule update --init --recursive
 make install                   # create venvs, install all deps
 make nano_restart NANO_MODEL_TAG=d26 NANO_DEVICE_TYPE=cpu NANO_DTYPE=float32
 make wo_restart
@@ -197,7 +202,7 @@ Open `https://127.0.0.1:8888` in a browser and accept the self-signed certificat
 For a short CLI smoke test against the local stack:
 
 ```bash
-./.venv/bin/python ./bin/wo -k --provider wikioracle --model nanochat "Yes or no only?"
+./.venv/bin/python ./bin/wo -k --provider WikiOracle --model nanochat "Yes or no only?"
 ```
 
 If you only want the WikiOracle shim in the foreground, use:
@@ -218,7 +223,7 @@ python3 bin/wikioracle.py
 
 ### Configuration
 
-The server reads `config.xml` at startup. On first run, it auto-generates a `server_id` (UUID4) and writes it back. Provider API keys can be set in the XML or via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`).
+The server loads `data/config.xml` as its baseline and deep-merges a project-root `config.xml` override when present. In writable mode it can generate a missing `server_id`. Main-provider API keys live under `config.client.providers`; selected environment variables are last-resort fallbacks only for matching dynamic truth-provider URLs.
 
 User identity (name, user_id) lives in the state file, not in the config -- the client is the authority for state, and the server is the authority for config.
 

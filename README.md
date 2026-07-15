@@ -1,5 +1,5 @@
 # WikiOracle
-Revision: 2026.02.27
+Revision: 2026.07.15
 
 **An open-source architecture for truthful AI.**
 
@@ -7,112 +7,100 @@ WikiOracle is a truthful, explainable LLM system designed as a public good -- th
 
 ## The Problem
 
-For-profit corporations are using our data -- sourced from billions of people -- to train models that are teaching our children. Those models hallucinate. They can't explain themselves. They are vulnerable to ideological capture and data-driven manipulation, especially under online learning. And the knowledge they encode is locked behind proprietary walls.
+For-profit corporations are using our data -- sourced from billions of people -- to train models that are teaching our children. Those models hallucinate, cannot reliably explain themselves, and are vulnerable to ideological capture and data-driven manipulation, especially under online learning. The knowledge they encode is then locked behind proprietary walls.
 
-Most large AI systems today are built around a single global objective function, centralized data aggregation, hidden alignment rules, and implicit averaging over moral and cultural differences. The result is predictable: minority viewpoints are quietly averaged away, the loudest groups shape the model at scale, a single model becomes an authority node that everyone depends on, and predictive advantage converts into economic or political dominance.
-
-When this happens, wisdom stops being a shared good and becomes a strategic asset.
+Most large AI systems are built around a single global objective, centralized data aggregation, hidden alignment rules, and implicit averaging over moral and cultural differences. Minority viewpoints are quietly averaged away, the loudest groups shape the model at scale, and a single model becomes an authority node on which everyone depends. When predictive advantage converts into economic or political dominance, wisdom stops being a shared good and becomes a strategic asset.
 
 ## What Makes WikiOracle Different
 
-### Truth
-
-WikiOracle does not optimize for fluency and bolt on truthfulness as an afterthought. Truthfulness is the primary design constraint. Every claim traces back to explicit trust entries carrying certainty values on [-1, +1]. Reasoning chains and citations are inspectable. Grounded models are less prone to hallucination and capture, and claims can be contested, improved, or revised openly.
-
-### Data Soverignty
-
-WikiOracle is local-first. Your conversation state, your trust entries, and your configuration live on your machine -- not on a corporate server accumulating hidden central memory. You can export, merge, and port your sessions freely. Your data is yours.
-
-The remote server is strictly stateless: it holds no per-user conversation, no trust table, and no session memory between requests. Every call arrives with the state it needs and leaves nothing behind.
-
-For off-machine backup and sharing, WikiOracle can optionally stage your `state.xml` and `config.xml` to your own Dropbox as AES-256 encrypted ZIP archives (via `pyzipper`). The encryption password is held only by you -- Dropbox sees ciphertext, and the server never persists either the password or the decrypted contents.
-
-### Sharing Truth via QR Code
-
-You can share a conversation or a truth set by publishing its encrypted state bundle to Dropbox and exposing the Dropbox link plus the decryption key inside an `<authority>` XML element. WikiOracle renders that element as a QR code in the client -- scan it from another device to copy the authority URI, paste it into the recipient's Truth editor, and their client will fetch and decrypt the bundle, importing your conversation and trust entries at whatever trust weight they choose to grant it.
-
-### Democracy
-
-No single actor -- company, state, foundation, or maintainer group -- can silently become the epistemic root for everyone else. WikiOracle supports multiple points of view, each with its own trust map and standards of evidence. Where serious disagreement exists among credible sources, the system represents the dispute rather than smoothing it away. Minority viewpoints are preserved, not averaged into oblivion. And if governance ever fails these obligations, forking is a constitutional right.
-
-### Distribution
-
-Instead of one model that claims to know everything, WikiOracle builds a network of trust. Authorities are pointers to external knowledge bases whose entries are imported with scaled certainty -- we trust what they trust, to a degree. You choose who to trust and how much. Multiple LLM providers serve as "other minds" whose outputs become evidence, not unquestionable authority. Trust is transitive but attenuated, distributed but structured. A distributed truth network prevents appropriation. Open truth does disrupt business models that depend on information asymmetry, extractive IP capture, and strategic opacity, but that disruption is corrective.
+| Commitment | Architectural expression | Practical effect |
+|---|---|---|
+| **Truth** | Claims are explicit TruthSet entries with a Degree of Truth (DoT) on [-1, +1]; logic and sources remain inspectable. | Claims can be contested, revised, and grounded instead of being accepted because they sound fluent. |
+| **Data sovereignty** | `state.xml` holds identity, conversations, and truth; `config.xml` separates server policy from client preferences. Stateful and stateless runtime modes are both supported. | A user can export, merge, and move a session without depending on hidden central memory. |
+| **Secure sharing** | Dropbox backup stores AES-encrypted ZIP bundles. A shared state can be represented as an `<authority>` reference and encoded as a QR code. | Another client can import the shared state and assign its own trust weight without receiving the sender's config or provider keys. |
+| **Democracy** | Each participant maintains an independent trust map; disagreement among credible sources is represented rather than silently averaged away. Forking is a constitutional right. | No company, state, foundation, or maintainer group becomes the universal epistemic root. |
+| **Distribution** | Authorities contribute remote TruthSets with scaled certainty, while provider entries act as expert consultants in a Hierarchical Mixture of Experts (HME). | Trust is transitive but attenuated, and provider output remains evidence rather than unquestionable authority. |
 
 ## Current Prototype
 
-The initial prototype is intentionally modest and low-cost:
-
-* Hierarchical, multi-LLM architecture for runtime-configurable Hierarchical Mixture of Experts.
-* User-specified truth sets (consisting of facts, feelings, references, operators, authorities, and providers)
-* Online learning constrained by trust and epistemic grounding
-* Extends [NanoChat](https://github.com/karpathy/nanochat) with Truth Sets using Retrieval-Augmented Generation
-* Allows feasible experiments in LLM architectures on rented compute (~$100 scale)
+| Capability | Current implementation |
+|---|---|
+| Conversation model | Branching conversation tree with diamond-shaped merges for provider voting |
+| Truth model | Facts, feelings, references, logic, authorities, and providers in typed XML |
+| Reasoning | Strong Kleene `and`, `or`, `not`, and `non` operators over DoT values |
+| Provider layer | Runtime-selectable WikiOracle/NanoChat, BasicModel, OpenAI, Anthropic, Gemini, Grok, and OpenRouter adapters |
+| Learning | Optional online training constrained by DoT, warmup, clipping, and checkpoint anchoring |
+| Storage | Local XML plus optional AES-encrypted Dropbox backup and authority sharing |
+| Research scale | Local CPU/MPS workflows and rentable GPU workflows intended for comparatively low-cost experiments |
 
 ## Longer-Term Direction
 
-If WikiOracle proves viable at small scale, the architecture can be evaluated and extended to larger open models. The broader aim of WikiOracle is to explore whether architectural commitments to truth can enable honest self-explanation, reduce the need for ad-hoc guardrails, and support AI systems that function as durable public goods. See [FutureWork.md](doc/FutureWork.md)
+If WikiOracle proves viable at small scale, the architecture can be evaluated with larger open models. The broader aim is to test whether architectural commitments to truth can enable honest self-explanation, reduce reliance on ad-hoc guardrails, and support AI systems that function as durable public goods. Current engineering priorities are tracked in [`todo.md`](todo.md).
 
 ## How to Contribute
 
-Contributions of many kinds are welcome:
-* ML research and implementation
-* xAI, interpretability, and safety analysis
-* Epistemology, philosophy of science, and governance critique
-* Documentation, evaluation, and testing
+| Area | Examples |
+|---|---|
+| ML systems | Model integration, training, evaluation, and performance work |
+| Safety and interpretability | Explainability, adversarial analysis, and capture resistance |
+| Epistemology and governance | Philosophy of science, plural truth, and constitutional critique |
+| Product quality | Documentation, UI, accessibility, testing, and deployment |
 
 ## Getting Started
 
-See the [Installation Guide](doc/Installation.md) for build, deploy, and runtime instructions.
-
-Quickstart:
+See the [Installation Guide](doc/Installation.md) for prerequisites, local services, training, and deployment.
 
 ```bash
-pip install -r requirements.txt
-python bin/wikioracle.py
+git submodule update --init --recursive
+make install
+make nano_restart NANO_MODEL_TAG=d26 NANO_DEVICE_TYPE=cpu NANO_DTYPE=float32
+make wo_restart
+make nano_status wo_status
 ```
+
+Then open `https://127.0.0.1:8888` and accept the local development certificate.
 
 ## Documentation
 
-Server and client documentation lives in `./doc`:
+The assembled manual is [WikiOracle.pdf](WikiOracle.pdf). Its WikiOracle server and client chapters live in `./doc`:
 
 | File | Topic |
 |---|---|
-| [Config.md](doc/Config.md) | Configuration format, settings reference, and environment variables |
-| [Constitution.md](doc/Constitution.md) | Non-negotiable invariants for WikiOracle truth and governance |
-| [Ethics.md](doc/Ethics.md) | Ethical AI through truth architecture, entanglement policy, and truth development |
-| [Freedom.md](doc/Freedom.md) | Freedom, entanglement policy, and worldline-capture constraints |
-| [FutureWork.md](doc/FutureWork.md) | Server roadmap and future directions |
-| [Voting.md](doc/Voting.md) | Hierarchical Mixture of Experts architecture and voting model |
-| [Implementation.md](doc/Implementation.md) | Implementation notes |
+| [WikiOracle.md](doc/WikiOracle.md) | Design and architecture overview |
+| [Constitution.md](doc/Constitution.md) | Non-negotiable invariants for truth and governance |
 | [Installation.md](doc/Installation.md) | Build, deploy, and runtime instructions |
-| [Logic.md](doc/Logic.md) | Logical operators, Strong Kleene evaluation, and derived truth |
-| [PrivacyAndSecurity.md](doc/PrivacyAndSecurity.md) | Privacy and security considerations |
-| [ProposedLicense.md](doc/ProposedLicense.md) | Proposed licensing architecture |
-| [Socrates.pdf](doc/Socrates.pdf) | PDF reference document |
-| [State.md](doc/State.md) | State file format, conversation tree, truth table, and serialization |
-| [Training.md](doc/Training.md) | Training pipeline, DegreeOfTruth, and NanoChat integration |
-| [Truth.md](doc/Truth.md) | Plural truth, POVs, empathy, and certainty semantics |
-| [UserInterface.md](doc/UserInterface.md) | Canonical client UI strings and labels |
-| [WikiOracle.md](doc/WikiOracle.md) | WikiOracle design overview |
-| [WikiOracle.pdf](doc/WikiOracle.pdf) | PDF version of the WikiOracle overview |
+| [Truth.md](doc/Truth.md) | Plural truth, points of view, empathy, and certainty semantics |
+| [Ethics.md](doc/Ethics.md) | Truth symmetry, entanglement policy, and ethical reasoning |
+| [PrivacyAndSecurity.md](doc/PrivacyAndSecurity.md) | Data ownership, credentials, transport, storage, and browser security |
+| [Freedom.md](doc/Freedom.md) | Freedom, entanglement policy, and worldline-capture constraints |
+| [Voting.md](doc/Voting.md) | HME provider voting and diamond topology |
+| [Logic.md](doc/Logic.md) | Strong Kleene operators and derived truth |
+| [Training.md](doc/Training.md) | Sensation preprocessing, DegreeOfTruth, and online learning |
+| [Implementation.md](doc/Implementation.md) | Components, endpoints, and request flow |
+| [Config.md](doc/Config.md) | Canonical configuration format and environment variables |
+| [State.md](doc/State.md) | State grammar, conversation DAG, truth elements, and serialization |
+| [UserInterface.md](doc/UserInterface.md) | Client behavior, settings, navigation, and canonical strings |
+| [ProposedLicense.md](doc/ProposedLicense.md) | Proposed layered licensing architecture |
 
-BasicModel AI documentation lives in `./basicmodel/doc`:
+BasicModel documentation lives in `./basicmodel/doc`:
 
 | File | Topic |
 |---|---|
-| [Architecture.md](basicmodel/doc/Architecture.md) | Six-space bidirectional pipeline, invertible layers, LDU |
-| [BasicModel.md](basicmodel/doc/BasicModel.md) | Four-space cognitive model theory, symmetric perception |
-| [BuddhistParallels.md](basicmodel/doc/BuddhistParallels.md) | Buddhist epistemology parallels, pramana theory, tetralemma |
-| [Ergodic.md](basicmodel/doc/Ergodic.md) | Ergodic exploration, gradient energy sensor, simulated annealing |
-| [Grammar.md](basicmodel/doc/Grammar.md) | Formal grammar mapped to neural architecture spaces |
-| [Language.md](basicmodel/doc/Language.md) | SyntacticLayer, CNF grammar rules, method implementations, thought-free mode |
-| [Logic.md](basicmodel/doc/Logic.md) | Subsymbolic/symbolic operators, truth fields, luminosity |
-| [MachineMinds.md](basicmodel/doc/MachineMinds.md) | Weight ergodicity, network invertibility, output certainty |
-| [Params.md](basicmodel/doc/Params.md) | XML configuration schema for all model hyperparameters |
-| [Reasoning.md](basicmodel/doc/Reasoning.md) | Reasoning methods, TruthLoss, partitioned symbolic space, contemplative awareness |
-| [Spaces.md](basicmodel/doc/Spaces.md) | InputSpace through OutputSpace specifications |
-| [Training.md](basicmodel/doc/Training.md) | Two-phase training: embedding pretraining + network training |
+| [Architecture.md](basicmodel/doc/Architecture.md) | Bidirectional model pipeline and decomposition |
+| [BasicModel.md](basicmodel/doc/BasicModel.md) | Cognitive model theory and symmetric perception |
+| [Componentization.md](basicmodel/doc/Componentization.md) | Model component boundaries |
+| [Ergodic.md](basicmodel/doc/Ergodic.md) | Ergodic exploration and training dynamics |
+| [Language.md](basicmodel/doc/Language.md) | Language and grammar implementation |
+| [Lexicon.md](basicmodel/doc/Lexicon.md) | Lexical representation |
+| [Logic.md](basicmodel/doc/Logic.md) | Subsymbolic and symbolic operators |
+| [MachineMinds.md](basicmodel/doc/MachineMinds.md) | Invertibility, uncertainty, and machine minds |
+| [Mereology.md](basicmodel/doc/Mereology.md) | Part-whole representation |
+| [Params.md](basicmodel/doc/Params.md) | XML model parameters |
+| [Reasoning.md](basicmodel/doc/Reasoning.md) | Reasoning surfaces and TruthLoss |
+| [Spaces.md](basicmodel/doc/Spaces.md) | Model-space specifications |
+| [STM.md](basicmodel/doc/STM.md) | Short-term memory |
+| [SymbolFirewall.md](basicmodel/doc/SymbolFirewall.md) | Symbolic boundary and safety contract |
+| [Training.md](basicmodel/doc/Training.md) | BasicModel training pipeline |
 
 ## Research Materials
 
@@ -132,4 +120,4 @@ Supporting papers live in [`doc/research/`](doc/research):
 | [2510.06265v2.pdf](doc/research/2510.06265v2.pdf) | arXiv paper PDF |
 | [2511.03529v1.pdf](doc/research/2511.03529v1.pdf) | arXiv paper PDF |
 | [2601.11199v1.pdf](doc/research/2601.11199v1.pdf) | arXiv paper PDF |
-| [BF_ICDCS_2022.pdf](doc/research/BF_ICDCS_2022.pdf) | conference paper PDF |
+| [BF_ICDCS_2022.pdf](doc/research/BF_ICDCS_2022.pdf) | Conference paper PDF |

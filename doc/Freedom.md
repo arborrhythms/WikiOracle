@@ -2,13 +2,13 @@
 
 ## Entanglement Policy
 
-**No spacetime particulars $\to$ no worldline capture**
+**No spacetime particulars → no worldline capture**
 
 | Data type        | TruthSet     | Train weights | Session only |
 | ---------------- | ------------ | ------------- | ------------ |
-| universal facts  | $\checkmark$ | $\checkmark$  | $\checkmark$ |
-| particular facts | optional     | $\checkmark$  | $\checkmark$ |
-| feelings         | $\times$     | $\times$      | $\checkmark$ |
+| universal facts | $\checkmark$ | $\checkmark$ | $\checkmark$ |
+| particular facts | optional | $\checkmark$ | $\checkmark$ |
+| feelings | × | × | $\checkmark$ |
 
 This table is the architectural foundation. It separates knowledge into
 three channels -- knowing, learning, and valuing -- each with a different
@@ -154,7 +154,7 @@ These populate the **TruthSet**.
 
 Criterion:
 
-    remove(entity,time) $\rightarrow$ proposition still meaningful
+    remove(entity,time) → proposition still meaningful
 
 ### Particular Knowledge (Training Input)
 
@@ -174,7 +174,7 @@ Examples:
 
 Pipeline:
 
-    particular facts $\rightarrow$ pattern extraction $\rightarrow$ weight update
+    particular facts → pattern extraction → weight update
 
 Weights encode **statistical structure**, not specific historical
 events.
@@ -192,8 +192,8 @@ Examples:
 | Use                     | Allowed      |
 | ----------------------- | ------------ |
 | evaluation of responses | $\checkmark$ |
-| TruthSets               | $\times$     |
-| training weights        | $\times$     |
+| TruthSets | × |
+| training weights | × |
 
 This avoids turning subjective states into truth claims.
 
@@ -213,17 +213,17 @@ yesterday was 20degC" is *narrow*: it holds at one place, one day.
 
 The policy table operationalizes this gradient:
 
--   **Broad extent** (universal) $\rightarrow$ TruthSet + training.
+-   **Broad extent** (universal) → TruthSet + training.
     The proposition is stable enough to serve as a reasoning premise.
--   **Narrow extent** (particular) $\rightarrow$ training + optionally TruthSet.
+-   **Narrow extent** (particular) → training + optionally TruthSet.
     The observation carries empirical signal.  Whether it persists as a
     stored premise is the user's choice (`store_concrete` in
     config.xml, default false).  Storing particulars supports communal
     remembrance; omitting them prevents worldline anchoring.
--   **No extent** (feelings) $\rightarrow$ session only.
+-   **No extent** (feelings) → session only.
     Subjective reports have no spatiotemporal generalizability.
 
-The criterion `remove(entity, time) $\rightarrow$ proposition still meaningful`
+The criterion `remove(entity, time) → proposition still meaningful`
 is a heuristic for identifying broad extent. When a universal-looking
 fact is later discovered to be narrower than assumed, it should be
 reclassified as particular.
@@ -233,9 +233,9 @@ reclassified as particular.
 
 | Mode     | Function            | Pipeline                                        |
 | -------- | ------------------- | ----------------------------------------------- |
-| knowing  | universal structure | universal rules $\rightarrow$ TruthSet $\rightarrow$ reasoning          |
-| learning | particular evidence | particular observations $\rightarrow$ abstraction $\rightarrow$ weights |
-| valuing  | feelings            | feelings $\rightarrow$ response evaluation                  |
+| knowing | universal structure | universal rules → TruthSet → reasoning |
+| learning | particular evidence | particular observations → abstraction → weights |
+| valuing | feelings | feelings → response evaluation |
 
 
 ## Zero-Knowledge and Selective Disclosure
@@ -246,10 +246,10 @@ decisions should determine the *location of a space* in which an
 individual occupies, rather than collapsing to a *point* that identifies
 them.
 
-Instead of "when was this person born?" $\rightarrow$ verify "are they over 21?"
-Instead of "what is their credit history?" $\rightarrow$ verify "do they have more
+Instead of "when was this person born?" → verify "are they over 21?"
+Instead of "what is their credit history?" → verify "do they have more
 than X dollars?"
-Instead of "where was this user at 9:14 PM?" $\rightarrow$ verify "does this claim
+Instead of "where was this user at 9:14 PM?" → verify "does this claim
 hold across broad spatiotemporal conditions?"
 
 These are not just rhetorical distinctions.  Point-based observation
@@ -293,7 +293,7 @@ epistemic capture: trained preferences about what is "helpful" reshape
 what the model treats as true.
 
 **The abstraction boundary is load-bearing.** The pipeline
-`particular $\rightarrow$ abstraction $\rightarrow$ weights` depends on the quality of the
+`particular → abstraction → weights` depends on the quality of the
 abstraction step. Too faithful, and it preserves worldline information
 in the weights (entanglement through the back door). Too aggressive,
 and it discards genuine empirical signal. The hard work happens at this

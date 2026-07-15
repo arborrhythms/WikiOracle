@@ -1,6 +1,6 @@
 # WikiOracle Constitution
 
-Revision: 2026.02.27
+Revision: 2026.07.15
 
 ## Preamble
 

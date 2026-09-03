@@ -116,6 +116,7 @@ WO_DEST           ?= /opt/bitnami/wordpress/files/WikiOracle.org/client
 ALERT_EMAIL ?=
 WIKIORACLE_APP ?= bin/wikioracle.py
 LOCAL_MAKEFILE ?= Makefile.local
+SELF_MAKE ?= $(MAKE)
 .DEFAULT_GOAL := help
 UPDATE_TARGET ?= update_remote_only
 LOCAL_UP_TARGET ?= local_up_missing
@@ -125,8 +126,6 @@ TUNNEL_START_TARGET ?= tunnel_start_missing
 TUNNEL_STOP_TARGET ?= tunnel_stop_missing
 TUNNEL_STATUS_TARGET ?= tunnel_status_missing
 BASIC_REMOTE_TRAIN_TARGET ?= basic_remoteTrain_missing
-
--include $(LOCAL_MAKEFILE)
 
 # --- Local/Remote switching ---------------------------------------------------
 HOST              ?= local
@@ -285,21 +284,21 @@ help:
 all: install train test_eval
 
 update:
-	@$(MAKE) $(UPDATE_TARGET)
+	@$(SELF_MAKE) $(UPDATE_TARGET)
 
 update_remote_only:
 	$(MAKE) sync HOST=remote
 
 up:
 ifeq ($(HOST),local)
-	@$(MAKE) $(LOCAL_UP_TARGET)
+	@$(SELF_MAKE) $(LOCAL_UP_TARGET)
 else
 	$(MAKE) nano_restart wo_restart basic_restart
 endif
 
 down:
 ifeq ($(HOST),local)
-	@$(MAKE) $(LOCAL_DOWN_TARGET)
+	@$(SELF_MAKE) $(LOCAL_DOWN_TARGET)
 else
 	$(MAKE) nano_stop wo_stop basic_stop
 endif
@@ -468,7 +467,7 @@ WO_RSYNC := rsync -avz -e "ssh -i $(WO_KEY_FILE) -o ConnectTimeout=10"
 
 sync:
 ifeq ($(HOST),local)
-	@$(MAKE) $(LOCAL_SYNC_TARGET)
+	@$(SELF_MAKE) $(LOCAL_SYNC_TARGET)
 else ifeq ($(HOST),remote)
 	@echo "=== Syncing app → $(WO_HOST):$(WO_DEST) ==="
 	$(WO_RSYNC) --delete $(EXCLUDE_OPTS) \
@@ -591,13 +590,13 @@ endif
 # --- Optional local overlay hooks ---------------------------------------------
 
 tunnel_start:
-	@$(MAKE) $(TUNNEL_START_TARGET)
+	@$(SELF_MAKE) $(TUNNEL_START_TARGET)
 
 tunnel_stop:
-	@$(MAKE) $(TUNNEL_STOP_TARGET)
+	@$(SELF_MAKE) $(TUNNEL_STOP_TARGET)
 
 tunnel_status:
-	@$(MAKE) $(TUNNEL_STATUS_TARGET)
+	@$(SELF_MAKE) $(TUNNEL_STATUS_TARGET)
 
 # --- WikiOracle Server (HOST=local|remote) ------------------------------------
 # When HOST=local  → background Flask shim with PID file
@@ -952,7 +951,7 @@ basic_smallTrain:
 	$(MAKE) -C $(BASIC_DIR) train_micro
 
 basic_remoteTrain:
-	@$(MAKE) $(BASIC_REMOTE_TRAIN_TARGET)
+	@$(SELF_MAKE) $(BASIC_REMOTE_TRAIN_TARGET)
 
 basic_test:
 	BASICMODEL_DEVICE=cpu $(MAKE) -C $(BASIC_DIR) test

@@ -120,7 +120,7 @@ Structural entries are not treated as prose claims. Logic yields derived DoT, au
 | Target | Behavior |
 |---|---|
 | External LLM adapters | Adds the non-discursive constraint prompt to the system bundle |
-| BasicModel | Sends `thought_free=true`; the BasicModel service applies its restricted grammar path for the request |
+| BasicModel | Sends `thought_free=true`; the BasicModel service applies its restricted grammar path for the request and answers in one `what()` iteration (no internal dialogue: the thinking episode of `basicmodel/doc/specs/2026-09-09-mathematical-thinking.md` is limited to one iteration, so no subquestion is opened) |
 | Browser display | Strips supported thinking blocks before display according to client preference |
 
 The preference originates at `config.client.thought_free`, enters the query bundle, and reaches `_call_provider()`.

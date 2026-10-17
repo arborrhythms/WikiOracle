@@ -1,0 +1,281 @@
+{
+  "commit": "52ea5ebfb05c250392eb984d890acefad77f566f",
+  "date": "2026-10-17",
+  "elapsed_seconds": 465.2190702909138,
+  "selected": 5788,
+  "completed": 5788,
+  "outcomes": {
+    "passed": 5454,
+    "skipped": 332,
+    "xfailed": 1,
+    "failed": 1
+  },
+  "failures": [
+    {
+      "nodeid": "test/test_math_chain_section14.py::test_forced_ordinary_answer_fills_committed_question_without_its_own_episode",
+      "phase": "call",
+      "outcome": "failed",
+      "duration": 45.95156499999575,
+      "message": "test/test_math_chain_section14.py:244: in test_forced_ordinary_answer_fills_committed_question_without_its_own_episode\n    rows = train_documents(model, documents, tmp_path, after=after)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntest/math_chain_ordinary.py:80: in train_documents\n    present(model, split='train', optimizer=optimizer, batch_size=8, after_batch=record)\nbin/MathChainTraining.py:52: in present\n    after_batch(model, split, rows, result)\ntest/math_chain_ordinary.py:77: in record\n    after(model, split, rows, result, observations, observer)\ntest/test_math_chain_section14.py:241: in after\n    assert not open_slots(value) and matches(model,value,'five')\nE   AssertionError: assert (not () and False)\nE    +  where () = open_slots(ConceptualMeaning(mode='interrogative', polarity=True, role_refs=(('ltm', 'address-v1', 2706775359560643600), ('sym', ..., 'equal'), ('_thought_witnesses', (('ltm', 'address-v1', 2706775359560643600),))), scope=(), sentence_kind='relation'))\nE    +  and   False = <function matches at 0x142088ae0>(BasicModel(\\n  (loss): ModelLoss(\\n    (output_criterion): MSELoss()\\n  )\\n  (inputSpace): InputSpace(\\n    (subspace): Sub...=29, out_features=104, bias=False)\\n  )\\n  (question_conditioner): Linear(in_features=29, out_features=104, bias=False)\\n), ConceptualMeaning(mode='interrogative', polarity=True, role_refs=(('ltm', 'address-v1', 2706775359560643600), ('sym', ..., 'equal'), ('_thought_witnesses', (('ltm', 'address-v1', 2706775359560643600),))), scope=(), sentence_kind='relation'), 'five')",
+      "stdout": "batch = 0 (warm-up)\r\nbatch = 8 (\u0394=21.679s)\r\n"
+    }
+  ],
+  "weekly_contracts": {
+    "test/test_arithmetic_isolation.py::test_numeric_and_renamed_sentence_paths_keep_oracles_out[texts0]": "skipped",
+    "test/test_arithmetic_isolation.py::test_numeric_and_renamed_sentence_paths_keep_oracles_out[texts1]": "skipped",
+    "test/test_arithmetic_isolation.py::test_supervised_update_cannot_use_exact_arithmetic_or_fallback_codes": "skipped",
+    "test/test_bounded_test_recycling.py::test_live_worker_receipt_keeps_completed_cases_when_a_later_case_times_out": "skipped",
+    "test/test_bounded_test_recycling.py::test_recycle_on_memory_pressure_keeps_every_case_once": "skipped",
+    "test/test_bounded_test_recycling.py::test_time_pressure_recycles_after_complete_cases_without_dropping_coverage": "skipped",
+    "test/test_bounded_test_runner.py::test_parallel_workers_share_the_aggregate_budget_and_overlap": "skipped",
+    "test/test_bounded_test_runner.py::test_real_pytest_coverage_fresh_workers_and_failure_receipt": "skipped",
+    "test/test_bounded_test_runner.py::test_test_failure_does_not_cancel_remaining_worker_coverage": "skipped",
+    "test/test_category_em_smoke.py::test_codebook_enables_and_em_populates_on_real_model": "skipped",
+    "test/test_category_em_smoke.py::test_mlp_chooser_sized_and_context_built": "skipped",
+    "test/test_compiled_operator_diagonal.py::test_free_candidate_search_compiles_backward_through_native_operators": "skipped",
+    "test/test_compiled_word_chunk.py::test_peer_leg_profiler_executes_real_ps_ws_and_conceptual_bodies": "skipped",
+    "test/test_compiled_word_chunk.py::test_tensor_peer_word_loop_rejects_external_full_stm": "skipped",
+    "test/test_decoder_exploration.py::test_single_departure_replays_prefix_and_is_greedy_after_it[True]": "skipped",
+    "test/test_echoic_decoder.py::test_same_walk_infers_binary_and_unary_without_a_journal[True]": "skipped",
+    "test/test_expectation_defaults.py::test_native_future_and_other_row_changes_do_not_change_first_estimate": "skipped",
+    "test/test_generation_catalog.py::test_normal_supervised_output_respects_gradient_contract[False]": "skipped",
+    "test/test_generation_catalog.py::test_normal_supervised_output_respects_gradient_contract[True]": "skipped",
+    "test/test_gradient_factorization.py::test_normal_batch_logs_owned_optimizer_gradients": "skipped",
+    "test/test_grammar_word_learning.py::test_normal_text_reconstruction_updates_the_grammar_chooser[distinct]": "skipped",
+    "test/test_grammar_word_learning.py::test_normal_text_reconstruction_updates_the_grammar_chooser[tie]": "skipped",
+    "test/test_input_byte_addresses.py::test_promoted_percepts_keep_their_original_byte_addresses[stream_smoke]": "skipped",
+    "test/test_interleave_schedule.py::test_one_native_read_retains_shared_owner[True]": "skipped",
+    "test/test_joint_objectives.py::test_real_intermediate_and_final_ends_have_same_canonical_roles": "skipped",
+    "test/test_ltm_consolidation.py::TestRuntimeUserIngestion::test_user_rows_coexist_with_conversation_rows": "skipped",
+    "test/test_ltm_consolidation.py::TestSerialForwardAppendsStore::test_forward_grows_store_not_deque": "skipped",
+    "test/test_math_chain_repair.py::test_ordinary_driver_two_three_eight_stream_groups_after_single_write": "skipped",
+    "test/test_math_chain_section14.py::test_ordinary_initial_binding_distribution_includes_every_retained_candidate": "skipped",
+    "test/test_negative_expectation.py::test_native_nonzero_composition_is_bit_identical_at_every_stance": "skipped",
+    "test/test_negative_expectation.py::test_native_unlabelled_batch_trains_the_same_chooser": "skipped",
+    "test/test_one_attention.py::test_narrowing_uses_the_shared_operation_chooser_and_compiles": "skipped",
+    "test/test_output_path_supervised.py::test_legacy_parity_memory_cannot_change_an_owned_conceptual_answer[development]": "skipped",
+    "test/test_output_path_supervised.py::test_native_checkpoint_restores_active_answer_widths[False-development]": "skipped",
+    "test/test_output_walk.py::test_output_ignores_input_derivation_on_conceptual_slots": "skipped",
+    "test/test_output_walk.py::test_packed_recall_observes_captured_sentence_programs": "skipped",
+    "test/test_output_walk.py::test_question_conditioner_optimizer_steps_both_widths": "skipped",
+    "test/test_output_walk.py::test_walk_compiles_fullgraph_and_matches_eager": "skipped",
+    "test/test_prepared_answer_boundary.py::test_prepared_concept_handoff_cuts_answer_state_gradient[True-False]": "skipped",
+    "test/test_query_native_ids.py::test_real_sentence_capture_owns_native_object_ids_across_later_staging": "skipped",
+    "test/test_relation_closing.py::test_unaligned_mm_forward_can_select_a_relation_without_native_word_rows": "skipped",
+    "test/test_review11_contracts.py::test_supported_compound_cannot_stop_even_with_a_chunk_code[True-False]": "skipped",
+    "test/test_review14_contracts.py::test_review17_measurement_wiring_on_one_ordinary_batch": "skipped",
+    "test/test_sentence_journal.py::test_no_numerical_frames_without_a_sentence_closing_reader": "skipped",
+    "test/test_stored_idea_generation.py::test_compound_candidates_are_not_word_emissions[True]": "skipped",
+    "test/test_surface_grammar.py::test_normal_batch_trains_supplied_grammar_lessons": "skipped",
+    "test/test_tied_operator_reconstruction.py::test_snapshot_owns_values_across_same_shape_dictionary_update": "skipped",
+    "test/test_training_device.py::test_all_dispatches_explicit_device_marks_and_keeps_slow_proofs_on_cpu": "skipped",
+    "test/test_training_device.py::test_parallel_pool_keeps_one_accelerator_training_lane": "skipped",
+    "test/test_trial_policy_ownership.py::test_trial_and_batch_answer_leave_the_decoder_to_reconstruction[True-exploit]": "skipped",
+    "test/test_trial_policy_ownership.py::test_trial_and_batch_answer_leave_the_decoder_to_reconstruction[True-explore]": "skipped",
+    "test/test_unified_thought_controller.py::test_runbatch_credits_each_controller_row_from_its_own_answer": "skipped"
+  },
+  "default_xor_certificates": [
+    {
+      "nodeid": "test/test_mm_xor.py::TestMMXorConvergence::test_convergence",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 4.250580749940127,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_mm_xor.py::TestMMXorConvergence::test_learns_xor_signal",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.11707841698080301,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_mm_xor.py::TestMMXorConvergence::test_mm_grammar_learns_xor_signal",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 282.0408840831369,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_explicit_dimensions.py::TestXorExactCliReconstruction::test_at_least_50_pct_inputs_reconstruct",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 39.465744292130694,
+      "message": "",
+      "stdout": "XOR_exact reconstruction count: 4/4\n\n"
+    },
+    {
+      "nodeid": "test/test_explicit_dimensions.py::TestXorExactCliReconstruction::test_output_mse_is_crisp",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 39.513704250101,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_explicit_dimensions.py::TestXorGrammarLearnsXor::test_xor_class_accuracy",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0003084170166403055,
+      "message": "",
+      "stdout": "8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [384/400]\r\nbatch = 0 (\u0394=0.418s, 100.00%)\r\nTraining throughput: 1 batches in 0.417s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [385/400]\r\nbatch = 0 (\u0394=0.426s, 100.00%)\r\nTraining throughput: 1 batches in 0.426s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [386/400]\r\nbatch = 0 (\u0394=0.425s, 100.00%)\r\nTraining throughput: 1 batches in 0.424s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [387/400]\r\nbatch = 0 (\u0394=0.426s, 100.00%)\r\nTraining throughput: 1 batches in 0.426s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [388/400]\r\nbatch = 0 (\u0394=0.430s, 100.00%)\r\nTraining throughput: 1 batches in 0.429s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [389/400]\r\nbatch = 0 (\u0394=0.428s, 100.00%)\r\nTraining throughput: 1 batches in 0.428s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [390/400]\r\nbatch = 0 (\u0394=0.430s, 100.00%)\r\nTraining throughput: 1 batches in 0.429s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [391/400]\r\nbatch = 0 (\u0394=0.426s, 100.00%)\r\nTraining throughput: 1 batches in 0.426s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [392/400]\r\nbatch = 0 (\u0394=0.377s, 100.00%)\r\nTraining throughput: 1 batches in 0.376s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [393/400]\r\nbatch = 0 (\u0394=0.434s, 100.00%)\r\nTraining throughput: 1 batches in 0.434s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [394/400]\r\nbatch = 0 (\u0394=0.389s, 100.00%)\r\nTraining throughput: 1 batches in 0.388s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [395/400]\r\nbatch = 0 (\u0394=0.437s, 100.00%)\r\nTraining throughput: 1 batches in 0.436s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [396/400]\r\nbatch = 0 (\u0394=0.434s, 100.00%)\r\nTraining throughput: 1 batches in 0.433s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [397/400]\r\nbatch = 0 (\u0394=0.434s, 100.00%)\r\nTraining throughput: 1 batches in 0.433s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [398/400]\r\nbatch = 0 (\u0394=0.427s, 100.00%)\r\nTraining throughput: 1 batches in 0.426s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [399/400]\r\nbatch = 0 (\u0394=0.426s, 100.00%)\r\nTraining throughput: 1 batches in 0.426s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nEpoch [400/400]\r\nbatch = 0 (\u0394=0.433s, 100.00%)\r\nTraining throughput: 1 batches in 0.432s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nTrain Loss: output=0.0000, reconstruction=0.0000\r\nFinal Stats:\r\n=== Selected operation grammar ===\r\nbatch = 0 (\u0394=12.932s, 100.00%)\r\nTraining throughput: 1 batches in 12.870s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\n=== Input Reconstruction (test) ===\r\n  row[0] input='hello world' -> reconstructed=' ' label=0.0000 predicted=0.0002 MISMATCH\r\n  row[1] input='hello there' -> reconstructed='' label=1.0000 predicted=1.0001 MISMATCH\r\n  row[2] input='loving world' -> reconstructed='' label=1.0000 predicted=1.0002 MISMATCH\r\n  row[3] input='loving there' -> reconstructed='' label=0.0000 predicted=0.0002 MISMATCH\r\n"
+    },
+    {
+      "nodeid": "test/test_explicit_dimensions.py::TestXorGrammarReconstruction::test_piecewise_overall_at_least_50_pct",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0001661251299083233,
+      "message": "",
+      "stdout": ""
+    }
+  ],
+  "mechanism_gates": [
+    {
+      "nodeid": "test/test_independent_components.py::test_native_admission_optimizer_ownership_and_checkpoint",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.16832183417864144,
+      "message": "",
+      "stdout": "[BasicModel] Weights saved to /private/var/folders/_y/q6ybzrpx39jd0fzf9g671z280000gn/T/pytest-of-arogers/pytest-6259/test_native_admission_optimize0/admitted-columns.ckpt\r\n[BasicModel] Weights loaded from /private/var/folders/_y/q6ybzrpx39jd0fzf9g671z280000gn/T/pytest-of-arogers/pytest-6259/test_native_admission_optimize0/admitted-columns.ckpt\r\n"
+    },
+    {
+      "nodeid": "test/test_independent_components.py::test_sparse_coding_is_confined_to_verbs_and_cannot_train_noun_signatures",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0017101671546697617,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_later_common_evidence_merges_accessible_occurrences_without_rewriting_them",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.020210999995470047,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_same_kind_fourth_close_preserves_mints_and_revises_ambiguous_binding[0]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.057720832992345095,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_same_kind_fourth_close_preserves_mints_and_revises_ambiguous_binding[1]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.05621766694821417,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_same_kind_fourth_close_preserves_mints_and_revises_ambiguous_binding[2]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.055761541007086635,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_same_kind_fourth_close_preserves_mints_and_revises_ambiguous_binding[3]",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.05642795911990106,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_bind_without_access_cannot_mint_and_old_rows_cannot_be_revised",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0067534169647842646,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_empty_close_has_no_policy_gradient_or_store_side_effect",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0013966669794172049,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_reference_evidence_credits_the_departure_without_changing_exact_reconstruction",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.0004632091149687767,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_revision_merges_three_accessible_groups_transitively_across_cued_documents",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.030832582851871848,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_closing_credit_keeps_both_trial_graphs_and_learns_salience_and_form_cues",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.011550707975402474,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_only_order_one_defers_reference_and_higher_orders_keep_their_contract",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.001004084013402462,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_reference_close.py::test_kept_journal_supplies_np_content_predicate_and_positional_provenance",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 0.016727708047255874,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_operators_final_b.py::test_forced_not_and_or_descend_and_snapshot_certificate",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 6.809984792023897,
+      "message": "",
+      "stdout": "[AMP] off (fp32, MODEL_AMP unset or =off)\nbatch = 0 (warm-up)\r\nbatch = 0 (\u0394=0.337s)\r\n"
+    },
+    {
+      "nodeid": "test/test_operators_final_b.py::test_both_training_trials_share_bootstrap_snapshot",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 25.3511968748644,
+      "message": "",
+      "stdout": "batch = 0 (warm-up, 100.00%)\r\nrunEpoch(train): hit max_batches=1 cap; cursor exiting early (1 batches processed, ds.all_done=True).\r\nTraining throughput: 1 batches in 24.187s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nbatch = 0 (\u0394=0.557s, 100.00%)\r\nrunEpoch(train): hit max_batches=1 cap; cursor exiting early (1 batches processed, ds.all_done=True).\r\nTraining throughput: 1 batches in 0.556s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nbatch = 0 (\u0394=0.562s, 100.00%)\r\nrunEpoch(train): hit max_batches=1 cap; cursor exiting early (1 batches processed, ds.all_done=True).\r\nTraining throughput: 1 batches in 0.562s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\n"
+    },
+    {
+      "nodeid": "test/test_expectation_defaults.py::test_expectation_off_keeps_every_packed_closing_in_ltm",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 2.66281925002113,
+      "message": "",
+      "stdout": ""
+    },
+    {
+      "nodeid": "test/test_exploration_coverage.py::test_trained_artifact_departs_every_eligible_sentence_round",
+      "phase": "call",
+      "outcome": "passed",
+      "duration": 18.04224512493238,
+      "message": "",
+      "stdout": "[BasicModel] Weight file partial -- output/item6-orders-paired-accepted-code-20261015/warmup.ckpt\n  Keys in model but missing from file: 24 (initialized fresh)\r\n[BasicModel] Weights loaded from output/item6-orders-paired-accepted-code-20261015/warmup.ckpt\r\n"
+    }
+  ]
+}

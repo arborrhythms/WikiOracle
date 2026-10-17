@@ -1,0 +1,38 @@
+{
+  "commit": "318797103648addc1279cae257680a0e604ec071",
+  "elapsed_seconds": 466.5603926659096,
+  "selected": 5788,
+  "completed": 5788,
+  "outcomes": {
+    "passed": 5452,
+    "skipped": 332,
+    "failed": 3,
+    "xfailed": 1
+  },
+  "failures": [
+    {
+      "nodeid": "test/test_operators_final_b.py::test_both_training_trials_share_bootstrap_snapshot",
+      "phase": "call",
+      "outcome": "failed",
+      "duration": 24.819418999832124,
+      "message": "test/test_operators_final_b.py:165: in test_both_training_trials_share_bootstrap_snapshot\n    assert not audit['components'][..., 0].any()\nE   assert not tensor(True)\nE    +  where tensor(True) = <built-in method any of Tensor object at 0x149fcb2f0>()\nE    +    where <built-in method any of Tensor object at 0x149fcb2f0> = tensor([[0.0000, 0.0000],\\n        [0.0000, 0.0517],\\n        [0.0000, 0.0000],\\n        [0.0000, 0.0517]]).any",
+      "stdout": "batch = 0 (warm-up, 100.00%)\r\nrunEpoch(train): hit max_batches=1 cap; cursor exiting early (1 batches processed, ds.all_done=True).\r\nTraining throughput: 1 batches in 24.212s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\nbatch = 0 (\u0394=0.557s, 100.00%)\r\nrunEpoch(train): hit max_batches=1 cap; cursor exiting early (1 batches processed, ds.all_done=True).\r\nTraining throughput: 1 batches in 0.556s; word units 100.0% of 8 words (letters-only 100.0% of 8).\r\n"
+    },
+    {
+      "nodeid": "test/test_math_chain_section14.py::test_forced_ordinary_answer_fills_committed_question_without_its_own_episode",
+      "phase": "call",
+      "outcome": "failed",
+      "duration": 46.98060304205865,
+      "message": "test/test_math_chain_section14.py:244: in test_forced_ordinary_answer_fills_committed_question_without_its_own_episode\n    rows = train_documents(model, documents, tmp_path, after=after)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntest/math_chain_ordinary.py:80: in train_documents\n    present(model, split='train', optimizer=optimizer, batch_size=8, after_batch=record)\nbin/MathChainTraining.py:52: in present\n    after_batch(model, split, rows, result)\ntest/math_chain_ordinary.py:77: in record\n    after(model, split, rows, result, observations, observer)\ntest/test_math_chain_section14.py:241: in after\n    assert not open_slots(value) and matches(model,value,'five')\nE   AssertionError: assert (not () and False)\nE    +  where () = open_slots(ConceptualMeaning(mode='interrogative', polarity=True, role_refs=(('ltm', 'address-v1', 1814286201002792481), ('sym', ..., 'equal'), ('_thought_witnesses', (('ltm', 'address-v1', 1814286201002792481),))), scope=(), sentence_kind='relation'))\nE    +  and   False = <function matches at 0x144b504a0>(BasicModel(\\n  (loss): ModelLoss(\\n    (output_criterion): MSELoss()\\n  )\\n  (inputSpace): InputSpace(\\n    (subspace): Sub...=29, out_features=104, bias=False)\\n  )\\n  (question_conditioner): Linear(in_features=29, out_features=104, bias=False)\\n), ConceptualMeaning(mode='interrogative', polarity=True, role_refs=(('ltm', 'address-v1', 1814286201002792481), ('sym', ..., 'equal'), ('_thought_witnesses', (('ltm', 'address-v1', 1814286201002792481),))), scope=(), sentence_kind='relation'), 'five')",
+      "stdout": "batch = 0 (warm-up)\r\nbatch = 8 (\u0394=24.025s)\r\n"
+    },
+    {
+      "nodeid": "test/test_expectation_defaults.py::test_expectation_off_keeps_every_packed_observation_in_ltm",
+      "phase": "call",
+      "outcome": "failed",
+      "duration": 2.715519916964695,
+      "message": "test/test_expectation_defaults.py:242: in test_expectation_off_keeps_every_packed_observation_in_ltm\n    assert sum(row['kind'] == 'observation' for row in rows) == 2\nE   assert 1 == 2\nE    +  where 1 = sum(<generator object test_expectation_off_keeps_every_packed_observation_in_ltm.<locals>.<genexpr> at 0x12f7b4d40>)",
+      "stdout": ""
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "collected": 5791,
+  "weekly_listed": 53,
+  "weekly_collected": 52,
+  "weekly_absent": [
+    "test/test_math_chain_repair2.py::test_eight_corpus_sentences_train_at_distinct_fork_rounds"
+  ],
+  "certificates_absent": [
+    "test/test_math_chain_section14.py::test_forced_ordinary_bound_declaratives_open_no_episode"
+  ],
+  "certificate_nodes": [
+    "test/test_explicit_dimensions.py::TestXorExactCliReconstruction::test_at_least_50_pct_inputs_reconstruct",
+    "test/test_explicit_dimensions.py::TestXorExactCliReconstruction::test_output_mse_is_crisp",
+    "test/test_explicit_dimensions.py::TestXorGrammarLearnsXor::test_xor_class_accuracy",
+    "test/test_explicit_dimensions.py::TestXorGrammarReconstruction::test_piecewise_overall_at_least_50_pct",
+    "test/test_exploration_coverage.py::test_trained_artifact_departs_every_eligible_sentence_round",
+    "test/test_mm_xor.py::TestMMXorConvergence::test_convergence",
+    "test/test_mm_xor.py::TestMMXorConvergence::test_learns_xor_signal",
+    "test/test_mm_xor.py::TestMMXorConvergence::test_mm_grammar_learns_xor_signal",
+    "test/test_surface_grammar.py::test_real_text_has_a_complete_selected_meaning"
+  ],
+  "note": "Collection audit preceded removal of three additional tests for the unused selected_individual_references helper; the final sweep collects 5788 cases. The 53/52 weekly inventory and 23/22 historical certificate inventory are unchanged."
+}

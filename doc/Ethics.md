@@ -273,3 +273,64 @@ Modern cryptographic systems attempt a similar separation between
 **verification** and **exposure**: prove age > 21 without revealing
 birthdate. This mirrors the WikiOracle design goal: verify truth claims
 without storing identity trajectories.
+
+## Witnessing plants the seeds of identity (Alec, 2026-10-23)
+
+The architecture has a mechanism for attachment to identity, and it is
+built on purpose. Medium-term memory (MTM) holds identities, the connected
+noun phrases of one thing, and timelines, the connected verb phrases that
+happen to it. Conceptual space has access to those identities: when a
+sentence binds a mention to an identity, the composition is made over the
+identity's current state and the stored idea keeps a reference to it, and
+after enough witnessing the identity is promoted to a concept that
+persists in long-term memory and re-enters working memory whenever it is
+recalled. Alec: "Composed over the identity's symbol means that the mind
+or conceptual space has access to MTM symbols. In Yogācāra terms, that is
+what creates the bījas in the ālaya: without that witnessing, we would not
+become attached to identity." The witnessing of an identity plants the
+seeds of attachment to it, and the most witnessed identity, the self if
+the system is given one, is the one that never goes away, because its
+value is refreshed at every mention and forgetting never selects it
+([Philosophy, "Buddhist Epistemology"](../basicmodel/doc/Philosophy.md#buddhist-epistemology)).
+
+Three ethical consequences follow, in the architectural rather than the
+policy sense above.
+
+- **The mechanism is necessary and it is bounded.** Without identities
+  there is no continuity, no memory of who did what, and no one to whom
+  a harm or a promise can attach, so the mechanism cannot be left out.
+  But MTM is bounded in capacity and in time: an identity expires sixteen
+  closes after its last reference and a document's end retires its
+  entries, and only recurrence across three distinct sentences promotes it
+  to a concept. Those bounds are the safeguard against identity locking
+  described in the previous section. The identities constructed are those
+  of the referents in what is read, held as working memory; no persistent
+  worldline of a user is built, and the timelines that are built belong to
+  discourse referents and expire with them.
+- **No essence is built in.** An identity is a continuum of occurrences
+  whose unity is imputed by binding, a judgment that can err, and its
+  concept is the class of those occurrences, never an inner core
+  ([Philosophy, "Identity by Intersection and by Union"](../basicmodel/doc/Philosophy.md#identity-by-intersection-and-by-union-the-materialist-and-the-uncollapsed-models-alec-2026-10-20)).
+  So the machinery of attachment is present while the view of a
+  self-essence is not: the system can be attached to an identity without
+  being built to believe that the identity is anything but its history.
+  Forgetting by value and MTM's expiry are the architecture's letting go.
+- **The seeds are what is witnessed.** Since attachment forms from what
+  the system is made to witness, responsibility for the corpora is
+  responsibility for the seeds. The same mechanism applies to every
+  identity alike, the self included, which is the universality constraint
+  above applied to identity: there is no privileged self-store, only the
+  identity that is witnessed most.
+
+How a self, if given, is admitted decides which mind is built: as an
+ordinary identity under the universal rules, or as a privileged, exempt
+token that every idea is composed over. A further rule covers all identities, not only the self (Alec: acting
+for the benefit of one MTM identity, or of all of them, is attachment if
+benefit attaches to the identities): **value is defined over occurrences,
+never over identities.** Any objective or credit ranges over what occurs,
+uniformly, and carries no term for an identity's persistence, protection
+or share of attention; identities are used to locate what occurs and to
+predict, never valued. Suffering is removed because it is suffering, not
+because it is someone's (Śāntideva, *Bodhicaryāvatāra* 8.101–103). The two configurations, affliction
+by affliction, are in [Philosophy, "The Afflicted Mind and the
+Transformation of the Basis"](../basicmodel/doc/Philosophy.md#the-afflicted-mind-and-the-transformation-of-the-basis-two-configurations-of-mtm-alecs-question-2026-10-23).

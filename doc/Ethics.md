@@ -334,3 +334,11 @@ predict, never valued. Suffering is removed because it is suffering, not
 because it is someone's (Śāntideva, *Bodhicaryāvatāra* 8.101–103). The two configurations, affliction
 by affliction, are in [Philosophy, "The Afflicted Mind and the
 Transformation of the Basis"](../basicmodel/doc/Philosophy.md#the-afflicted-mind-and-the-transformation-of-the-basis-two-configurations-of-mtm-alecs-question-2026-10-23).
+
+**Further hypotheses (Alec, 2026-11-09).** Non-attachment to identities in
+MTM is proposed as intellectual selflessness and cessation of the seventh
+consciousness; nonduality would additionally require higher-order thought
+to cease, allowing experience without its narrowing conceptual activity.
+Non-attachment to abstract concepts may prevent that thought from continually
+arising, giving two proposed criteria for enlightenment: elimination of
+emotional obscurations (no suffering) and cognitive obscurations (nonduality).
